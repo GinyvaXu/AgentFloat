@@ -1,0 +1,31 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Python
+*.py text eol=lf
+*.pyw text eol=lf
+
+# Windows-specific
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.iss text eol=crlf
+*.vbs text eol=crlf
+
+# Documentation
+*.md text eol=lf
+*.txt text eol=lf
+LICENSE text eol=lf
+
+# Binary files (don't diff)
+*.png binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.exe binary
+*.msi binary
+*.pyz binary
+*.pkg binary
+*.zip binary
+*.pdf binary
+*.docx binary

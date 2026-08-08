@@ -1,0 +1,71 @@
+﻿# VBS launcher (may contain hardcoded paths)
+launcher.vbs
+**/launcher.vbs
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment secrets
+.env
+
+# PyInstaller
+build/
+build_debug/
+build_setup/
+dist/
+*.spec
+*.spec.bak
+!AgentFloat.spec
+
+*.toc
+*.pyz
+*.pkg
+*.zip
+localpycs/
+xref-*.html
+warn-*.txt
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Temp
+*.tmp
+~$*
+
+# Tutorials & docs (not for distribution)
+*教程.md
+*教程*.md
+GitHub发布*.md
+
+# Review reports
+审查报告*.md
+审查报告*.docx
+UI设计审查报告*
+
+# ── 版本归档（本地保留，不上传）──
+versions/
+
+# ── 临时脚本 & 本地文档 ──
+_gen_report.py
+浮窗炫酷助手_技术方案报告.docx
+# 本地个人配置（含用户私有设置，绝不上传）
+config.json
+launcher_config.json

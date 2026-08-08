@@ -1,0 +1,95 @@
+{
+  "window_x": -1,
+  "window_y": -1,
+  "auto_start": false,
+  "launch_mode": "normal",
+  "widget_size": 52,
+  "opacity": 0.88,
+  "working_directory": "",
+  "snap_enabled": true,
+  "snap_edge": "right",
+  "snap_hidden": true,
+  "hide_delay_ms": 800,
+  "cleanup_on_quit": false,
+  "theme": "light",
+  "check_updates": false,
+  "agents": [
+    {
+      "id": "claude",
+      "name": "Claude Code",
+      "command": "claude",
+      "args": [],
+      "skip_permissions_arg": "--dangerously-skip-permissions",
+      "working_directory": "",
+      "launch_mode": "normal",
+      "icon_color": "#D97757",
+      "icon_char": "C",
+      "check": "claude",
+      "primary": true,
+      "builtin": true,
+      "description": "Anthropic Claude Code"
+    },
+    {
+      "id": "codex",
+      "name": "Codex CLI",
+      "command": "codex",
+      "args": [],
+      "skip_permissions_arg": "--dangerously-skip-permissions",
+      "working_directory": "",
+      "launch_mode": "normal",
+      "icon_color": "#10A37F",
+      "icon_char": "X",
+      "check": "codex",
+      "primary": false,
+      "builtin": true,
+      "description": "OpenAI Codex CLI"
+    }
+  ],
+  "radial_menu": {
+    "enabled": true,
+    "trigger_mode": "both",
+    "hover_delay_ms": 400,
+    "long_press_delay_ms": 500,
+    "radius": 120
+  },
+  "skills": {
+    "roots": [],
+    "ai_tool": "codex exec",
+    "max_description_len": 160
+  },
+  "api_monitor": {
+    "enabled": false,
+    "poll_interval_seconds": 60,
+    "low_balance_warn": 5.0,
+    "endpoints": [
+      {
+        "name": "My API",
+        "url": "https://api.example.com/v1/usage?date={{today}}",
+        "method": "GET",
+        "headers": {
+          "Authorization": "Bearer {{env:API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "body": null,
+        "fields": [
+          {
+            "label": "已用量",
+            "jsonpath": "$.usage.used",
+            "unit": "tokens",
+            "display": "number"
+          },
+          {
+            "label": "限额",
+            "jsonpath": "$.usage.limit",
+            "unit": "tokens",
+            "display": "number"
+          }
+        ],
+        "progress_field": {
+          "used": "$.usage.used",
+          "total": "$.usage.limit"
+        }
+      }
+    ]
+  }
+}

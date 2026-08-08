@@ -1,0 +1,62 @@
+# -*- mode: python ; coding: utf-8 -*-
+
+
+a = Analysis(
+    ['agent_float.py'],
+    pathex=[],
+    binaries=[],
+    datas=[('assets', 'assets')],
+    hiddenimports=[
+        'api_monitor_config',
+        'api_fetcher',
+        'api_monitor_worker',
+        'api_balance_badge',
+        'api_monitor_settings',
+        'updater',
+        'af_theme',
+        'agent_registry',
+        'radial_menu',
+        'skills_scanner',
+        'skills_panel',
+        'agent_manager',
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[
+        'QtWebEngine', 'QtWebEngineCore', 'QtWebEngineWidgets', 'QtWebChannel',
+        'QtMultimedia', 'QtMultimediaWidgets',
+        'QtSql', 'QtXml', 'QtTest',
+        'QtNetwork', 'Qt3D', 'Qt3DCore', 'Qt3DRender', 'Qt3DInput', 'Qt3DLogic',
+        'QtCharts', 'QtDataVisualization',
+        'QtSensors', 'QtSerialPort', 'QtPositioning',
+        'QtPrintSupport', 'QtQuick', 'QtQml', 'QtQmlModels', 'QtQuickWidgets',
+        'QtSvg', 'QtSvgWidgets', 'QtBluetooth', 'QtNfc',
+        'QtTextToSpeech', 'QtSpeech', 'QtLocation',
+    ],
+    noarchive=False,
+    optimize=0,
+)
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.datas,
+    [],
+    name='AgentFloat',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=['assets\\agent_float_icon.ico'],
+)
