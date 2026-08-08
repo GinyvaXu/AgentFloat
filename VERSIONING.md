@@ -14,6 +14,7 @@ PATCH — Bug 修复、安全补丁
 
 | 版本 | 说明 |
 |------|------|
+| v1.0.3 | 修复环绕菜单绘制崩溃（QPointF 解包） |
 | v1.0.2 | 错误日志改为关闭程序时统一导出汇总报告 |
 | v1.0.1 | 修复悬停动画失效；新增报错日志导出 |
 | v1.0.0 | AgentFloat 首个版本：通用多 Agent 启动 + 环绕菜单 + Skills 辅助窗 |
@@ -122,10 +123,10 @@ AgentFloat/
 
 ## 当前版本
 
-**v1.0.2** — 2026-08-08
+**v1.0.3** — 2026-08-08
 
-- 修复：悬停动画失效（`QPropertyAnimation` 无法识别普通 `property()`，已改 `pyqtProperty`）
+- 修复：环绕菜单绘制崩溃（`QPointF` 不能序列解包 → 改用 `.x()/.y()`；paintEvent 增加异常保护）
 - 错误日志：会话内收集，关闭程序时统一导出 `logs/reports/v{版本}_{时间戳}_errors.txt`（含全部错误汇总）
 - 保留：会话报告（session.txt）与崩溃报告（crash.txt）
 
-见 `versions/v1.0.2/CHANGELOG.md`。
+见 `versions/v1.0.3/CHANGELOG.md`。

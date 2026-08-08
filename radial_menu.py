@@ -173,6 +173,20 @@ class RadialMenu(QWidget):
     # ── 绘制 ────────────────────────────────────
     def paintEvent(self, event):
         painter = QPainter(self)
+        try:
+            self._render_paint(painter)
+        except Exception:
+            # 绘制异常不破坏 Qt paint 状态；仅记录一次避免刷屏
+            if not getattr(self, "_paint_error_logged", False):
+                self._paint_error_logged = True
+                import logging, traceback
+                logging.getLogger("AgentFloat").error(
+                    "环绕菜单绘制异常:\n%s", traceback.format_exc())
+        finally:
+            painter.end()
+
+
+    def _render_paint(self, painter):
         painter.setRenderHint(QPainter.Antialiasing)
         c = get_colors(self._theme)
         is_dark = self._theme == "dark"
@@ -231,7 +245,8 @@ class RadialMenu(QWidget):
             # 文字
             mid = a0 + drawn_sweep / 2.0
             rad = self._outer * 0.68
-            tx, ty = self._polar(mid, rad)
+            _pt = self._polar(mid, rad)
+            tx, ty = _pt.x(), _pt.y()
             painter.setPen(QColor(255, 255, 255) if i == self._hover_idx else text_c)
             char_font = QFont("Segoe UI", 15, QFont.Bold)
             painter.setFont(char_font)

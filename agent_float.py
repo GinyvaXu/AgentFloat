@@ -229,7 +229,7 @@ IOS_HINT       = _LIGHT["HINT"]
 IOS_SURFACE    = _LIGHT["SURFACE"]
 
 FONT_FAMILY = "Microsoft YaHei"
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 # ── 浮窗参数 ──────────────────────────────────────────
 DEFAULT_SIZE  = 52          # 默认边长 px
