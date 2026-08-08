@@ -1,4 +1,4 @@
-﻿"""
+"""
 AgentFloat — AI Agent 桌面悬浮助手（通用多 Agent 启动器）
 - 圆角矩形悬浮窗，iOS 风格毛玻璃质感
 - 自由拖拽，始终置顶
@@ -36,7 +36,7 @@ from PyQt5.QtWidgets import (
     QScrollArea, QComboBox, QListWidget, QListWidgetItem, QTabWidget
 )
 from PyQt5.QtCore import (
-    Qt, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve,
+    Qt, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QCoreApplication,
     pyqtSignal, pyqtProperty, QRect, QRectF, QtMsgType, qInstallMessageHandler,
 )
 from PyQt5.QtGui import (
@@ -64,7 +64,8 @@ from skills_scanner import default_skill_roots
 from skills_panel import SkillsPanel
 from agent_manager import AgentManagerDialog, SkillsSettingsDialog
 from local_ai_service import (LocalAiWorker, AutoTranslateWorker,
-                              find_new_skills, ensure_translator_skill)
+                              find_new_skills, ensure_translator_skill,
+                              _ensure_platform_url)
 
 # ── 路径（兼容 PyInstaller 打包）──────────────────────
 import sys as _sys
@@ -232,7 +233,7 @@ IOS_HINT       = _LIGHT["HINT"]
 IOS_SURFACE    = _LIGHT["SURFACE"]
 
 FONT_FAMILY = "Microsoft YaHei"
-VERSION = "1.0.8"
+VERSION = "1.0.9"
 
 # ── 浮窗参数 ──────────────────────────────────────────
 DEFAULT_SIZE  = 52          # 默认边长 px
@@ -1475,6 +1476,8 @@ class FloatingWidget(QWidget):
         self._window_origin = QPoint()
         # 拖拽结束后的悬停冷却截止时间戳（monotonic 秒）
         self._drag_cooldown_until = 0.0
+        # 退出动画中，拒绝所有交互
+        self._quitting = False
 
         # 按压缩放 (0.0 ~ 1.0，1.0 = 正常)
         self._press_scale = 1.0
@@ -2220,6 +2223,8 @@ class FloatingWidget(QWidget):
             self.move(self.pos().x(), int(v))
 
     def _check_hover(self):
+        if self._quitting:
+            return
         # 高分屏下 mapFromGlobal 可能返回 2 倍偏移坐标，导致悬停检测错乱；
         # 顶层窗口 pos() 即全局坐标，直接用 QCursor.pos() - pos() 计算本地坐标
         local_pos = QCursor.pos() - self.pos()
@@ -2318,11 +2323,11 @@ class FloatingWidget(QWidget):
         elif action_id == "skills":
             self._open_skills_panel()
         elif action_id == "api":
-            self._show_api_summary()
+            self._open_api_platform()
         elif action_id == "settings":
             self.settings_requested.emit()
         elif action_id == "quit":
-            self.quit_requested.emit()
+            self._animate_quit()
 
     def _open_skills_panel(self):
         dlg = SkillsPanel(self._skills_cfg, theme=self.theme, parent=self)
@@ -2354,6 +2359,59 @@ class FloatingWidget(QWidget):
                 parts.append("%s %s" % (f.get("label", ""), vtxt))
             lines.append("• %s：%s" % (name, "，".join(parts) or "无字段"))
         QMessageBox.information(None, "API 用量", "\n".join(lines))
+
+    def _open_api_platform(self):
+        """点击扇形「API 余额」→ 打开对应 API 平台网页（默认浏览器）"""
+        import webbrowser
+        endpoints = (self.config.get("api_monitor") or {}).get("endpoints") or []
+        url = ""
+        for ep in endpoints:
+            url = (ep.get("platform_url") or "").strip()
+            if not url:
+                # 旧配置可能没有 platform_url：按已知平台名称自动补上
+                url = (_ensure_platform_url(ep).get("platform_url") or "").strip()
+            if url:
+                break
+        if url:
+            try:
+                from api_monitor_config import resolve_url
+                webbrowser.open(resolve_url(url))
+                _log().debug("打开 API 平台网页: %s", url)
+            except Exception as e:
+                _log().warning("打开 API 平台网页失败: %s", e)
+        else:
+            # 未配置平台网页 → 回退到用量摘要
+            self._show_api_summary()
+
+    def _animate_quit(self):
+        """点击退出：播放全新收拢动画（缩小 + 淡出）后再退出"""
+        if self._quitting:
+            return
+        self._quitting = True
+        _log().info("退出动画开始")
+        # 关闭环绕菜单与余额角标，停止各计时器
+        self._close_radial_menu()
+        if self._api_badge:
+            self._api_badge.hide()
+        self._hover_timer.stop()
+        self._hover_open_timer.stop()
+        self._long_press_timer.stop()
+        # 收拢：整体缩小到 12% + 窗口淡出，结束后发出退出信号
+        anim = QPropertyAnimation(self, b"press_scale")
+        anim.setDuration(380)
+        anim.setEasingCurve(QEasingCurve.InCubic)
+        anim.setStartValue(self._press_scale)
+        anim.setEndValue(0.12)
+        anim.finished.connect(self.quit_requested.emit)
+        self._quit_anim = anim  # 保持引用
+        anim.start()
+        fade = QPropertyAnimation(self, b"windowOpacity")
+        fade.setDuration(380)
+        fade.setEasingCurve(QEasingCurve.InCubic)
+        fade.setStartValue(self.windowOpacity())
+        fade.setEndValue(0.0)
+        self._quit_fade = fade
+        fade.start()
 
     # ── 绘制（7 层玻璃 + 涟漪 + 指示灯）─────────────────
     def paintEvent(self, event):
@@ -2479,6 +2537,8 @@ class FloatingWidget(QWidget):
 
     # ── 鼠标事件（拖拽修复）─────────────────────────
     def mousePressEvent(self, event):
+        if self._quitting:
+            return
         if event.button() == Qt.LeftButton:
             self._drag_origin = event.globalPos()
             self._window_origin = self.pos()
@@ -2503,7 +2563,7 @@ class FloatingWidget(QWidget):
             self._long_press_timer.start(int(self._radial_cfg.get("long_press_delay_ms", 500)))
 
     def mouseMoveEvent(self, event):
-        if not (event.buttons() & Qt.LeftButton):
+        if self._quitting or not (event.buttons() & Qt.LeftButton):
             return
         delta = (event.globalPos() - self._drag_origin).manhattanLength()
         if not self._drag_active and delta > self.CLICK_THRESHOLD:
@@ -2518,6 +2578,8 @@ class FloatingWidget(QWidget):
             self.move(new_pos)
 
     def mouseReleaseEvent(self, event):
+        if self._quitting:
+            return
         if event.button() == Qt.LeftButton:
             was_dragging = self._drag_active
             if not was_dragging:
@@ -2837,6 +2899,12 @@ def _main():
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("agentfloat.launcher")
     except Exception: pass
+
+    # 高分辨屏 DPI 一致性：必须在 QApplication 创建前设置，
+    # 否则 QCursor.pos() / event.globalPos() 与 self.pos() 坐标空间不一致，
+    # 导致环绕菜单悬停高亮错位、点击失效。
+    QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)

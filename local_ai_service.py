@@ -1,4 +1,4 @@
-﻿# -*- mode: python ; coding: utf-8 -*-
+# -*- mode: python ; coding: utf-8 -*-
 """AgentFloat — 本地 AI 服务对接
 
 使用用户配置的主 Agent（点击浮窗启动的那一个）以非交互（headless）模式，
@@ -236,6 +236,32 @@ def _is_placeholder(ep):
     return "api.example.com" in url or name in ("my api", "myapi", "示例")
 
 
+# 常见平台的用量/余额页网址（点击扇形「API 余额」时跳转）
+_DEFAULT_PLATFORMS = [
+    ("deepseek", "https://platform.deepseek.com/usage"),
+    ("openai", "https://platform.openai.com/usage"),
+    ("anthropic", "https://console.anthropic.com/settings/usage"),
+    ("moonshot", "https://platform.moonshot.cn/console/usage"),
+    ("kimi", "https://platform.moonshot.cn/console/usage"),
+    ("zhipu", "https://open.bigmodel.cn/console"),
+    ("qwen", "https://bailian.console.aliyun.com/"),
+    ("doubao", "https://console.volcengine.com/ark"),
+]
+
+
+def _ensure_platform_url(endpoint):
+    """给缺少 platform_url 的端点填上常见平台的用量页网址"""
+    ep = dict(endpoint)
+    if (ep.get("platform_url") or "").strip():
+        return ep
+    name = (ep.get("name") or "").lower()
+    for key, url in _DEFAULT_PLATFORMS:
+        if key in name:
+            ep["platform_url"] = url
+            break
+    return ep
+
+
 def _merge_api_endpoints(config, data):
     """校验并合并 AI 修正后的 endpoints；返回 (changed_count, notes, api_config_or_None)"""
     api_cfg = dict(config.get("api_monitor") or API_MONITOR_DEFAULTS)
@@ -267,7 +293,7 @@ def _merge_api_endpoints(config, data):
         changed = len(ai_list)
     if changed == 0:
         return 0, notes, None
-    api_cfg["endpoints"] = merged
+    api_cfg["endpoints"] = [_ensure_platform_url(e) for e in merged]
     return changed, notes, api_cfg
 
 

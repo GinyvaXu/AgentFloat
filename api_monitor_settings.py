@@ -114,6 +114,12 @@ class EndpointEditDialog(QDialog):
         self.url_edit.setPlaceholderText("https://api.example.com/v1/usage?date={{today}}")
         layout.addWidget(self.url_edit)
 
+        # 平台网页（点击扇形「API 余额」时用浏览器打开）
+        layout.addWidget(QLabel("平台网页 URL（可选；点击扇形「API 余额」时跳转）:"))
+        self.platform_url_edit = QLineEdit(self.endpoint.get("platform_url", ""))
+        self.platform_url_edit.setPlaceholderText("https://platform.deepseek.com/usage")
+        layout.addWidget(self.platform_url_edit)
+
         # 方法
         row = QHBoxLayout()
         row.addWidget(QLabel("HTTP 方法:"))
@@ -222,6 +228,7 @@ class EndpointEditDialog(QDialog):
         self.result = {
             "name": self.name_edit.text().strip(),
             "url": self.url_edit.text().strip(),
+            "platform_url": self.platform_url_edit.text().strip(),
             "method": self.method_cb.currentText(),
             "headers": headers,
             "body": self.endpoint.get("body"),

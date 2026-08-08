@@ -1,4 +1,4 @@
-﻿# -*- mode: python ; coding: utf-8 -*-
+# -*- mode: python ; coding: utf-8 -*-
 """AgentFloat — Skills 辅助窗（v1.0.6）
 
 无边框毛玻璃窗口：
@@ -440,7 +440,9 @@ class SkillsPanel(QDialog):
                 txt += "\n\n（暂无中文翻译）"
         if s.trigger:
             txt += "\n\n⚡ 触发指令：`%s`" % s.trigger
-        if s.has_manual_trigger and not s.trigger:
+        elif s.has_manual_trigger and s.trigger_doc:
+            txt += "\n\n⚡ 手动触发说明：\n%s" % s.trigger_doc
+        elif s.has_manual_trigger:
             txt += "\n\n（该 skill 需要手动触发，具体指令见 SKILL.md 正文）"
         txt += "\n\n路径：%s" % s.path
         self.desc_view.setPlainText(txt)
@@ -451,6 +453,10 @@ class SkillsPanel(QDialog):
             self.btn_copy.setEnabled(True)
         else:
             self.ed_trigger.clear()
+            if s.has_manual_trigger:
+                self.ed_trigger.setPlaceholderText("无短触发指令（手动触发说明见上方正文）")
+            else:
+                self.ed_trigger.setPlaceholderText("无触发指令（该 skill 由 AI 自动调用）")
             self.btn_copy.setEnabled(False)
 
     # ── 语言切换 ────────────────────────────────

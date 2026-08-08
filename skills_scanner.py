@@ -15,6 +15,7 @@ class SkillInfo(object):
     path: str
     root: str
     trigger: str = ""
+    trigger_doc: str = ""
     has_manual_trigger: bool = False
 
 
@@ -41,6 +42,22 @@ def default_skill_roots():
 
 def _expand(path):
     return os.path.abspath(os.path.expandvars(os.path.expanduser((path or "").strip())))
+
+
+def _extract_trigger_doc(text):
+    """提取手动触发的完整说明（用于辅助窗右侧展示）"""
+    # 优先取「使用 / 用法 / 触发 / Usage / Trigger」等章节正文
+    m = re.search(
+        r"^#{1,4}\s*(?:使用|用法|触发|如何使用|怎么用|如何触发|Usage|Trigger|Trigger\s*Instructions)[^\n]*\n(.*?)(?=^#{1,4}\s|\Z)",
+        text, re.M | re.I | re.S)
+    if m and m.group(1).strip():
+        return m.group(1).strip()[:800]
+    # 回退：包含 trigger / 手动 / 在聊天 关键词的正文片段
+    m = re.search(r"(?:grill me|grill-me|trigger|手动|在聊天|输入)[^\n]{0,80}", text, re.I)
+    if m:
+        start = max(0, m.start() - 120)
+        return text[start:m.end() + 300].strip()[:800]
+    return ""
 
 
 def scan_skills(roots):
@@ -114,9 +131,13 @@ def parse_skill_md(path, root=""):
     if not trigger and re.search(r"grill me|grill-me", text, re.I):
         trigger = "grill me"
 
-    has_manual = bool(trigger) or "trigger" in text.lower() or ("手动" in text and "触发" in text)
+    trigger_doc = _extract_trigger_doc(text)
+    has_manual = (bool(trigger) or bool(trigger_doc)
+                  or "trigger" in text.lower()
+                  or ("手动" in text and "触发" in text))
     return SkillInfo(name=name, description=desc, path=path, root=root,
-                     trigger=trigger, has_manual_trigger=has_manual)
+                     trigger=trigger, trigger_doc=trigger_doc,
+                     has_manual_trigger=has_manual)
 
 
 def _parse_desc(body):

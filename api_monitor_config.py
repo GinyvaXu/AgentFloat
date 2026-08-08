@@ -1,4 +1,4 @@
-﻿"""
+"""
 API 用量监控 — 配置 schema、模板引擎、JSONPath 解析
 """
 import os
@@ -18,6 +18,7 @@ DEFAULTS = {
 SAMPLE_ENDPOINT = {
     "name": "My API",
     "url": "https://api.example.com/v1/usage?date={{today}}",
+    "platform_url": "https://platform.example.com/usage",
     "method": "GET",
     "headers": {
         "Authorization": "Bearer {{env:API_KEY}}",

@@ -1,4 +1,4 @@
-﻿# -*- mode: python ; coding: utf-8 -*-
+# -*- mode: python ; coding: utf-8 -*-
 """AgentFloat — 悬停 / 长按环绕菜单（v1.0.6 统一高级感重绘）
 
 设计遵循 apple-design：
@@ -198,10 +198,17 @@ class RadialMenu(QWidget):
 
     def _sector_at(self, global_pos):
         """返回光标所在扇区下标；不在环带上返回 -1。
-        坐标统一用 global_pos - self.pos()（顶层窗口，避免高分屏换算误差）。"""
+        坐标用 mapFromGlobal 转换（高分屏 DPI 安全），命中半径与绘制缩放保持同步。"""
         c = self._center()
-        p = global_pos - self.pos()
+        # 坐标用 mapFromGlobal（高分辨屏 DPI 安全）；
+        # 命中半径随入场/关闭动画缩放同步，避免「灰块悬在按键之间 / 悬停错位」
+        p = self.mapFromGlobal(global_pos)
         dx, dy = p.x() - c.x(), p.y() - c.y()
+        # 与绘制一致的当前缩放（入场 OutBack + 关闭收拢）
+        close_scale = 0.30 + 0.70 * self._close_progress
+        scale = (0.72 + 0.28 * self._ease_out_back(self._progress)) * close_scale
+        if scale > 0.01:
+            dx, dy = dx / scale, dy / scale
         dist = math.hypot(dx, dy)
         if dist < self._inner - 8 or dist > self._outer + 8:
             return -1
@@ -215,7 +222,7 @@ class RadialMenu(QWidget):
 
     def _in_menu_rect(self, global_pos):
         """光标是否落在菜单窗口矩形内（DPI 安全：与浮窗同一坐标空间）"""
-        return self.rect().adjusted(-6, -6, 6, 6).contains(global_pos - self.pos())
+        return self.rect().adjusted(-6, -6, 6, 6).contains(self.mapFromGlobal(global_pos))
 
     def _poll_cursor(self):
         if not self.isVisible():

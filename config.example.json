@@ -70,6 +70,7 @@
       {
         "name": "My API",
         "url": "https://api.example.com/v1/usage?date={{today}}",
+        "platform_url": "https://platform.example.com/usage",
         "method": "GET",
         "headers": {
           "Authorization": "Bearer {{env:API_KEY}}",
