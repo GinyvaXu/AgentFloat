@@ -35,7 +35,8 @@ from PyQt5.QtWidgets import (
     QScrollArea, QComboBox, QListWidget, QListWidgetItem
 )
 from PyQt5.QtCore import (
-    Qt, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, pyqtSignal, QRect, QRectF
+    Qt, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve,
+    pyqtSignal, pyqtProperty, QRect, QRectF, QtMsgType, qInstallMessageHandler,
 )
 from PyQt5.QtGui import (
     QPainter, QBrush, QColor, QRadialGradient, QLinearGradient, QPen, QFont,
@@ -228,7 +229,7 @@ IOS_HINT       = _LIGHT["HINT"]
 IOS_SURFACE    = _LIGHT["SURFACE"]
 
 FONT_FAMILY = "Microsoft YaHei"
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 # ── 浮窗参数 ──────────────────────────────────────────
 DEFAULT_SIZE  = 52          # 默认边长 px
@@ -1668,11 +1669,14 @@ class FloatingWidget(QWidget):
             self._ripple_timer.stop()
         self.update()
 
-    def get_press_scale(self): return self._press_scale
-    def set_press_scale(self, v):
+    @pyqtProperty(float)
+    def press_scale(self):
+        return self._press_scale
+
+    @press_scale.setter
+    def press_scale(self, v):
         self._press_scale = v
         self.update()
-    press_scale = property(get_press_scale, set_press_scale)
 
     def _on_press_anim_done(self):
         self._press_anim.stop()
@@ -1712,8 +1716,12 @@ class FloatingWidget(QWidget):
         self._size_anim.setEndValue(target)
         self._size_anim.start()
 
-    def get_widget_size_prop(self): return self.current_size
-    def set_widget_size_prop(self, v):
+    @pyqtProperty(int)
+    def widget_size_prop(self):
+        return self.current_size
+
+    @widget_size_prop.setter
+    def widget_size_prop(self, v):
         if v == self.current_size:
             return
         self.current_size = v
@@ -1724,7 +1732,6 @@ class FloatingWidget(QWidget):
         ng = self.frameGeometry()
         ng.moveCenter(c)
         self.move(ng.topLeft())
-    widget_size_prop = property(get_widget_size_prop, set_widget_size_prop)
 
     def _restore_position(self):
         x, y = self.config.get("window_x", -1), self.config.get("window_y", -1)
@@ -1934,15 +1941,16 @@ class FloatingWidget(QWidget):
         # 保持引用防止被垃圾回收
         self._slide_anim = anim
 
-    def get_slide_pos(self):
+    @pyqtProperty(int)
+    def slide_pos(self):
         return self.pos().x() if self._snap_edge in ("left", "right") else self.pos().y()
 
-    def set_slide_pos(self, v):
+    @slide_pos.setter
+    def slide_pos(self, v):
         if self._snap_edge == "left" or self._snap_edge == "right":
             self.move(int(v), self.pos().y())
         elif self._snap_edge in ("top", "bottom"):
             self.move(self.pos().x(), int(v))
-    slide_pos = property(get_slide_pos, set_slide_pos)
 
     def _check_hover(self):
         # 用 mapFromGlobal 替代 frameGeometry().contains() —
@@ -2356,6 +2364,67 @@ class FloatingWidget(QWidget):
             self.update()
 
 
+
+# ── 全局报错导出（每次报错 → 时间戳命名错误日志）──────────────────
+def _install_error_handlers():
+    """安装全局异常/崩溃导出：
+    - 未捕获 Python 异常（含 Qt 槽函数内）→ v{版本}_{时间戳}_{异常类型}_error.txt
+    - Qt 关键/致命消息 → 同样导出 error 报告；普通警告写入主日志
+    """
+    report_dir = os.path.join(_get_config_dir(), "logs", "reports")
+    os.makedirs(report_dir, exist_ok=True)
+
+    def _write_error_report(kind, exc_type, exc, body):
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        name = "v%s_%s_%s_%s.txt" % (VERSION, ts, exc_type or "unknown", kind)
+        path = os.path.join(report_dir, name)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("AgentFloat v%s %s报告\n" % (VERSION, kind))
+                f.write("时间: %s\n" % _dt.now().isoformat())
+                f.write("类型: %s\n" % (exc_type or "-"))
+                f.write("信息: %s\n" % (exc or "-"))
+                f.write("PID: %s | Frozen: %s\n" % (os.getpid(), _IS_FROZEN))
+                f.write("Python: %s\n" % sys.version)
+                f.write("-" * 40 + "\n\n")
+                f.write(body or "")
+            return path
+        except Exception:
+            return None
+
+    def _on_unhandled_exception(exc_type, exc, tb):
+        import traceback
+        tb_text = "".join(traceback.format_exception(exc_type, exc, tb))
+        _log().critical("未捕获异常 [%s]: %s\n%s", getattr(exc_type, "__name__", str(exc_type)), exc, tb_text)
+        path = _write_error_report("error", getattr(exc_type, "__name__", str(exc_type)), str(exc), tb_text)
+        if path:
+            _log().info("错误报告已导出: %s", path)
+
+    sys.excepthook = _on_unhandled_exception
+
+    def _qt_message_handler(msg_type, context, message):
+        msg = str(message)
+        # 已知无害噪音降级到 debug，避免刷屏
+        if "UpdateLayeredWindowIndirect failed" in msg:
+            _log().debug("Qt: %s", msg)
+            return
+        if msg_type == QtMsgType.QtDebugMsg:
+            _log().debug("Qt: %s", msg)
+        elif msg_type == QtMsgType.QtWarningMsg:
+            _log().warning("Qt: %s", msg)
+        elif msg_type in (QtMsgType.QtCriticalMsg, QtMsgType.QtFatalMsg):
+            _log().error("Qt[%s]: %s", msg_type.name if hasattr(msg_type, "name") else msg_type, msg)
+            path = _write_error_report("qterror", "QtCritical", msg, msg)
+            if path:
+                _log().info("Qt 错误报告已导出: %s", path)
+
+    try:
+        qInstallMessageHandler(_qt_message_handler)
+    except Exception as e:
+        _log().debug("Qt 消息处理器安装失败: %s", e)
+
+
 # ── 主入口 ──────────────────────────────────────────
 def main():
     # ── 启动日志 ──
@@ -2367,6 +2436,7 @@ def main():
     _start_ts = _dt.now().strftime("%Y%m%d_%H%M%S")
     _report_dir = os.path.join(_get_config_dir(), "logs", "reports")
     os.makedirs(_report_dir, exist_ok=True)
+    _install_error_handlers()
     _session_path = os.path.join(_report_dir, f"v{VERSION}_{_start_ts}_session.txt")
 
     # 写入会话报告开头

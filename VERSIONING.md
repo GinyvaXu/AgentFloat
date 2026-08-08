@@ -14,6 +14,7 @@ PATCH — Bug 修复、安全补丁
 
 | 版本 | 说明 |
 |------|------|
+| v1.0.1 | 修复悬停动画失效；新增每次报错自动导出时间戳错误日志 |
 | v1.0.0 | AgentFloat 首个版本：通用多 Agent 启动 + 环绕菜单 + Skills 辅助窗 |
 
 ---
@@ -120,14 +121,10 @@ AgentFloat/
 
 ## 当前版本
 
-**v1.0.0** — AgentFloat 首个版本，2026-08-08
+**v1.0.1** — 2026-08-08
 
-从 ClaudeFloat v2.0.0 演进为通用多 Agent 浮窗助手：
-- 新增 `agent_registry.py` — 内置 claude/codex 预设 + 用户自定义命令模板
-- 新增 `radial_menu.py` — 悬停/长按双通道环绕菜单（QPainter 自绘扇区）
-- 新增 `skills_scanner.py` / `skills_panel.py` — Skills 扫描与辅助窗
-- 新增 `agent_manager.py` — Agent 管理 / Skills 设置对话框
-- 设置页新增：主 Agent 选择、环绕菜单、Skills 辅助模块
-- 品牌重命名：应用名/配置目录/日志/图标/构建脚本全部迁移为 AgentFloat
+- 修复：悬停动画失效（`QPropertyAnimation` 无法识别普通 `property()`，已改 `pyqtProperty`）
+- 新增：每次报错自动导出 `logs/reports/v{版本}_{时间戳}_{异常类型}_error.txt`（完整堆栈 + 环境信息）
+- 保留：会话报告（session.txt）与崩溃报告（crash.txt）
 
-见 `versions/v1.0.0/CHANGELOG.md`。
+见 `versions/v1.0.1/CHANGELOG.md`。
