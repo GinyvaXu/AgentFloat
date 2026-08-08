@@ -1,6 +1,6 @@
 # AgentFloat — AI Agent 桌面悬浮助手
 
-[![Version](https://img.shields.io/badge/version-1.0.5-blue)](VERSION)
+[![Version](https://img.shields.io/badge/version-1.0.6-blue)](VERSION)
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)]()
 
@@ -17,9 +17,9 @@
 - 📌 **边缘吸附** — 拖到屏幕边缘自动贴边，支持自动隐藏
 - 🌓 **即时换肤** — 设置对话框中一键切换，无需重启
 - ⚡ **通用多 Agent 启动** — 点击浮窗启动主 Agent；右键/托盘可切换其他 Agent
-- 🎯 **悬停/长按环绕菜单** — 悬停或长按浮窗唤出扇形菜单（双通道，可在设置中调整），一键切换 Agent、打开 Skills 辅助窗、查看 API 用量、设置与退出
-- 🧩 **Skills 辅助窗** — 一键查看本机已安装 skills、功能描述与手动触发指令（无边框窗口，支持中英对照与一键复制）
-- 🤖 **本地 AI 自检服务** — 首次启动自动调用主 Agent 校验 API 余额端点、查找并翻译缺失的 skills；可在设置中随时再次运行
+- 🎯 **悬停/长按环绕菜单** — 悬停或长按浮窗唤出环形菜单（双通道，可在设置中调整，整环统一配色、鼠标移走后 2 秒宽限关闭），一键切换 Agent、打开 Skills 辅助窗、查看 API 用量、设置与退出
+- 🧩 **Skills 辅助窗** — 一键查看本机已安装 skills、功能描述与手动触发指令（无边框窗口，分类树浏览，支持中英对照与一键复制）
+- 🤖 **本地 AI 自检服务** — 手动运行：校验 API 余额端点、查找并翻译缺失的 skills；另配本地翻译 skill，安装新 skills 后可按需补翻而无需跑完整流程
 - 🔔 **系统托盘** — 最小化到托盘，右键菜单快速操作
 - 🟢 **状态指示** — 绿色指示灯显示主 Agent 运行状态
 - 🚀 **开机自启** — 可选注册到 Windows 启动文件夹
@@ -82,9 +82,10 @@ python build_setup_exe.py
 AgentFloat/
 ├── agent_float.py              # 主程序（浮窗 + 设置 + 托盘）
 ├── agent_registry.py           # 多 Agent 注册表与启动模型
-├── radial_menu.py              # 悬停/长按环绕菜单（QPainter 自绘）
-├── skills_scanner.py           # Skills 扫描器（SKILL.md 解析）
-├── skills_panel.py             # Skills 辅助窗（双栏 + AI 优化）
+├── radial_menu.py              # 悬停/长按环绕菜单（整环自绘 + 宽限关闭）
+├── skills_scanner.py           # Skills 扫描器（SKILL.md 解析 + 分类）
+├── skills_panel.py             # Skills 辅助窗（分类树 + 中英对照）
+├── local_ai_service.py         # 本地 AI 自检服务（API 配置 / Skills 翻译）
 ├── agent_manager.py            # Agent 管理 / Skills 设置对话框
 ├── af_theme.py                 # 共享主题配色
 ├── api_*.py                    # API 用量监控模块

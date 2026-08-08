@@ -230,7 +230,7 @@ IOS_HINT       = _LIGHT["HINT"]
 IOS_SURFACE    = _LIGHT["SURFACE"]
 
 FONT_FAMILY = "Microsoft YaHei"
-VERSION = "1.0.5"
+VERSION = "1.0.6"
 
 # ── 浮窗参数 ──────────────────────────────────────────
 DEFAULT_SIZE  = 52          # 默认边长 px
@@ -824,10 +824,10 @@ class SettingsDialog(QDialog):
         self.btn_ai_service = QPushButton("⚡ AI 自检服务")
         self.btn_ai_service.setStyleSheet(btn_css)
         self.btn_ai_service.setToolTip(
-            "调用本地主 Agent（非交互模式）自动完成待处理服务：\n"
+            "调用本地主 Agent（非交互模式）手动完成待处理服务：\n"
             "· 校验 / 补全 API 余额监控端点\n"
             "· 扫描 skills 并生成缺失的中文翻译\n"
-            "首次启动自动运行一次，之后可随时手动运行。")
+            "不会自动触发；新装 skill 的翻译可由本地「AgentFloat 翻译助手」skill 完成。")
         self.btn_ai_service.clicked.connect(self._run_ai_service)
         ai_row.addWidget(self.btn_ai_service)
         self.lbl_ai_service = QLabel("")
@@ -1368,10 +1368,8 @@ class FloatingWidget(QWidget):
         self._api_worker = None
         self._init_api_monitor()
 
-        # 本地 AI 服务（首次启动自动执行一次待处理服务）
+        # 本地 AI 服务（仅手动触发；翻译任务由本地 skill 完成）
         self._ai_worker = None
-        self._ai_first_run_triggered = False
-        QTimer.singleShot(2500, self._maybe_run_first_ai_service)
 
         # 预缓存绘制资源
         self._cache = {}
@@ -1509,7 +1507,7 @@ class FloatingWidget(QWidget):
         self._api_badge = ApiBalanceBadge(parent_float=self)
         self._api_badge.set_theme(self.theme)
         self._api_badge.set_warn_threshold(am_config.get("low_balance_warn", 5.0))
-        self._api_badge.update_balance("…")
+        self._api_badge.update_balance("--")
         if self.isVisible():
             self._api_badge.show()
 
@@ -1538,18 +1536,7 @@ class FloatingWidget(QWidget):
         self._stop_api_monitor()
         self._init_api_monitor()
 
-    # ── 本地 AI 服务（待处理服务：API 余额配置 / Skills 翻译）──────
-    def _maybe_run_first_ai_service(self):
-        """首次启动自动执行一次本地 AI 待处理服务"""
-        if self._ai_first_run_triggered:
-            return
-        self._ai_first_run_triggered = True
-        svc = self.config.get("services") or {}
-        if svc.get("ai_first_run_done"):
-            return
-        _log().info("首次启动：自动运行本地 AI 服务（配置 API 余额 / 翻译 skills）")
-        self._run_local_ai_services(auto=True)
-
+    # ── 本地 AI 服务（手动：API 余额配置 / Skills 翻译）──────────
     def _run_local_ai_services(self, auto=False):
         """后台线程运行本地 AI 服务；auto=True 用托盘通知，False 弹窗"""
         if self._ai_worker is not None and self._ai_worker.isRunning():
@@ -1574,9 +1561,9 @@ class FloatingWidget(QWidget):
             self.config["api_monitor"] = api["api_config"]
             self._restart_api_monitor()
         svc = dict(self.config.get("services") or {})
-        svc["ai_first_run_done"] = True
         from datetime import datetime
         svc["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        svc["ai_first_run_done"] = True
         self.config["services"] = svc
         save_config(self.config)
         summary = res.get("summary", "完成")
@@ -1599,6 +1586,9 @@ class FloatingWidget(QWidget):
         self._api_last_results = results or []
         if not results or not self._api_badge:
             return
+        # 监控启用时保持角标常显（数据就绪即补显，避免时有时无）
+        if self.isVisible() and not self._api_badge.isVisible():
+            self._api_badge.show()
         r = results[0]
         if not r.fields:
             return
@@ -2106,10 +2096,17 @@ class FloatingWidget(QWidget):
         self._radial_menu.open_at(
             center,
             anchor_rect=QRect(self.pos(), self.size()))
+        # 环绕菜单打开时隐藏余额角标，避免重叠遮挡
+        if self._api_badge:
+            self._api_badge.hide()
 
     def _close_radial_menu(self):
         if self._radial_menu is not None:
             self._radial_menu.close_menu()
+        # 菜单关闭后恢复余额角标显示（监控启用且浮窗可见时）
+        if (self._api_badge is not None and self.isVisible()
+                and (self.config.get("api_monitor") or {}).get("enabled")):
+            self._api_badge.show()
 
     def _on_radial_action(self, action_id):
         if action_id.startswith("agent:"):

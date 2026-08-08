@@ -1,47 +1,60 @@
 ﻿# -*- mode: python ; coding: utf-8 -*-
-"""AgentFloat — Skills 辅助窗
+"""AgentFloat — Skills 辅助窗（v1.0.6）
 
-无边框双栏窗口（自定义标题栏可拖动）：左列表（搜索 / 来源过滤 / 中英对照切换）
-+ 右详情（中英描述 / 触发指令可见可复制）。
+无边框毛玻璃窗口：
+- 标题栏：整合式（底部细分隔线 + 强调色圆点 + 计数 + 可见关闭按钮），可拖动；
+- 左侧：按默认分类（包）的树状列表，点击类名展开/收起，再点 skill 查看详情；
+- 搜索时自动展开匹配分类；中英对照三态切换；触发指令可见可复制。
 """
 import os
 
 from PyQt5.QtCore import Qt, QTimer, QPoint
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QBrush, QColor
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
-    QListWidget, QListWidgetItem, QPushButton, QTextBrowser, QFrame,
+    QTreeWidget, QTreeWidgetItem, QPushButton, QTextBrowser, QFrame,
     QApplication, QSplitter,
 )
 
 from af_theme import get_colors
-from skills_scanner import scan_skills, default_skill_roots
+from skills_scanner import scan_skills, default_skill_roots, categorize_skills
 from skills_translations import get_zh
 
 
 class _TitleBar(QFrame):
-    """自定义标题栏：拖动窗口 + 关闭按钮"""
+    """整合式标题栏：拖动窗口 + 计数 + 可见关闭按钮"""
 
     def __init__(self, parent, title):
         super().__init__(parent)
         self._parent = parent
         self._drag_pos = None
+        self.setObjectName("titleBar")
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 6, 8, 6)
-        lay.setSpacing(6)
+        lay.setContentsMargins(14, 8, 10, 8)
+        lay.setSpacing(8)
+
+        # 强调色圆点 + 标题
+        dot = QLabel("●")
+        dot.setStyleSheet("color: %s; font-size: 10px; border: none;" %
+                          ("#%02X%02X%02X" % get_colors(parent._theme)["ACCENT"]))
+        lay.addWidget(dot)
         t = QLabel(title)
         t.setFont(QFont("Microsoft YaHei", 13, QFont.Bold))
         lay.addWidget(t)
         lay.addStretch()
         self.lbl_count = QLabel("")
+        self.lbl_count.setFont(QFont("Microsoft YaHei", 10))
         lay.addWidget(self.lbl_count)
+
         btn = QPushButton("✕")
-        btn.setFixedSize(26, 26)
+        btn.setFixedSize(28, 28)
         btn.setToolTip("关闭")
+        btn.setCursor(Qt.PointingHandCursor)
         btn.setStyleSheet(
-            "QPushButton { border: none; border-radius: 13px; font-size: 13px;"
-            " background: transparent; }"
-            "QPushButton:hover { background: rgba(255, 60, 60, 0.75); color: #FFF; }")
+            "QPushButton { border: none; border-radius: 14px; font-size: 13px;"
+            " background: rgba(128,128,128,0.14); color: #888; }"
+            "QPushButton:hover { background: rgba(255,60,60,0.85); color: #FFF; }"
+            "QPushButton:pressed { background: rgba(200,40,40,0.9); }")
         btn.clicked.connect(parent.close)
         lay.addWidget(btn)
         self._btn_close = btn
@@ -67,14 +80,15 @@ class SkillsPanel(QDialog):
         self._skills_cfg = skills_cfg or {}
         self._theme = theme
         self._all_skills = []
+        self._grouped = []            # [(category, [SkillInfo,...])]
         self._current = None
-        self._lang_mode = "both"          # en / zh / both
+        self._lang_mode = "both"      # en / zh / both
         self._lang_cycle = ["en", "zh", "both"]
         self._cjk = "Microsoft YaHei"
         self.setWindowTitle("AgentFloat — Skills 辅助窗")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setMinimumSize(880, 580)
+        self.setMinimumSize(920, 600)
         self.setStyleSheet(self._stylesheet())
         self._setup_ui()
         self.refresh()
@@ -91,29 +105,30 @@ class SkillsPanel(QDialog):
         card = "#333336" if is_dark else "#FFFFFF"
         return (
             "QDialog { background: %s; border: 1px solid %s; border-radius: 14px; }" % (sf, bd) +
-            "QListWidget, QTextBrowser, QLineEdit, QComboBox { background: %s; color: %s;"
+            "QFrame#titleBar { background: transparent; border-bottom: 1px solid %s; }" % bd +
+            "QTreeWidget, QTextBrowser, QLineEdit, QComboBox { background: %s; color: %s;"
             " border: 1px solid %s; border-radius: 8px; padding: 6px; font-size: 12px; }" % (card, tx, bd) +
-            "QListWidget::item { padding: 6px 8px; border-radius: 6px; }" +
-            "QListWidget::item:selected { background: %s; color: #FFF; }" % ac +
+            "QTreeWidget::item { padding: 5px 4px; border-radius: 6px; }" +
+            "QTreeWidget::item:selected { background: %s; color: #FFF; border-radius: 6px; }" % ac +
+            "QTreeWidget::branch { background: transparent; }" +
             "QPushButton { background: %s; color: %s; border: 1px solid %s;"
             " border-radius: 8px; padding: 6px 14px; font-size: 12px; }" % (card, ac, bd) +
             "QPushButton:hover { background: %s; }" % sf +
             "QPushButton:disabled { color: %s; }" % hi +
             "QLabel { color: %s; font-size: 12px; }" % tx +
-            "QFrame#detailCard { background: %s; border: 1px solid %s; border-radius: 10px; }" % (card, bd) +
-            "QFrame#titleBar { background: transparent; }"
+            "QFrame#detailCard { background: %s; border: 1px solid %s; border-radius: 10px; }" % (card, bd)
         )
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 8, 14, 14)
+        root.setContentsMargins(14, 0, 14, 14)
         root.setSpacing(10)
 
         self._title = _TitleBar(self, "Skills 辅助窗")
-        self._title.setObjectName("titleBar")
         root.addWidget(self._title)
 
         bar = QHBoxLayout()
+        bar.setSpacing(8)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("搜索 skill 名称 / 描述（中英文均可）…")
         self.search_edit.textChanged.connect(self._apply_filter)
@@ -132,9 +147,12 @@ class SkillsPanel(QDialog):
         left = QFrame()
         ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
-        self.list = QListWidget()
-        self.list.currentRowChanged.connect(self._on_select)
-        ll.addWidget(self.list)
+        self.tree = QTreeWidget()
+        self.tree.setHeaderHidden(True)
+        self.tree.setIndentation(18)
+        self.tree.itemClicked.connect(self._on_item_clicked)
+        self.tree.currentItemChanged.connect(self._on_select)
+        ll.addWidget(self.tree)
         split.addWidget(left)
 
         detail = QFrame()
@@ -152,7 +170,6 @@ class SkillsPanel(QDialog):
         self.desc_view.setOpenExternalLinks(False)
         dv.addWidget(self.desc_view, 1)
 
-        # 触发指令：可见文本 + 一键复制
         tri = QHBoxLayout()
         tri_lbl = QLabel("触发指令：")
         tri_lbl.setStyleSheet("color: #%02X%02X%02X;" % get_colors(self._theme)["HINT"])
@@ -174,11 +191,11 @@ class SkillsPanel(QDialog):
         dv.addLayout(act)
 
         split.addWidget(detail)
-        split.setSizes([320, 540])
+        split.setSizes([360, 540])
         root.addWidget(split, 1)
 
         bottom = QHBoxLayout()
-        hint = QLabel("提示：触发指令指需要手动输入的关键词（如 grill me），复制后粘贴到对应 AI 聊天框即可。")
+        hint = QLabel("提示：分类按 skill 包划分，点击类名展开；触发指令复制后粘贴到对应 AI 聊天框即可。")
         hint.setStyleSheet("color: #%02X%02X%02X;" % get_colors(self._theme)["HINT"])
         bottom.addWidget(hint)
         bottom.addStretch()
@@ -188,6 +205,7 @@ class SkillsPanel(QDialog):
     def refresh(self):
         roots = self._skills_cfg.get("roots") or default_skill_roots()
         self._all_skills = scan_skills(roots)
+        self._grouped = categorize_skills(self._all_skills)
         self._rebuild_sources()
         self._apply_filter()
 
@@ -228,33 +246,70 @@ class SkillsPanel(QDialog):
     def _apply_filter(self):
         kw = self.search_edit.text().strip().lower()
         src = self.source_combo.currentData()
-        self.list.blockSignals(True)
-        self.list.clear()
-        for s in self._all_skills:
-            if src and s.root != src:
+        ac = "#%02X%02X%02X" % get_colors(self._theme)["ACCENT"]
+        self.tree.blockSignals(True)
+        self.tree.clear()
+        total = 0
+        for cat, items in self._grouped:
+            matched = []
+            for s in items:
+                if src and s.root != src:
+                    continue
+                if kw and kw not in self._searchable_text(s):
+                    continue
+                matched.append(s)
+            if not matched:
                 continue
-            if kw and kw not in self._searchable_text(s):
-                continue
-            item = QListWidgetItem()
-            item.setText("%s%s" % (self._display_name(s), "  ⚡" if s.trigger else ""))
-            item.setData(Qt.UserRole, s)
-            item.setToolTip(s.path)
-            self.list.addItem(item)
-        self.list.blockSignals(False)
-        self._title.lbl_count.setText("共 %d 个 skill" % self.list.count())
-        if self.list.count():
-            self.list.setCurrentRow(0)
-        else:
+            top = QTreeWidgetItem(["%s（%d）" % (cat, len(matched))])
+            top.setData(0, Qt.UserRole, None)
+            top.setFlags(Qt.ItemIsEnabled)
+            top.setFont(0, QFont(self._cjk, 12, QFont.Bold))
+            top.setForeground(0, QBrush(QColor(ac)))
+            top.setToolTip(0, "点击展开 / 收起该分类")
+            for s in matched:
+                child = QTreeWidgetItem(["%s%s" % (self._display_name(s), "  ⚡" if s.trigger else "")])
+                child.setData(0, Qt.UserRole, s)
+                child.setToolTip(0, s.path)
+                top.addChild(child)
+            self.tree.addTopLevelItem(top)
+            if kw:
+                top.setExpanded(True)
+            total += len(matched)
+        self.tree.blockSignals(False)
+        self._title.lbl_count.setText("共 %d 个 skill" % total)
+        if total == 0:
             self.lbl_name.setText("—")
             self.desc_view.setPlainText("未找到匹配的 skill。")
             self.ed_trigger.clear()
             self.btn_copy.setEnabled(False)
+            self._current = None
+        elif self.tree.topLevelItemCount():
+            self.tree.setCurrentItem(self.tree.topLevelItem(0))
 
-    def _on_select(self, row):
-        item = self.list.item(row)
-        if item is None:
+    # ── 选中 ────────────────────────────────────
+    def _on_item_clicked(self, item, column):
+        if item is not None and item.parent() is None:
+            item.setExpanded(not item.isExpanded())
+
+    def _on_select(self, current, previous):
+        if current is None:
             return
-        s = item.data(Qt.UserRole)
+        s = current.data(0, Qt.UserRole)
+        if s is None:
+            self._show_category(current.text(0))
+        else:
+            self._show_skill(s)
+
+    def _show_category(self, text):
+        self.lbl_name.setText(text)
+        self.lbl_source.setText("分类")
+        self.desc_view.setPlainText("这是一个 skill 分类，共包含多个 skill。\n\n点击分类名可展开 / 收起；点击下方条目查看详情。")
+        self.ed_trigger.clear()
+        self.btn_copy.setEnabled(False)
+        self.lbl_status.setText("")
+        self._current = None
+
+    def _show_skill(self, s):
         self._current = s
         zh_name, zh_desc = self._zh(s)
         has_zh = bool(zh_name and zh_desc)
@@ -280,8 +335,8 @@ class SkillsPanel(QDialog):
             txt += "\n\n（该 skill 需要手动触发，具体指令见 SKILL.md 正文）"
         txt += "\n\n路径：%s" % s.path
         self.desc_view.setPlainText(txt)
+        self.lbl_source.setText(os.path.basename(os.path.dirname(s.path)) or s.root)
         self.lbl_status.setText("")
-        # 触发指令框：显示可见文本，有则启用复制
         if s.trigger:
             self.ed_trigger.setText(s.trigger)
             self.btn_copy.setEnabled(True)
