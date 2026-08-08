@@ -106,5 +106,24 @@
         }
       }
     ]
+  },
+  "news": {
+    "enabled": false,
+    "language": "zh",
+    "schedule_mode": "daily_startup",
+    "schedule_time": "09:00",
+    "max_items": 6,
+    "use_ai": true,
+    "agent_id": "",
+    "sources": [
+      "hackernews",
+      "github_trending",
+      "sspai",
+      "qbitai"
+    ],
+    "notify": true,
+    "badge": true,
+    "unread_count": 0,
+    "last_generated": ""
   }
 }

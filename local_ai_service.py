@@ -114,6 +114,11 @@ def build_headless_command(agent, prompt):
     return args, None
 
 
+def run_headless(agent, prompt, cancel=None):
+    """公共封装：以 headless 模式调用本地 Agent（供 AI 快报等模块复用）"""
+    return _run_headless(agent, prompt, cancel=cancel)
+
+
 def _run_headless(agent, prompt, cancel=None):
     """执行 headless 命令；cancel 为可选 threading.Event，置位时终止子进程"""
     args, err = build_headless_command(agent, prompt)

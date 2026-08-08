@@ -71,3 +71,6 @@ config.json
 launcher_config.json
 skill_state.json
 skills_translations_ai.json
+
+# AI 快报数据（开发模式存脚本目录，打包后存 %APPDATA% ）
+news/

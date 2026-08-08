@@ -33,11 +33,11 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QSystemTrayIcon, QMenu,
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QPushButton,
     QSpinBox, QGroupBox, QRadioButton, QCheckBox, QLineEdit, QFileDialog, QMessageBox,
-    QScrollArea, QComboBox, QListWidget, QListWidgetItem, QTabWidget
+    QScrollArea, QComboBox, QListWidget, QListWidgetItem, QTabWidget, QTimeEdit
 )
 from PyQt5.QtCore import (
     Qt, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QCoreApplication,
-    pyqtSignal, pyqtProperty, QRect, QRectF, QtMsgType, qInstallMessageHandler,
+    pyqtSignal, pyqtProperty, QRect, QRectF, QtMsgType, qInstallMessageHandler, QTime,
 )
 from PyQt5.QtGui import (
     QPainter, QBrush, QColor, QRadialGradient, QLinearGradient, QPen, QFont,
@@ -66,6 +66,9 @@ from agent_manager import AgentManagerDialog, SkillsSettingsDialog
 from local_ai_service import (LocalAiWorker, AutoTranslateWorker,
                               find_new_skills, ensure_translator_skill,
                               _ensure_platform_url)
+from news_fetcher import DEFAULT_NEWS as _NEWS_DEFAULTS
+from news_worker import NewsWorker, today_news_exists
+from news_panel import NewsPanel
 
 # ── 路径（兼容 PyInstaller 打包）──────────────────────
 import sys as _sys
@@ -233,7 +236,7 @@ IOS_HINT       = _LIGHT["HINT"]
 IOS_SURFACE    = _LIGHT["SURFACE"]
 
 FONT_FAMILY = "Microsoft YaHei"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 # ── 浮窗参数 ──────────────────────────────────────────
 DEFAULT_SIZE  = 52          # 默认边长 px
@@ -271,6 +274,7 @@ def load_config():
         "skills": copy.deepcopy(DEFAULT_SKILLS),
         "api_monitor": _default_api_monitor(),
         "services": {"ai_first_run_done": False, "last_run": ""},
+        "news": copy.deepcopy(_NEWS_DEFAULTS),
     }
     loaded = {}
 
@@ -473,6 +477,7 @@ class SettingsDialog(QDialog):
         self._primary_agent_id = (get_primary_agent(self._agents) or {}).get("id")
         self._radial_cfg = copy.deepcopy(self.config.get("radial_menu") or DEFAULT_RADIAL_MENU)
         self._skills_cfg = copy.deepcopy(self.config.get("skills") or DEFAULT_SKILLS)
+        self._news_cfg = copy.deepcopy(self.config.get("news") or _NEWS_DEFAULTS)
         # 拖拽状态 (v1.4.1)
         self._dragging = False
         self._drag_start = QPoint()
@@ -1079,6 +1084,123 @@ class SettingsDialog(QDialog):
         pap.addWidget(api_scroll)
         tabs.addTab(page_api, "API 用量")
 
+        # ================= AI 快报 =================
+        page_news = QWidget()
+        pnw = QVBoxLayout(page_news)
+        pnw.setContentsMargins(6, 10, 6, 6)
+
+        news_content = QWidget()
+        ncl = QVBoxLayout(news_content)
+        ncl.setSpacing(8)
+        ncl.setContentsMargins(14, 14, 14, 14)
+        n_cfg = self._news_cfg
+
+        box_news = QGroupBox("AI 快报")
+        box_news.setFont(self._font(13, bold=True))
+        box_news.setStyleSheet(s["group"])
+        vn = QVBoxLayout(box_news)
+        vn.setSpacing(8)
+        vn.setContentsMargins(14, 14, 14, 10)
+
+        self.cb_news_enabled = QCheckBox("启用 AI 快报（环绕菜单「AI 快报」扇区 / 托盘「AI 快报」打开）")
+        self.cb_news_enabled.setChecked(bool(n_cfg.get("enabled", False)))
+        vn.addWidget(self.cb_news_enabled)
+
+        lang_row = QHBoxLayout()
+        lang_row.addWidget(self._label("生成语言", size=10, color=s["text_secondary"]))
+        self.cmb_news_lang = QComboBox()
+        for lb, dt in (("中文（推荐）", "zh"), ("English", "en"), ("中英双语", "both")):
+            self.cmb_news_lang.addItem(lb, dt)
+        li = self.cmb_news_lang.findData(n_cfg.get("language", "zh"))
+        self.cmb_news_lang.setCurrentIndex(max(0, li))
+        self.cmb_news_lang.setStyleSheet(s["combo"])
+        lang_row.addWidget(self.cmb_news_lang, 1)
+        vn.addLayout(lang_row)
+
+        sched_row = QHBoxLayout()
+        sched_row.addWidget(self._label("定时模式", size=10, color=s["text_secondary"]))
+        self.cmb_news_schedule = QComboBox()
+        for lb, dt in (("仅手动生成", "off"), ("每天定时生成", "daily"),
+                       ("启动时补生成", "startup"), ("每天定时 + 启动补生成", "daily_startup")):
+            self.cmb_news_schedule.addItem(lb, dt)
+        si = self.cmb_news_schedule.findData(n_cfg.get("schedule_mode", "daily_startup"))
+        self.cmb_news_schedule.setCurrentIndex(max(0, si))
+        self.cmb_news_schedule.setStyleSheet(s["combo"])
+        sched_row.addWidget(self.cmb_news_schedule, 1)
+        vn.addLayout(sched_row)
+
+        time_row = QHBoxLayout()
+        time_row.addWidget(self._label("定时时间", size=10, color=s["text_secondary"]))
+        self.time_news = QTimeEdit()
+        try:
+            hh, mm = str(n_cfg.get("schedule_time", "09:00")).split(":")
+            self.time_news.setTime(QTime(int(hh), int(mm)))
+        except Exception:
+            self.time_news.setTime(QTime(9, 0))
+        self.time_news.setStyleSheet(s["combo"])
+        time_row.addWidget(self.time_news, 1)
+        vn.addLayout(time_row)
+
+        cnt_row = QHBoxLayout()
+        cnt_row.addWidget(self._label("条数上限", size=10, color=s["text_secondary"]))
+        self.spin_news_max = QSpinBox()
+        self.spin_news_max.setRange(3, 15)
+        self.spin_news_max.setValue(int(n_cfg.get("max_items") or 6))
+        self.spin_news_max.setStyleSheet(s["combo"])
+        cnt_row.addWidget(self.spin_news_max, 1)
+        vn.addLayout(cnt_row)
+
+        self.cb_news_ai = QCheckBox("使用本地 AI 生成摘要（关闭则仅显示标题列表，零成本离线可用）")
+        self.cb_news_ai.setChecked(bool(n_cfg.get("use_ai", True)))
+        vn.addWidget(self.cb_news_ai)
+
+        agent_row = QHBoxLayout()
+        agent_row.addWidget(self._label("摘要 Agent", size=10, color=s["text_secondary"]))
+        self.cmb_news_agent = QComboBox()
+        self.cmb_news_agent.addItem("默认主 Agent（点击浮窗启动的那个）", "")
+        for a in self._agents:
+            self.cmb_news_agent.addItem(a.get("name") or "Agent", a.get("id"))
+        ai = self.cmb_news_agent.findData(n_cfg.get("agent_id") or "")
+        self.cmb_news_agent.setCurrentIndex(max(0, ai))
+        self.cmb_news_agent.setStyleSheet(s["combo"])
+        agent_row.addWidget(self.cmb_news_agent, 1)
+        vn.addLayout(agent_row)
+
+        vn.addSpacing(4)
+        vn.addWidget(self._label("数据源（可多选，单个源失败不影响整体）", size=10, color=s["text_secondary"]))
+        self._news_source_cbs = {}
+        enabled_src = n_cfg.get("sources") or _NEWS_DEFAULTS["sources"]
+        for sid, szh, sen in (("hackernews", "Hacker News", "Hacker News"),
+                              ("github_trending", "GitHub 趋势", "GitHub Trending"),
+                              ("sspai", "少数派", "少数派"),
+                              ("qbitai", "量子位", "量子位"),
+                              ("arxiv_ai", "arXiv AI", "arXiv AI")):
+            cb = QCheckBox("%s（%s）" % (szh, sen))
+            cb.setChecked(sid in enabled_src)
+            self._news_source_cbs[sid] = cb
+            vn.addWidget(cb)
+
+        vn.addSpacing(4)
+        self.cb_news_notify = QCheckBox("生成完成时托盘通知")
+        self.cb_news_notify.setChecked(bool(n_cfg.get("notify", True)))
+        vn.addWidget(self.cb_news_notify)
+        self.cb_news_badge = QCheckBox("浮窗显示未读红点角标")
+        self.cb_news_badge.setChecked(bool(n_cfg.get("badge", True)))
+        vn.addWidget(self.cb_news_badge)
+
+        ncl.addWidget(box_news)
+        ncl.addStretch()
+
+        news_scroll = QScrollArea()
+        news_scroll.setWidgetResizable(True)
+        news_scroll.setFrameShape(QScrollArea.NoFrame)
+        news_scroll.setWidget(news_content)
+        news_scroll.setStyleSheet(
+            f"QScrollArea {{ border: 1px solid {s['bd']}; border-radius: 10px; background: {s['card_bg']}; }}"
+            f"QScrollBar:vertical {{ width: 6px; }}")
+        pnw.addWidget(news_scroll)
+        tabs.addTab(page_news, "AI 快报")
+
         # ================= 关于 =================
         page_about = QWidget()
         pab = QVBoxLayout(page_about)
@@ -1130,9 +1252,10 @@ class SettingsDialog(QDialog):
         # ── 存储控件引用，用于即时换肤 ──
         self._tw = {
             'container': container,
-            'groups': [box, box_theme, box2, box3, box_snap, box4, box_cleanup, box_radial, box_skills, box_about],
+            'groups': [box, box_theme, box2, box3, box_snap, box4, box_cleanup, box_radial, box_skills, box_news, box_about],
             'radios': [self.rb_normal, self.rb_skip, self.rb_light, self.rb_dark],
-            'checkboxes': [self.cb_snap_enabled, self.cb_snap_hidden, self.cb_cleanup, self.cb_auto_translate],
+            'checkboxes': [self.cb_snap_enabled, self.cb_snap_hidden, self.cb_cleanup, self.cb_auto_translate,
+                        self.cb_news_enabled, self.cb_news_ai, self.cb_news_notify, self.cb_news_badge],
             'buttons': [preview_btn, cancel_btn, browse_btn, reset_btn, self.btn_manage_agent,
                         self.btn_skills_set, self.btn_skills_open, self.btn_ai_service],
             'save_btn': save_btn,
@@ -1379,6 +1502,20 @@ class SettingsDialog(QDialog):
             "theme": "dark" if self.rb_dark.isChecked() else "light",
             "cleanup_on_quit": self.cb_cleanup.isChecked(),
             "api_monitor": getattr(self, "_api_config", self.config.get("api_monitor", API_MONITOR_DEFAULTS)),
+            "news": {
+                "enabled": self.cb_news_enabled.isChecked(),
+                "language": self.cmb_news_lang.currentData() or "zh",
+                "schedule_mode": self.cmb_news_schedule.currentData() or "off",
+                "schedule_time": self.time_news.time().toString("HH:mm"),
+                "max_items": self.spin_news_max.value(),
+                "use_ai": self.cb_news_ai.isChecked(),
+                "agent_id": self.cmb_news_agent.currentData() or "",
+                "sources": [sid for sid, cb in self._news_source_cbs.items() if cb.isChecked()],
+                "notify": self.cb_news_notify.isChecked(),
+                "badge": self.cb_news_badge.isChecked(),
+                "unread_count": self._news_cfg.get("unread_count", 0),
+                "last_generated": self._news_cfg.get("last_generated", ""),
+            },
         }
     def _on_api_config_changed(self, config):
         """API 监控配置实时变更回调"""
@@ -1528,6 +1665,8 @@ class FloatingWidget(QWidget):
     ai_service_failed = pyqtSignal(str)
     auto_translate_done   = pyqtSignal(str)
     auto_translate_failed = pyqtSignal(str)
+    news_done   = pyqtSignal(str)
+    news_failed = pyqtSignal(str)
 
     CLICK_THRESHOLD = 4
 
@@ -1597,6 +1736,18 @@ class FloatingWidget(QWidget):
         # 本地 AI 服务（仅手动触发；翻译任务由本地 skill 完成）
         self._ai_worker = None
         self._auto_worker = None
+
+        # ── AI 快报 ──
+        self._news_cfg = copy.deepcopy(self.config.get("news") or _NEWS_DEFAULTS)
+        self._news_worker = None
+        self._news_panel = None
+        self._news_generating = False
+        self._news_unread = int(self._news_cfg.get("unread_count") or 0)
+        self._news_check_timer = QTimer(self)
+        self._news_check_timer.setInterval(60000)
+        self._news_check_timer.timeout.connect(self._news_timer_tick)
+        if self._news_cfg.get("enabled"):
+            self._news_check_timer.start()
 
         # 预缓存绘制资源
         self._cache = {}
@@ -2459,16 +2610,133 @@ class FloatingWidget(QWidget):
         elif action_id == "settings":
             self.settings_requested.emit()
         elif action_id == "news":
-            from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.information(
-                None, "AI 快报",
-                "AI 快报功能正在开发中，将在后续版本上线（每日 AI 行业速览）。")
+            self._open_news_panel()
         elif action_id == "quit":
             self._animate_quit()
 
     def _open_skills_panel(self):
         dlg = SkillsPanel(self._skills_cfg, theme=self.theme, parent=self)
         dlg.exec_()
+
+    # ── AI 快报 ────────────────────────────────────
+    def _open_news_panel(self):
+        """打开 AI 快报面板（清除未读红点）"""
+        self._mark_news_read()
+        panel = NewsPanel(theme=self.theme, parent=self)
+        panel.generate_requested.connect(lambda: self._generate_news(auto=False))
+        self._news_panel = panel
+        panel.finished.connect(lambda _r: self._clear_news_panel_ref(panel))
+        panel.exec_()
+
+    def _clear_news_panel_ref(self, panel):
+        if self._news_panel is panel:
+            self._news_panel = None
+
+    def _mark_news_read(self):
+        if self._news_unread:
+            self._news_unread = 0
+            self._news_cfg["unread_count"] = 0
+            self.config["news"] = self._news_cfg
+            save_config(self.config)
+            self.update()
+
+    def _generate_news(self, auto=False):
+        """手动/定时/启动补生成 AI 快报（后台线程，防重入）"""
+        if self._news_generating or (self._news_worker is not None and self._news_worker.isRunning()):
+            _log().info("AI 快报生成中，忽略重复触发")
+            return
+        cfg = self._news_cfg or {}
+        if not cfg.get("sources"):
+            if not auto:
+                QMessageBox.warning(None, "AI 快报", "未启用任何数据源，请在「设置 → AI 快报」中勾选。")
+            return
+        agent = None
+        if cfg.get("use_ai", True):
+            agent = get_primary_agent(self._agents)
+            if not agent:
+                if not auto:
+                    QMessageBox.warning(None, "AI 快报",
+                                        "未配置主 Agent，无法生成 AI 摘要。\n"
+                                        "可在设置中关闭「使用本地 AI 生成摘要」改用标题列表。")
+                return
+        self._news_generating = True
+        if self._news_panel is not None and self._news_panel.isVisible():
+            self._news_panel.set_generating(True)
+        worker = NewsWorker(cfg, self._agents, parent=self)
+        worker.done.connect(self._on_news_done)
+        worker.failed.connect(self._on_news_failed)
+        self._news_worker = worker
+        worker.start()
+        _log().info("AI 快报生成启动 (auto=%s, sources=%s, ai=%s)",
+                     auto, cfg.get("sources"), bool(cfg.get("use_ai", True)))
+
+    def _on_news_done(self, payload):
+        self._news_worker = None
+        self._news_generating = False
+        date = payload.get("date", "")
+        count = payload.get("count", 0)
+        used_ai = payload.get("used_ai", False)
+        _log().info("AI 快报生成完成: %s (%d 条, ai=%s)", date, count, used_ai)
+        cfg = dict(self._news_cfg or {})
+        cfg["last_generated"] = payload.get("generated_at", "")
+        cfg["unread_count"] = int(cfg.get("unread_count") or 0) + 1
+        self._news_unread = cfg["unread_count"]
+        self._news_cfg = cfg
+        self.config["news"] = cfg
+        save_config(self.config)
+        self.update()
+        if self._news_panel is not None and self._news_panel.isVisible():
+            self._news_panel.on_generated(payload)
+            self._news_panel.set_generating(False)
+        if cfg.get("notify", True):
+            mode = "AI 摘要" if used_ai else "标题列表"
+            self.news_done.emit("今日 AI 快报已生成（%s，%d 条，%s）" % (date, count, mode))
+
+    def _on_news_failed(self, err):
+        self._news_worker = None
+        self._news_generating = False
+        _log().warning("AI 快报生成失败: %s", err)
+        if self._news_panel is not None and self._news_panel.isVisible():
+            self._news_panel.set_generating(False)
+        self.news_failed.emit(str(err))
+
+    def _setup_news_scheduler(self):
+        """按配置启动/停止定时检查（60s 心跳，到点且当日未生成则触发）"""
+        cfg = self._news_cfg or {}
+        if cfg.get("enabled"):
+            self._news_check_timer.start()
+            QTimer.singleShot(8000, self._news_startup_check)
+        else:
+            self._news_check_timer.stop()
+
+    def _news_startup_check(self):
+        """启动补生成：当日未生成且模式含 startup 时自动生成"""
+        if not (self._news_cfg or {}).get("enabled"):
+            return
+        mode = (self._news_cfg or {}).get("schedule_mode", "daily_startup")
+        if mode in ("startup", "daily_startup") and not today_news_exists():
+            _log().info("启动补生成：今日快报尚未生成，自动触发")
+            self._generate_news(auto=True)
+
+    def _news_timer_tick(self):
+        """每日定时检查（每分钟心跳，命中定时点且当日未生成则触发）"""
+        cfg = self._news_cfg or {}
+        if not cfg.get("enabled"):
+            return
+        mode = cfg.get("schedule_mode", "daily_startup")
+        if mode not in ("daily", "daily_startup"):
+            return
+        if today_news_exists():
+            return
+        try:
+            hh, mm = str(cfg.get("schedule_time", "09:00")).split(":")
+            target = (int(hh), int(mm))
+        except Exception:
+            return
+        now = time.localtime()
+        if (now.tm_hour, now.tm_min) == target:
+            _log().info("每日定时触发 AI 快报生成 (%02d:%02d)", target[0], target[1])
+            self._generate_news(auto=True)
 
     def _show_api_summary(self):
         results = getattr(self, "_api_last_results", [])
@@ -2670,6 +2938,24 @@ class FloatingWidget(QWidget):
             painter.setPen(Qt.NoPen)
             painter.drawEllipse(QPointF(dot_cx, dot_cy), dot_r, dot_r)
 
+        # ── AI 快报未读角标：左上角红色圆点（带未读数）──
+        if self._news_unread > 0 and (self._news_cfg or {}).get("badge", True):
+            dot_r = max(5, s * 0.09)
+            dot_margin = s * 0.16
+            dot_cx = dot_margin
+            dot_cy = dot_margin
+            painter.setBrush(QColor(255, 59, 48, 235))
+            painter.setPen(QPen(QColor(255, 255, 255, 230), 1.5))
+            painter.drawEllipse(QPointF(dot_cx, dot_cy), dot_r, dot_r)
+            if s >= 40 and self._news_unread <= 99:
+                painter.setPen(QPen(QColor(255, 255, 255, 255), 1))
+                font = QFont(FONT_FAMILY, max(7, int(s * 0.16)), QFont.Bold)
+                painter.setFont(font)
+                painter.drawText(
+                    QRect(int(dot_cx - dot_r), int(dot_cy - dot_r),
+                          int(dot_r * 2), int(dot_r * 2)),
+                    Qt.AlignCenter, str(self._news_unread))
+
         painter.end()
 
     # ── 鼠标事件（拖拽修复）─────────────────────────
@@ -2795,6 +3081,9 @@ class FloatingWidget(QWidget):
     def closeEvent(self, event):
         self._unregister_hotkey()
         self._close_radial_menu()
+        if self._news_worker is not None and self._news_worker.isRunning():
+            self._news_worker.cancel()
+            self._news_worker.wait(3000)
         if self._api_badge:
             self._api_badge.close()
         pos = self.pos()
@@ -2826,6 +3115,14 @@ class FloatingWidget(QWidget):
         if new_cfg.get("skills") is not None:
             self._skills_cfg = copy.deepcopy(new_cfg["skills"])
             self.config["skills"] = self._skills_cfg
+        if new_cfg.get("news") is not None:
+            new_news = copy.deepcopy(new_cfg["news"])
+            new_news["unread_count"] = self._news_unread  # 保留当前未读数
+            new_news["last_generated"] = (self._news_cfg or {}).get("last_generated", "")
+            self._news_cfg = new_news
+            self.config["news"] = self._news_cfg
+            self._setup_news_scheduler()
+            self.update()
 
         # 主题切换
         new_theme = new_cfg.get("theme", "light")
@@ -3065,8 +3362,8 @@ def _main():
     app.aboutToQuit.connect(_cleanup_on_quit)
 
     def _shutdown():
-        # 退出时先取消正在运行的本地 AI / 自动翻译服务，再等待线程结束
-        for attr in ("_ai_worker", "_auto_worker"):
+        # 退出时先取消正在运行的本地 AI / 自动翻译 / 快报服务，再等待线程结束
+        for attr in ("_ai_worker", "_auto_worker", "_news_worker"):
             w = getattr(widget, attr, None)
             if w is not None and w.isRunning():
                 _log().info("正在取消 %s…", attr)
@@ -3190,6 +3487,7 @@ def _main():
                 continue
             tray_sub.addAction(a.get("name"), lambda a=a: launch_agent(a, widget.config))
     tray_menu.addAction("Skills 辅助窗", widget._open_skills_panel)
+    tray_menu.addAction("AI 快报", widget._open_news_panel)
     tray_menu.addSeparator()
     tray_menu.addAction("设置...", open_settings)
     tray_menu.addSeparator()
@@ -3223,6 +3521,9 @@ def _main():
     QTimer.singleShot(
         3000, lambda: (ensure_translator_skill(), widget._auto_translate_new_skills()))
 
+    # AI 快报调度器启动（含启动补生成检查）
+    widget._setup_news_scheduler()
+
     widget.launch_requested.connect(do_launch)
     widget.quit_requested.connect(app.quit)
     widget.settings_requested.connect(open_settings)
@@ -3234,6 +3535,10 @@ def _main():
         "AgentFloat — 自动翻译", msg, QSystemTrayIcon.Information, 5000))
     widget.auto_translate_failed.connect(lambda err: tray_icon.showMessage(
         "AgentFloat — 自动翻译失败", str(err), QSystemTrayIcon.Warning, 7000))
+    widget.news_done.connect(lambda msg: tray_icon.showMessage(
+        "AgentFloat — AI 快报", msg, QSystemTrayIcon.Information, 5000))
+    widget.news_failed.connect(lambda err: tray_icon.showMessage(
+        "AgentFloat — AI 快报失败", str(err), QSystemTrayIcon.Warning, 7000))
     # 主题切换时同步更新托盘菜单样式
     widget.theme_changed.connect(lambda t: tray_menu.setStyleSheet(_build_menu_stylesheet(t)))
     widget.show()

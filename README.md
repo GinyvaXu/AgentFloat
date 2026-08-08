@@ -12,7 +12,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 </p>
 
 <p align="center">
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-v1.1.0-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-v1.2.0-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%2010%2F11-8E44AD?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"></a>
@@ -31,6 +31,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 | 🧩 **通用多 Agent 启动** | 点击浮窗即启动 Claude Code / Codex CLI / 自定义命令，右键或托盘可快速切换主 Agent，实时状态指示灯 |
 | 🧠 **Skills 辅助窗** | 无边框窗口扫描本机已安装 skills，分类树浏览 + 中英对照切换 + 触发指令一键复制（右侧完整展示，溢出自动滚动） |
 | 📊 **API 用量监控** | 通用 JSONPath 框架轮询任意 API 用量，浮窗角标实时显示余额，<5¥ 低余额变色警告，环绕菜单一键跳转对应平台用量页 |
+| 📰 **AI 快报** | 多源聚合（Hacker News / GitHub Trending / 少数派 / 量子位 / arXiv）+ 本地 Agent 一键生成今日 AI 速览，无边框面板浏览、链接可点击，未读红点 + 托盘通知 |
 | 🤖 **本地 AI 自检服务** | 校验 API 余额端点、查找并翻译缺失的 skills；自动部署翻译 skill，检测到新 skill 自动触发补译（可在设置中关闭） |
 | 🔔 **系统托盘 / 开机自启** | 最小化至托盘、双击显示浮窗、可注册 Windows 自启动，全局热键 `Ctrl+Alt+C` 随时唤起 |
 | 🎬 **动态退出动画** | 退出时播放全新收拢动画，配合窗口淡出，告别生硬关闭 |
@@ -83,7 +84,7 @@ python agent_float.py
   - `Skills 辅助窗` — 浏览 / 翻译 / 复制触发指令
   - `API 余额` — 查看用量，点击跳转对应平台网页
   - `设置` — 打开设置
-  - `AI 快报` — 每日 AI 行业速览（**预留功能**，即将上线）
+  - `AI 快报` — 打开每日 AI 行业速览（多源聚合 + 本地 Agent 摘要）
   - `退出` — 播放收拢动画后退出
 
 > 预留动作位让未来扩展（AI 快报、剪贴板助手、日程提醒等）无需改动交互框架即可接入。
@@ -134,11 +135,19 @@ AgentFloat/
 
 - [x] v1.0.x — 通用 Agent 启动 / 环绕菜单 / Skills 辅助窗 / API 余额监控
 - [x] v1.1.0 — 环绕菜单扇区模块化自选 + 灰块覆盖层根因修复
-- [ ] v1.2 — **AI 快报**：每日 AI 行业速览订阅（详见调研报告）
+- [x] v1.2.0 — **AI 快报**：多源聚合 + 本地 Agent 摘要 + 无边框面板 + 定时/启动补生成（详见调研报告）
 - [ ] v1.3 — 剪贴板历史、快捷短语、定时提醒等效率工具
 - [ ] v2.0 — 主题商店 / 插件系统 / 多显示器支持
 
 > 📚 功能扩展的完整调研与方案对比见 [AI快报与多功能浮窗助手调研报告](docs/AI快报与多功能浮窗助手调研报告.md)。
+
+## 🙏 致谢
+
+AI 快报与扩展功能的设计参考了以下开源项目与产品（详见 [调研报告](docs/AI快报与多功能浮窗助手调研报告.md)）：
+
+- **AI 快报类**：[TrendRadar](https://github.com/BedrockLian/TrendRadar)、[agents-radar](https://github.com/duanyytop/agents-radar)、[condenseit](https://github.com/wildlifechorus/condenseit)、[dailybrief](https://github.com/adanoliveira/dailybrief)、[horizonnews](https://github.com/xinqiyang/horizonnews)、[Glanceway](https://www.producthunt.com/products/glanceway-everything-at-a-glance)、Digest
+- **浮窗 / 启动器类**：[ZTools](https://github.com/ZToolsCenter/ZTools)（uTools 开源实现）、[Floatyball](https://meta.appinn.net/t/topic/85852/2)、[Raycast](https://www.raycast.com/)、[SAO Utils](https://sao-sys.com/)
+- 数据源：Hacker News、GitHub Trending、少数派、量子位、arXiv 公开接口，感谢各平台免费开放。
 
 ## 📄 许可
 
