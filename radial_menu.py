@@ -111,7 +111,8 @@ class RadialMenu(QWidget):
 
     def _sector_at(self, global_pos):
         c = self._center()
-        p = self.mapFromGlobal(global_pos)
+        # 顶层窗口 pos() 即全局坐标；避免 mapFromGlobal 在高分屏下坐标偏移
+        p = global_pos - self.pos()
         dx, dy = p.x() - c.x(), p.y() - c.y()
         dist = math.hypot(dx, dy)
         if dist < self._inner - 6 or dist > self._outer + 6:

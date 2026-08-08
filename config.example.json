@@ -57,6 +57,10 @@
     "ai_tool": "codex exec",
     "max_description_len": 160
   },
+  "services": {
+    "ai_first_run_done": false,
+    "last_run": ""
+  },
   "api_monitor": {
     "enabled": false,
     "poll_interval_seconds": 60,

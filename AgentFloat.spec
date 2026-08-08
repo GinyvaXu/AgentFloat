@@ -19,6 +19,7 @@ a = Analysis(
         'skills_scanner',
         'skills_panel',
         'agent_manager',
+        'local_ai_service',
     ],
     hookspath=[],
     hooksconfig={},

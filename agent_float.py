@@ -62,6 +62,7 @@ from radial_menu import RadialMenu, RadialMenuItem
 from skills_scanner import default_skill_roots
 from skills_panel import SkillsPanel
 from agent_manager import AgentManagerDialog, SkillsSettingsDialog
+from local_ai_service import LocalAiWorker
 
 # ── 路径（兼容 PyInstaller 打包）──────────────────────
 import sys as _sys
@@ -229,7 +230,7 @@ IOS_HINT       = _LIGHT["HINT"]
 IOS_SURFACE    = _LIGHT["SURFACE"]
 
 FONT_FAMILY = "Microsoft YaHei"
-VERSION = "1.0.4"
+VERSION = "1.0.5"
 
 # ── 浮窗参数 ──────────────────────────────────────────
 DEFAULT_SIZE  = 52          # 默认边长 px
@@ -266,6 +267,7 @@ def load_config():
         "radial_menu": copy.deepcopy(DEFAULT_RADIAL_MENU),
         "skills": copy.deepcopy(DEFAULT_SKILLS),
         "api_monitor": _default_api_monitor(),
+        "services": {"ai_first_run_done": False, "last_run": ""},
     }
     loaded = {}
 
@@ -817,6 +819,26 @@ class SettingsDialog(QDialog):
         sk_row.addWidget(self.btn_skills_open)
         vsk.addLayout(sk_row)
 
+        # 本地 AI 待处理服务（首次自动运行，此处可再次手动触发）
+        ai_row = QHBoxLayout()
+        self.btn_ai_service = QPushButton("⚡ AI 自检服务")
+        self.btn_ai_service.setStyleSheet(btn_css)
+        self.btn_ai_service.setToolTip(
+            "调用本地主 Agent（非交互模式）自动完成待处理服务：\n"
+            "· 校验 / 补全 API 余额监控端点\n"
+            "· 扫描 skills 并生成缺失的中文翻译\n"
+            "首次启动自动运行一次，之后可随时手动运行。")
+        self.btn_ai_service.clicked.connect(self._run_ai_service)
+        ai_row.addWidget(self.btn_ai_service)
+        self.lbl_ai_service = QLabel("")
+        self.lbl_ai_service.setFont(self._font(9))
+        self.lbl_ai_service.setStyleSheet(f"color: {s['hi']};")
+        ai_row.addWidget(self.lbl_ai_service, 1)
+        vsk.addLayout(ai_row)
+        _svc = self.config.get("services") or {}
+        _last = (_svc.get("last_run") or "").strip()
+        self.lbl_ai_service.setText(("上次运行 %s" % _last) if _last else "尚未运行")
+
         left_col.addWidget(box_skills)
         left_col.addStretch()
 
@@ -1020,7 +1042,7 @@ class SettingsDialog(QDialog):
             'groups': [box, box_theme, box2, box3, box_snap, box4, box_cleanup, box_radial, box_skills],
             'radios': [self.rb_normal, self.rb_skip, self.rb_light, self.rb_dark],
             'checkboxes': [self.cb_snap_enabled, self.cb_snap_hidden, self.cb_cleanup],
-            'buttons': [preview_btn, cancel_btn, browse_btn, reset_btn, self.btn_manage_agent, self.btn_skills_set, self.btn_skills_open],
+            'buttons': [preview_btn, cancel_btn, browse_btn, reset_btn, self.btn_manage_agent, self.btn_skills_set, self.btn_skills_open, self.btn_ai_service],
             'save_btn': save_btn,
             'close_btn': close_btn,
             'api_scroll': api_scroll,
@@ -1227,6 +1249,14 @@ class SettingsDialog(QDialog):
                 li.setToolTip(r)
                 self.skills_root_list.addItem(li)
 
+    def _run_ai_service(self):
+        """运行本地 AI 待处理服务（调用浮窗主 Agent，后台线程执行）"""
+        p = self.parent()
+        if p is not None and hasattr(p, '_run_local_ai_services'):
+            p._run_local_ai_services(auto=False)
+        else:
+            QMessageBox.information(self, "AI 自检服务", "请先保存设置，再从托盘菜单运行。")
+
     def _open_skills_panel(self):
         dlg = SkillsPanel(self._skills_cfg, theme=self.theme, parent=self)
         dlg.exec_()
@@ -1274,6 +1304,8 @@ class FloatingWidget(QWidget):
     quit_requested    = pyqtSignal()
     settings_requested = pyqtSignal()
     theme_changed     = pyqtSignal(str)
+    ai_service_done   = pyqtSignal(str)
+    ai_service_failed = pyqtSignal(str)
 
     CLICK_THRESHOLD = 4
 
@@ -1335,6 +1367,11 @@ class FloatingWidget(QWidget):
         self._api_badge = None
         self._api_worker = None
         self._init_api_monitor()
+
+        # 本地 AI 服务（首次启动自动执行一次待处理服务）
+        self._ai_worker = None
+        self._ai_first_run_triggered = False
+        QTimer.singleShot(2500, self._maybe_run_first_ai_service)
 
         # 预缓存绘制资源
         self._cache = {}
@@ -1500,6 +1537,62 @@ class FloatingWidget(QWidget):
         """重启 API 用量监控（配置变更后调用）"""
         self._stop_api_monitor()
         self._init_api_monitor()
+
+    # ── 本地 AI 服务（待处理服务：API 余额配置 / Skills 翻译）──────
+    def _maybe_run_first_ai_service(self):
+        """首次启动自动执行一次本地 AI 待处理服务"""
+        if self._ai_first_run_triggered:
+            return
+        self._ai_first_run_triggered = True
+        svc = self.config.get("services") or {}
+        if svc.get("ai_first_run_done"):
+            return
+        _log().info("首次启动：自动运行本地 AI 服务（配置 API 余额 / 翻译 skills）")
+        self._run_local_ai_services(auto=True)
+
+    def _run_local_ai_services(self, auto=False):
+        """后台线程运行本地 AI 服务；auto=True 用托盘通知，False 弹窗"""
+        if self._ai_worker is not None and self._ai_worker.isRunning():
+            _log().info("本地 AI 服务已在运行中，忽略重复触发")
+            return
+        agent = get_primary_agent(self._agents)
+        if not agent:
+            _log().warning("本地 AI 服务：未配置主 Agent")
+            if not auto:
+                QMessageBox.warning(None, "AI 自检服务", "未配置主 Agent，请先在「设置 → Agent 管理」中配置。")
+            return
+        self._ai_worker = LocalAiWorker(self.config, agent, parent=self)
+        self._ai_worker.finished_ok.connect(lambda res: self._on_ai_service_done(res, auto))
+        self._ai_worker.failed.connect(lambda err: self._on_ai_service_failed(err, auto))
+        self._ai_worker.start()
+        _log().info("本地 AI 服务已启动 (auto=%s, agent=%s)", auto, agent.get("name"))
+
+    def _on_ai_service_done(self, res, auto):
+        self._ai_worker = None
+        api = res.get("api") or {}
+        if api.get("api_config") is not None:
+            self.config["api_monitor"] = api["api_config"]
+            self._restart_api_monitor()
+        svc = dict(self.config.get("services") or {})
+        svc["ai_first_run_done"] = True
+        from datetime import datetime
+        svc["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.config["services"] = svc
+        save_config(self.config)
+        summary = res.get("summary", "完成")
+        _log().info("本地 AI 服务完成:\n%s", summary)
+        if auto:
+            self.ai_service_done.emit(summary)
+        else:
+            QMessageBox.information(None, "AI 自检服务", summary)
+
+    def _on_ai_service_failed(self, err, auto):
+        self._ai_worker = None
+        _log().warning("本地 AI 服务失败: %s", err)
+        if auto:
+            self.ai_service_failed.emit(str(err))
+        else:
+            QMessageBox.warning(None, "AI 自检服务", "运行失败：\n%s" % err)
 
     def _on_api_data_ready(self, results):
         """轮询数据就绪，更新余额角标（只显示剩余额度）"""
@@ -1953,9 +2046,9 @@ class FloatingWidget(QWidget):
             self.move(self.pos().x(), int(v))
 
     def _check_hover(self):
-        # 用 mapFromGlobal 替代 frameGeometry().contains() —
-        # WA_ShowWithoutActivating 下 frameGeometry 坐标可能偏移
-        local_pos = self.mapFromGlobal(QCursor.pos())
+        # 高分屏下 mapFromGlobal 可能返回 2 倍偏移坐标，导致悬停检测错乱；
+        # 顶层窗口 pos() 即全局坐标，直接用 QCursor.pos() - pos() 计算本地坐标
+        local_pos = QCursor.pos() - self.pos()
         was = self.is_hovered
         self.is_hovered = self.rect().contains(local_pos)
 
@@ -1973,7 +2066,6 @@ class FloatingWidget(QWidget):
             self._maybe_start_hover_open()
         elif not self.is_hovered and was:
             _log().debug("悬停离开")
-        elif not self.is_hovered and was:
             self._animate_size(self.base_size)
             self._hover_open_timer.stop()
             self._close_radial_menu()
@@ -2010,9 +2102,9 @@ class FloatingWidget(QWidget):
         self._radial_menu.set_items(items, radius=int(self._radial_cfg.get("radius", 120)))
         center = self.geometry().center()
         _log().debug("环绕菜单打开: source=%s items=%d center=%s", source, len(items), center)
-        # 锚定区域用 pos()+size()（顶层窗口全局坐标），避免 frameGeometry 偏移
+        # 顶层窗口 geometry() 即全局坐标，直接作为菜单圆心（避免 mapToGlobal 高分屏偏移）
         self._radial_menu.open_at(
-            self.mapToGlobal(center),
+            center,
             anchor_rect=QRect(self.pos(), self.size()))
 
     def _close_radial_menu(self):
@@ -2558,6 +2650,14 @@ def _main():
                                capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
     app.aboutToQuit.connect(_cleanup_on_quit)
 
+    def _shutdown():
+        # 退出时先取消正在运行的本地 AI 服务，再等待线程结束
+        if widget._ai_worker is not None and widget._ai_worker.isRunning():
+            _log().info("正在取消本地 AI 服务…")
+            widget._ai_worker.cancel()
+            widget._ai_worker.wait(8000)
+    app.aboutToQuit.connect(_shutdown)
+
     widget = FloatingWidget()
 
     # ── 设置对话框 ──
@@ -2706,6 +2806,10 @@ def _main():
     widget.launch_requested.connect(do_launch)
     widget.quit_requested.connect(app.quit)
     widget.settings_requested.connect(open_settings)
+    widget.ai_service_done.connect(lambda summary: tray_icon.showMessage(
+        "AgentFloat — AI 自检完成", summary, QSystemTrayIcon.Information, 5000))
+    widget.ai_service_failed.connect(lambda err: tray_icon.showMessage(
+        "AgentFloat — AI 自检失败", str(err), QSystemTrayIcon.Warning, 7000))
     # 主题切换时同步更新托盘菜单样式
     widget.theme_changed.connect(lambda t: tray_menu.setStyleSheet(_build_menu_stylesheet(t)))
     widget.show()

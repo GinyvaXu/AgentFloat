@@ -1,6 +1,6 @@
 # AgentFloat — AI Agent 桌面悬浮助手
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue)](VERSION)
+[![Version](https://img.shields.io/badge/version-1.0.5-blue)](VERSION)
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)]()
 
@@ -18,7 +18,8 @@
 - 🌓 **即时换肤** — 设置对话框中一键切换，无需重启
 - ⚡ **通用多 Agent 启动** — 点击浮窗启动主 Agent；右键/托盘可切换其他 Agent
 - 🎯 **悬停/长按环绕菜单** — 悬停或长按浮窗唤出扇形菜单（双通道，可在设置中调整），一键切换 Agent、打开 Skills 辅助窗、查看 API 用量、设置与退出
-- 🧩 **Skills 辅助窗** — 一键查看本机已安装 skills、功能描述与手动触发指令（支持一键复制与 AI 优化描述）
+- 🧩 **Skills 辅助窗** — 一键查看本机已安装 skills、功能描述与手动触发指令（无边框窗口，支持中英对照与一键复制）
+- 🤖 **本地 AI 自检服务** — 首次启动自动调用主 Agent 校验 API 余额端点、查找并翻译缺失的 skills；可在设置中随时再次运行
 - 🔔 **系统托盘** — 最小化到托盘，右键菜单快速操作
 - 🟢 **状态指示** — 绿色指示灯显示主 Agent 运行状态
 - 🚀 **开机自启** — 可选注册到 Windows 启动文件夹

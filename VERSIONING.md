@@ -14,6 +14,7 @@ PATCH — Bug 修复、安全补丁
 
 | 版本 | 说明 |
 |------|------|
+| v1.0.5 | 本地 AI 服务（API 余额配置 + Skills 翻译）+ 悬停菜单/辅助窗/触发指令修复 |
 | v1.0.4 | 修复环绕菜单弹不出；Skills 中英对照 + 去除 AI 优化 |
 | v1.0.3 | 修复环绕菜单绘制崩溃（QPointF 解包） |
 | v1.0.2 | 错误日志改为关闭程序时统一导出汇总报告 |
@@ -30,7 +31,8 @@ AgentFloat/
 ├── agent_registry.py           # 多 Agent 注册表与启动模型
 ├── radial_menu.py              # 悬停/长按环绕菜单（QPainter 自绘）
 ├── skills_scanner.py           # Skills 扫描器（SKILL.md 解析）
-├── skills_panel.py             # Skills 辅助窗（双栏 + AI 优化）
+├── skills_panel.py             # Skills 辅助窗（无边框 + 中英对照 + 触发指令复制）
+├── local_ai_service.py         # 本地 AI 服务（API 配置 / Skills 翻译）
 ├── agent_manager.py            # Agent 管理 / Skills 设置对话框
 ├── af_theme.py                 # 共享主题配色
 ├── api_fetcher.py              # API HTTP 请求 + 模板变量

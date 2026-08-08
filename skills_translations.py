@@ -4,6 +4,10 @@
 内置常见 skills 的中文名称与简介；未收录项由 Skills 辅助窗回退显示原文。
 键：skill 名称（或目录名）；值：(中文名, 中文简介)
 """
+import json
+import os
+import sys
+
 SKILL_ZH = {
     "agent-browser": ("浏览器自动化", "AI 代理专用的浏览器自动化命令行工具：导航网页、填写表单、点击按钮、截图、提取数据、测试 Web 应用。"),
     "caveman": ("穴居人模式", "极简压缩沟通模式，大幅减少输出字数（实测省 65%），保持技术准确性；支持 lite/full/ultra 等强度。"),
@@ -65,13 +69,45 @@ _ALIAS = {
 }
 
 
+def _custom_path():
+    """AI 自检服务生成的补充翻译文件（用户目录）"""
+    if getattr(sys, "frozen", False):
+        d = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "AgentFloat")
+    else:
+        d = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(d, "skills_translations_ai.json")
+
+
+def _load_custom():
+    """懒加载 AI 生成的补充翻译：{"skill-name": ["中文名", "中文简介"]}"""
+    cached = getattr(_load_custom, "_cache", None)
+    if cached is not None:
+        return cached
+    data = {}
+    try:
+        with open(_custom_path(), "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            data = {k: v for k, v in raw.items() if isinstance(v, (list, tuple)) and len(v) >= 2}
+    except Exception:
+        pass
+    _load_custom._cache = data
+    return data
+
+
 def get_zh(skill_name, dir_name=None):
-    """返回 (中文名, 中文简介)；未收录返回 (None, None)"""
+    """返回 (中文名, 中文简介)；未收录返回 (None, None)。
+    AI 补充翻译优先于内置表，便于本地自检服务持续扩充。"""
     key = skill_name
+    custom = _load_custom()
+    if key in custom:
+        return custom[key][0], custom[key][1]
     if key in SKILL_ZH:
         return SKILL_ZH[key]
     if key in _ALIAS and _ALIAS[key] in SKILL_ZH:
         return SKILL_ZH[_ALIAS[key]]
     if dir_name and dir_name in SKILL_ZH:
         return SKILL_ZH[dir_name]
+    if dir_name and dir_name in custom:
+        return custom[dir_name][0], custom[dir_name][1]
     return None, None

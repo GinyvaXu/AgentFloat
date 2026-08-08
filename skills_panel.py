@@ -1,11 +1,12 @@
 ﻿# -*- mode: python ; coding: utf-8 -*-
 """AgentFloat — Skills 辅助窗
 
-双栏布局：左列表（搜索 / 来源过滤 / 中英对照切换）+ 右详情（中英描述 / 触发指令 / 复制）。
+无边框双栏窗口（自定义标题栏可拖动）：左列表（搜索 / 来源过滤 / 中英对照切换）
++ 右详情（中英描述 / 触发指令可见可复制）。
 """
 import os
 
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, QPoint
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
@@ -16,6 +17,48 @@ from PyQt5.QtWidgets import (
 from af_theme import get_colors
 from skills_scanner import scan_skills, default_skill_roots
 from skills_translations import get_zh
+
+
+class _TitleBar(QFrame):
+    """自定义标题栏：拖动窗口 + 关闭按钮"""
+
+    def __init__(self, parent, title):
+        super().__init__(parent)
+        self._parent = parent
+        self._drag_pos = None
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(12, 6, 8, 6)
+        lay.setSpacing(6)
+        t = QLabel(title)
+        t.setFont(QFont("Microsoft YaHei", 13, QFont.Bold))
+        lay.addWidget(t)
+        lay.addStretch()
+        self.lbl_count = QLabel("")
+        lay.addWidget(self.lbl_count)
+        btn = QPushButton("✕")
+        btn.setFixedSize(26, 26)
+        btn.setToolTip("关闭")
+        btn.setStyleSheet(
+            "QPushButton { border: none; border-radius: 13px; font-size: 13px;"
+            " background: transparent; }"
+            "QPushButton:hover { background: rgba(255, 60, 60, 0.75); color: #FFF; }")
+        btn.clicked.connect(parent.close)
+        lay.addWidget(btn)
+        self._btn_close = btn
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_pos = event.globalPos() - self._parent.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos is not None and (event.buttons() & Qt.LeftButton):
+            self._parent.move(event.globalPos() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+        event.accept()
 
 
 class SkillsPanel(QDialog):
@@ -29,6 +72,8 @@ class SkillsPanel(QDialog):
         self._lang_cycle = ["en", "zh", "both"]
         self._cjk = "Microsoft YaHei"
         self.setWindowTitle("AgentFloat — Skills 辅助窗")
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMinimumSize(880, 580)
         self.setStyleSheet(self._stylesheet())
         self._setup_ui()
@@ -45,7 +90,7 @@ class SkillsPanel(QDialog):
         bd = "#%02X%02X%02X" % c["SEPARATOR"]
         card = "#333336" if is_dark else "#FFFFFF"
         return (
-            "QDialog { background: %s; }" % sf +
+            "QDialog { background: %s; border: 1px solid %s; border-radius: 14px; }" % (sf, bd) +
             "QListWidget, QTextBrowser, QLineEdit, QComboBox { background: %s; color: %s;"
             " border: 1px solid %s; border-radius: 8px; padding: 6px; font-size: 12px; }" % (card, tx, bd) +
             "QListWidget::item { padding: 6px 8px; border-radius: 6px; }" +
@@ -55,22 +100,18 @@ class SkillsPanel(QDialog):
             "QPushButton:hover { background: %s; }" % sf +
             "QPushButton:disabled { color: %s; }" % hi +
             "QLabel { color: %s; font-size: 12px; }" % tx +
-            "QFrame#detailCard { background: %s; border: 1px solid %s; border-radius: 10px; }" % (card, bd)
+            "QFrame#detailCard { background: %s; border: 1px solid %s; border-radius: 10px; }" % (card, bd) +
+            "QFrame#titleBar { background: transparent; }"
         )
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 14, 14, 14)
+        root.setContentsMargins(14, 8, 14, 14)
         root.setSpacing(10)
 
-        head = QHBoxLayout()
-        title = QLabel("Skills 辅助窗")
-        title.setFont(QFont(self._cjk, 15, QFont.Bold))
-        head.addWidget(title)
-        head.addStretch()
-        self.lbl_count = QLabel("")
-        head.addWidget(self.lbl_count)
-        root.addLayout(head)
+        self._title = _TitleBar(self, "Skills 辅助窗")
+        self._title.setObjectName("titleBar")
+        root.addWidget(self._title)
 
         bar = QHBoxLayout()
         self.search_edit = QLineEdit()
@@ -88,7 +129,6 @@ class SkillsPanel(QDialog):
 
         split = QSplitter(Qt.Horizontal)
 
-        # 左：列表
         left = QFrame()
         ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
@@ -97,7 +137,6 @@ class SkillsPanel(QDialog):
         ll.addWidget(self.list)
         split.addWidget(left)
 
-        # 右：详情
         detail = QFrame()
         detail.setObjectName("detailCard")
         dv = QVBoxLayout(detail)
@@ -113,14 +152,25 @@ class SkillsPanel(QDialog):
         self.desc_view.setOpenExternalLinks(False)
         dv.addWidget(self.desc_view, 1)
 
-        act = QHBoxLayout()
-        self.btn_copy = QPushButton("复制触发指令")
+        # 触发指令：可见文本 + 一键复制
+        tri = QHBoxLayout()
+        tri_lbl = QLabel("触发指令：")
+        tri_lbl.setStyleSheet("color: #%02X%02X%02X;" % get_colors(self._theme)["HINT"])
+        self.ed_trigger = QLineEdit()
+        self.ed_trigger.setReadOnly(True)
+        self.ed_trigger.setPlaceholderText("无触发指令（该 skill 由 AI 自动调用）")
+        tri.addWidget(tri_lbl)
+        tri.addWidget(self.ed_trigger, 1)
+        self.btn_copy = QPushButton("复制")
         self.btn_copy.setEnabled(False)
         self.btn_copy.clicked.connect(self._copy_trigger)
-        act.addWidget(self.btn_copy)
-        act.addStretch()
+        tri.addWidget(self.btn_copy)
+        dv.addLayout(tri)
+
+        act = QHBoxLayout()
         self.lbl_status = QLabel("")
         act.addWidget(self.lbl_status)
+        act.addStretch()
         dv.addLayout(act)
 
         split.addWidget(detail)
@@ -132,9 +182,6 @@ class SkillsPanel(QDialog):
         hint.setStyleSheet("color: #%02X%02X%02X;" % get_colors(self._theme)["HINT"])
         bottom.addWidget(hint)
         bottom.addStretch()
-        close_btn = QPushButton("关闭")
-        close_btn.clicked.connect(self.accept)
-        bottom.addWidget(close_btn)
         root.addLayout(bottom)
 
     # ── 数据 ────────────────────────────────────
@@ -157,8 +204,7 @@ class SkillsPanel(QDialog):
         self.source_combo.blockSignals(False)
 
     def _zh(self, s):
-        zh_name, zh_desc = get_zh(s.name, os.path.basename(os.path.dirname(s.path)))
-        return zh_name, zh_desc
+        return get_zh(s.name, os.path.basename(os.path.dirname(s.path)))
 
     def _display_name(self, s):
         if self._lang_mode == "en":
@@ -195,12 +241,14 @@ class SkillsPanel(QDialog):
             item.setToolTip(s.path)
             self.list.addItem(item)
         self.list.blockSignals(False)
-        self.lbl_count.setText("共 %d 个 skill" % self.list.count())
+        self._title.lbl_count.setText("共 %d 个 skill" % self.list.count())
         if self.list.count():
             self.list.setCurrentRow(0)
         else:
             self.lbl_name.setText("—")
             self.desc_view.setPlainText("未找到匹配的 skill。")
+            self.ed_trigger.clear()
+            self.btn_copy.setEnabled(False)
 
     def _on_select(self, row):
         item = self.list.item(row)
@@ -233,7 +281,13 @@ class SkillsPanel(QDialog):
         txt += "\n\n路径：%s" % s.path
         self.desc_view.setPlainText(txt)
         self.lbl_status.setText("")
-        self.btn_copy.setEnabled(bool(s.trigger))
+        # 触发指令框：显示可见文本，有则启用复制
+        if s.trigger:
+            self.ed_trigger.setText(s.trigger)
+            self.btn_copy.setEnabled(True)
+        else:
+            self.ed_trigger.clear()
+            self.btn_copy.setEnabled(False)
 
     # ── 语言切换 ────────────────────────────────
     def _cycle_lang(self):
@@ -246,8 +300,8 @@ class SkillsPanel(QDialog):
 
     # ── 动作 ────────────────────────────────────
     def _copy_trigger(self):
-        s = getattr(self, "_current", None)
-        if s and s.trigger:
-            QApplication.clipboard().setText(s.trigger)
-            self.lbl_status.setText("已复制 ✓")
-            QTimer.singleShot(1500, lambda: self.lbl_status.setText(""))
+        text = self.ed_trigger.text().strip()
+        if text:
+            QApplication.clipboard().setText(text)
+            self.lbl_status.setText("已复制「%s」✓" % text)
+            QTimer.singleShot(1800, lambda: self.lbl_status.setText(""))

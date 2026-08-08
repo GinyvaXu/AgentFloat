@@ -40,6 +40,7 @@ HIDDEN_IMPORTS = [
     "api_balance_badge", "api_monitor_settings", "updater",
     "af_theme", "agent_registry", "radial_menu",
     "skills_scanner", "skills_panel", "agent_manager",
+    "local_ai_service",
 ]
 
 args = [
