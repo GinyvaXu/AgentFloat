@@ -412,18 +412,18 @@ class RadialMenu(QWidget):
         for i, item in enumerate(self._items):
             self._sector_cache.append((item.id, -90.0 + i * sweep, sweep))
             mid = -90.0 + (i + 0.5) * sweep
-            rad = self._outer * 0.68
+            rad = self._outer * (0.60 if n >= 8 else 0.68)
             pt = self._polar(mid, rad)
             hovered = (i == self._hover_idx)
 
             # 品牌色小圆点（外缘，仅做微辨识；悬停时轻微变淡）
-            dot_pt = self._polar(mid, self._outer - 12)
+            dot_pt = self._polar(mid, self._outer - 10)
             painter.setPen(Qt.NoPen)
             dot_c = QColor(item.color)
             if hovered:
                 dot_c.setAlpha(150)
             painter.setBrush(dot_c)
-            painter.drawEllipse(QRectF(dot_pt.x() - 3.5, dot_pt.y() - 3.5, 7, 7))
+            painter.drawEllipse(QRectF(dot_pt.x() - 3.0, dot_pt.y() - 3.0, 6, 6))
 
             # 按压扇区：内容向中心轻微缩小（按下去的触感）
             content_scale = 1.0 - 0.07 * self._press_progress
@@ -432,18 +432,26 @@ class RadialMenu(QWidget):
             painter.scale(content_scale, content_scale)
             painter.translate(-pt)
 
-            # 主字符
+            # 主字符（内圈）+ 标签（外圈）：随扇区数量自适应，杜绝相邻重叠
+            if n >= 8:
+                char_font = QFont("Segoe UI", 12, QFont.Bold)
+                label_font = QFont("Microsoft YaHei", 7)
+                char_rect = QRectF(pt.x() - 18, pt.y() - 28, 36, 22)
+                label_rect = QRectF(pt.x() - 50, pt.y() + 0, 100, 16)
+            else:
+                char_font = QFont("Segoe UI", 15, QFont.Bold)
+                label_font = QFont("Microsoft YaHei", 8)
+                char_rect = QRectF(pt.x() - 30, pt.y() - 36, 60, 26)
+                label_rect = QRectF(pt.x() - 52, pt.y() - 10, 104, 18)
             painter.setPen(QColor(255, 255, 255) if hovered else text_c)
-            char_font = QFont("Segoe UI", 15, QFont.Bold)
             painter.setFont(char_font)
-            painter.drawText(QRectF(pt.x() - 40, pt.y() - 36, 80, 26), Qt.AlignCenter, item.char)
+            painter.drawText(char_rect, Qt.AlignCenter, item.char)
 
             # 标签
-            label_font = QFont("Microsoft YaHei", 8)
             painter.setFont(label_font)
             painter.setPen(QColor(255, 255, 255, 235) if hovered else
                            QColor(text_c.red(), text_c.green(), text_c.blue(), 150))
-            painter.drawText(QRectF(pt.x() - 55, pt.y() - 10, 110, 18), Qt.AlignCenter, item.label)
+            painter.drawText(label_rect, Qt.AlignCenter, item.label)
 
             painter.restore()
 

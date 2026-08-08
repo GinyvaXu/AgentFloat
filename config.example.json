@@ -13,6 +13,8 @@
   "cleanup_on_quit": false,
   "theme": "light",
   "check_updates": false,
+  "commands": [],
+  "clipboard_history": [],
   "agents": [
     {
       "id": "claude",

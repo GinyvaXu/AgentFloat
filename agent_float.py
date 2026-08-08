@@ -70,6 +70,8 @@ from local_ai_service import (LocalAiWorker, AutoTranslateWorker,
 from news_fetcher import DEFAULT_NEWS as _NEWS_DEFAULTS
 from news_worker import NewsWorker, today_news_exists
 from news_panel import NewsPanel
+from clipboard_panel import ClipboardHistory, ClipboardPanel
+from command_panel import CommandPanel
 
 # ── 路径（兼容 PyInstaller 打包）──────────────────────
 import sys as _sys
@@ -237,7 +239,20 @@ IOS_HINT       = _LIGHT["HINT"]
 IOS_SURFACE    = _LIGHT["SURFACE"]
 
 FONT_FAMILY = "Microsoft YaHei"
-VERSION = "1.2.1"
+
+# 版本号：优先读取 VERSION 文件（与构建脚本保持一致），读取失败时回退到内置值
+def _read_version():
+    try:
+        _vp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")
+        with open(_vp, "r", encoding="utf-8-sig") as _f:
+            _v = _f.read().strip()
+        if _v:
+            return _v
+    except Exception:
+        pass
+    return "1.2.2"
+
+VERSION = _read_version()
 
 # ── 浮窗参数 ──────────────────────────────────────────
 DEFAULT_SIZE  = 52          # 默认边长 px
@@ -1227,9 +1242,9 @@ class SettingsDialog(QDialog):
         self.cb_news_notify = QCheckBox("生成完成时托盘通知")
         self.cb_news_notify.setChecked(bool(n_cfg.get("notify", True)))
         vn.addWidget(self.cb_news_notify)
-        self.cb_news_badge = QCheckBox("浮窗显示未读红点角标")
-        self.cb_news_badge.setChecked(bool(n_cfg.get("badge", True)))
-        vn.addWidget(self.cb_news_badge)
+        self.cb_news_auto_show = QCheckBox("自动生成完成后弹出快报窗口")
+        self.cb_news_auto_show.setChecked(bool(n_cfg.get("auto_show_panel", True)))
+        vn.addWidget(self.cb_news_auto_show)
 
         ncl.addWidget(box_news)
         ncl.addStretch()
@@ -1298,7 +1313,7 @@ class SettingsDialog(QDialog):
             'groups': [box, box_theme, box2, box3, box_snap, box4, box_cleanup, box_radial, box_skills, box_news, box_about],
             'radios': [self.rb_normal, self.rb_skip, self.rb_light, self.rb_dark],
             'checkboxes': [self.cb_snap_enabled, self.cb_snap_hidden, self.cb_cleanup, self.cb_auto_translate,
-                        self.cb_news_enabled, self.cb_news_ai, self.cb_news_notify, self.cb_news_badge],
+                        self.cb_news_enabled, self.cb_news_ai, self.cb_news_notify, self.cb_news_auto_show],
             'buttons': [preview_btn, cancel_btn, browse_btn, reset_btn, self.btn_manage_agent,
                         self.btn_skills_set, self.btn_skills_open, self.btn_ai_service],
             'save_btn': save_btn,
@@ -1448,7 +1463,9 @@ class SettingsDialog(QDialog):
             ("skills", "Skills 辅助窗"),
             ("api", "API 余额 / 用量"),
             ("settings", "设置"),
-            ("news", "AI 快报（预留）"),
+            ("news", "AI 快报"),
+            ("clip", "剪贴板历史"),
+            ("cmd", "命令面板"),
             ("quit", "退出"),
             ("", "（空）"),
         ]
@@ -1624,7 +1641,7 @@ class SettingsDialog(QDialog):
                 "agent_id": self.cmb_news_agent.currentData() or "",
                 "sources": [sid for sid, cb in self._news_source_cbs.items() if cb.isChecked()],
                 "notify": self.cb_news_notify.isChecked(),
-                "badge": self.cb_news_badge.isChecked(),
+                "auto_show_panel": self.cb_news_auto_show.isChecked(),
                 "unread_count": self._news_cfg.get("unread_count", 0),
                 "last_generated": self._news_cfg.get("last_generated", ""),
                 "interests": self._collect_interests(),
@@ -1843,8 +1860,10 @@ class FloatingWidget(QWidget):
         # 吸附状态
         self._snapped = False
         self._snap_edge = ""
+        self._hidden_now = False   # 当前是否处于“滑出屏幕外”的隐藏位
         self._visible_offset = 0  # 完全显示时的屏幕坐标
         self._hidden_offset = 0   # 隐藏时的偏移
+        self._slide_anim = None   # 滑动动画引用（防 GC + 可中断）
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.timeout.connect(self._auto_hide)
@@ -1867,11 +1886,24 @@ class FloatingWidget(QWidget):
         self._ai_worker = None
         self._auto_worker = None
 
+        # 剪贴板历史 + 自定义命令
+        self._clipboard = ClipboardHistory(self.config)
+        try:
+            self._last_clip_text = QApplication.clipboard().text()
+        except Exception:
+            self._last_clip_text = ""
+        self._clip_timer = QTimer(self)
+        self._clip_timer.setInterval(1000)
+        self._clip_timer.timeout.connect(self._clipboard_tick)
+        self._clip_timer.start()
+        self._commands = [dict(c) for c in (self.config.get("commands") or [])]
+
         # ── AI 快报 ──
         self._news_cfg = copy.deepcopy(self.config.get("news") or _NEWS_DEFAULTS)
         self._news_worker = None
         self._news_panel = None
         self._news_generating = False
+        self._news_pop_after = False
         self._news_unread = int(self._news_cfg.get("unread_count") or 0)
         self._news_check_timer = QTimer(self)
         self._news_check_timer.setInterval(60000)
@@ -2485,15 +2517,15 @@ class FloatingWidget(QWidget):
         detector.setStyleSheet("background: transparent;")
         detector.setMouseTracking(True)
 
-        # 检测条：沿屏幕边缘 3px 宽的细条
+        # 检测条：沿屏幕边缘 6px 宽的细条（加宽提升命中率，解决“很难点击打开”）
         if edge == "right":
-            detector.setGeometry(g.right() - 3, self.pos().y() - 5, 3, sz + 10)
+            detector.setGeometry(g.right() - 6, self.pos().y() - 6, 6, sz + 12)
         elif edge == "left":
-            detector.setGeometry(g.left(), self.pos().y() - 5, 3, sz + 10)
+            detector.setGeometry(g.left(), self.pos().y() - 6, 6, sz + 12)
         elif edge == "top":
-            detector.setGeometry(self.pos().x() - 5, g.top(), sz + 10, 3)
+            detector.setGeometry(self.pos().x() - 6, g.top(), sz + 12, 6)
         else:  # bottom
-            detector.setGeometry(self.pos().x() - 5, g.bottom() - 3, sz + 10, 3)
+            detector.setGeometry(self.pos().x() - 6, g.bottom() - 6, sz + 12, 6)
 
         detector.show()
         self._edge_detector = detector
@@ -2532,6 +2564,7 @@ class FloatingWidget(QWidget):
             target = g.bottom() - visible_tab
 
         self._hidden_offset = target
+        self._hidden_now = True
         self._animate_slide(target, edge)
         if self._api_badge:
             self._api_badge.hide()
@@ -2553,11 +2586,38 @@ class FloatingWidget(QWidget):
         else:
             target = g.bottom() - s - 2
 
+        self._hidden_now = False
         self._animate_slide(target, edge)
         if self._api_badge:
             self._api_badge.show()
         # 设置延迟重新隐藏
         self._hide_timer.start(self.config.get("hide_delay_ms", 800))
+
+    def _reveal_now(self):
+        """吸附隐藏状态下：立即弹出到完全可见位置（供按压 / 打开菜单前调用）。
+
+        不使用动画，确保后续操作（点击启动、环绕菜单圆心）落在屏幕内。
+        """
+        if not (self._snapped and self._hidden_now):
+            return
+        g = self._screen_geometry()
+        s = self.current_size
+        edge = self._snap_edge
+        if edge == "right":
+            self.move(g.right() - s - 2, self.pos().y())
+        elif edge == "left":
+            self.move(g.left() + 2, self.pos().y())
+        elif edge == "top":
+            self.move(self.pos().x(), g.top() + 2)
+        else:  # bottom
+            self.move(self.pos().x(), g.bottom() - s - 2)
+        if self._slide_anim is not None:
+            self._slide_anim.stop()
+        self._hide_timer.stop()
+        self._hidden_now = False
+        if self._api_badge:
+            self._api_badge.show()
+        _log().debug("吸附隐藏状态下立即弹出: edge=%s", edge)
 
     def _auto_hide(self):
         """计时器触发：自动隐藏"""
@@ -2567,7 +2627,7 @@ class FloatingWidget(QWidget):
     def _animate_slide(self, target, edge):
         """滑动动画"""
         anim = QPropertyAnimation(self, b"slide_pos")
-        anim.setDuration(180)
+        anim.setDuration(120)
         anim.setEasingCurve(QEasingCurve.InOutCubic)
         anim.setStartValue(self.pos().x() if edge in ("left", "right") else self.pos().y())
         anim.setEndValue(target)
@@ -2634,6 +2694,9 @@ class FloatingWidget(QWidget):
         # 防御：拖拽中或冷却期内绝不弹菜单
         if self._drag_active or time.monotonic() < self._drag_cooldown_until:
             return
+        # 吸附隐藏状态：先弹出到完全可见位置，避免菜单圆心在屏幕外
+        if self._snapped and self._hidden_now:
+            self._reveal_now()
         if source == "long_press":
             self._long_press_fired = True
         items = self._build_radial_items()
@@ -2721,6 +2784,8 @@ class FloatingWidget(QWidget):
             "api": ("API 余额", "用量监控", "#16A085", "¥"),
             "settings": ("设置", "偏好", "#5B8DEF", "⚙"),
             "news": ("AI 快报", "每日资讯", "#2E86C1", "N"),
+            "clip": ("剪贴板", "历史记录", "#E67E22", "C"),
+            "cmd": ("命令", "命令面板", "#27AE60", "⌘"),
             "quit": ("退出", "AgentFloat", "#E74C3C", "✕"),
         }
         if action in labels:
@@ -2741,12 +2806,52 @@ class FloatingWidget(QWidget):
             self.settings_requested.emit()
         elif action_id == "news":
             self._open_news_panel()
+        elif action_id == "clip":
+            self._open_clipboard_panel()
+        elif action_id == "cmd":
+            self._open_command_panel()
         elif action_id == "quit":
             self._animate_quit()
 
     def _open_skills_panel(self):
         dlg = SkillsPanel(self._skills_cfg, theme=self.theme, parent=self)
         dlg.exec_()
+
+    # ── 剪贴板历史 ──────────────────────────────────
+    def _clipboard_tick(self):
+        """轮询剪贴板（QClipboard.dataChanged 在部分环境下不可靠），写入历史"""
+        try:
+            txt = QApplication.clipboard().text()
+        except Exception:
+            return
+        if txt and txt != self._last_clip_text:
+            self._last_clip_text = txt
+            self._clipboard.push(txt)
+            save_config(self.config)
+
+    def _open_clipboard_panel(self):
+        """打开剪贴板历史面板（点击条目复制回剪贴板）"""
+        dlg = ClipboardPanel(self._clipboard, theme=self.theme, parent=self)
+
+        def _on_copy(text):
+            self._last_clip_text = text
+            self._clipboard.push(text)
+            save_config(self.config)
+
+        dlg.copied.connect(_on_copy)
+        dlg.exec_()
+
+    # ── 自定义命令面板 ──────────────────────────────
+    def _open_command_panel(self):
+        """打开自定义命令面板（新建/编辑/删除/运行）"""
+        dlg = CommandPanel(self._commands, theme=self.theme, parent=self)
+        dlg.commands_changed.connect(self._on_commands_changed)
+        dlg.exec_()
+
+    def _on_commands_changed(self, cmds):
+        self._commands = [dict(c) for c in cmds]
+        self.config["commands"] = self._commands
+        save_config(self.config)
 
     # ── AI 快报 ────────────────────────────────────
     def _open_news_panel(self):
@@ -2770,8 +2875,11 @@ class FloatingWidget(QWidget):
             save_config(self.config)
             self.update()
 
-    def _generate_news(self, auto=False):
-        """手动/定时/启动补生成 AI 快报（后台线程，防重入）"""
+    def _generate_news(self, auto=False, pop_panel=False):
+        """手动/定时/启动补生成 AI 快报（后台线程，防重入）
+
+        pop_panel: 生成完成后自动弹出快报面板（仅启动补生成时使用）"""
+        self._news_pop_after = pop_panel
         if self._news_generating or (self._news_worker is not None and self._news_worker.isRunning()):
             _log().info("AI 快报生成中，忽略重复触发")
             return
@@ -2821,6 +2929,11 @@ class FloatingWidget(QWidget):
         if cfg.get("notify", True):
             mode = "AI 摘要" if used_ai else "标题列表"
             self.news_done.emit("今日 AI 快报已生成（%s，%d 条，%s）" % (date, count, mode))
+        # 自动弹出快报窗口（默认开启，可在设置关闭）
+        pop = bool(getattr(self, "_news_pop_after", False))
+        self._news_pop_after = False
+        if pop and cfg.get("auto_show_panel", True):
+            QTimer.singleShot(500, self._open_news_panel)
 
     def _on_news_failed(self, err):
         self._news_worker = None
@@ -2846,7 +2959,7 @@ class FloatingWidget(QWidget):
         mode = (self._news_cfg or {}).get("schedule_mode", "daily_startup")
         if mode in ("startup", "daily_startup") and not today_news_exists():
             _log().info("启动补生成：今日快报尚未生成，自动触发")
-            self._generate_news(auto=True)
+            self._generate_news(auto=True, pop_panel=True)
 
     def _news_timer_tick(self):
         """每日定时检查（每分钟心跳，命中定时点且当日未生成则触发）"""
@@ -3068,25 +3181,6 @@ class FloatingWidget(QWidget):
             painter.setPen(Qt.NoPen)
             painter.drawEllipse(QPointF(dot_cx, dot_cy), dot_r, dot_r)
 
-        # ── AI 快报未读角标：左上角精致红点（无数字，渐变 + 白描边 + 投影）──
-        if self._news_unread > 0 and (self._news_cfg or {}).get("badge", True):
-            dot_r = max(4.5, s * 0.075)
-            dot_margin = s * 0.15
-            dot_cx, dot_cy = dot_margin, dot_margin
-            # 柔和投影
-            painter.setBrush(QColor(0, 0, 0, 60))
-            painter.setPen(Qt.NoPen)
-            painter.drawEllipse(QPointF(dot_cx + 1.0, dot_cy + 1.5), dot_r, dot_r)
-            # 渐变红点
-            grad = QRadialGradient(QPointF(dot_cx - dot_r * 0.3, dot_cy - dot_r * 0.3),
-                                   dot_r * 2.0)
-            grad.setColorAt(0.0, QColor(255, 121, 121, 255))
-            grad.setColorAt(0.55, QColor(255, 59, 48, 255))
-            grad.setColorAt(1.0, QColor(199, 37, 26, 255))
-            painter.setBrush(QBrush(grad))
-            painter.setPen(QPen(QColor(255, 255, 255, 235), 1.4))
-            painter.drawEllipse(QPointF(dot_cx, dot_cy), dot_r, dot_r)
-
         painter.end()
 
     # ── 鼠标事件（拖拽修复）─────────────────────────
@@ -3094,6 +3188,9 @@ class FloatingWidget(QWidget):
         if self._quitting:
             return
         if event.button() == Qt.LeftButton:
+            # 吸附隐藏状态：按压即先弹出，保证点击/拖拽落在可见区域
+            if self._snapped and self._hidden_now:
+                self._reveal_now()
             self._drag_origin = event.globalPos()
             self._window_origin = self.pos()
             self._drag_active = False

@@ -22,7 +22,10 @@ archive_old_builds(CURRENT_VERSION)
 script = os.path.join(SCRIPT_DIR, "agent_float.py")
 icon   = os.path.join(SCRIPT_DIR, "assets", "agent_float_icon.ico")
 res    = os.path.join(SCRIPT_DIR, "assets")
-add_data = f"{res}{os.pathsep}assets"
+add_data = [
+    f"{res}{os.pathsep}assets",
+    f"{os.path.join(SCRIPT_DIR, 'VERSION')}{os.pathsep}.",
+]
 
 EXCLUDES = [
     "QtWebEngine", "QtWebEngineCore", "QtWebEngineWidgets", "QtWebChannel",
@@ -41,6 +44,7 @@ HIDDEN_IMPORTS = [
     "af_theme", "agent_registry", "radial_menu",
     "skills_scanner", "skills_panel", "agent_manager",
     "local_ai_service", "news_fetcher", "news_worker", "news_panel",
+    "clipboard_panel", "command_panel",
 ]
 
 args = [
@@ -49,7 +53,7 @@ args = [
     "--console",
     "--name", "AgentFloat_debug",
     f"--icon={icon}",
-    "--add-data", add_data,
+    *[f"--add-data={a}" for a in add_data],
     "--distpath", os.path.join(SCRIPT_DIR, "dist"),
     "--workpath", os.path.join(SCRIPT_DIR, "build"),
     "--specpath", os.path.join(SCRIPT_DIR, "build"),

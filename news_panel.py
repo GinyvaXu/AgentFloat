@@ -158,7 +158,7 @@ class NewsPanel(QDialog):
         self.setWindowTitle("AgentFloat — AI 快报")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setMinimumSize(860, 560)
+        self.setMinimumSize(720, 500)
         self.setStyleSheet(self._stylesheet())
         self._setup_ui()
         self.refresh()
@@ -203,6 +203,10 @@ class NewsPanel(QDialog):
         bar.setSpacing(8)
         self.lbl_latest = QLabel("")
         self.lbl_latest.setStyleSheet("color: #%02X%02X%02X;" % get_colors(self._theme)["HINT"])
+        self.btn_history = QPushButton("历史 ▸")
+        self.btn_history.setCheckable(True)
+        self.btn_history.setChecked(False)
+        self.btn_history.clicked.connect(self._toggle_history)
         self.btn_refresh = QPushButton("刷新")
         self.btn_refresh.clicked.connect(self.refresh)
         self.btn_generate = QPushButton("⚡ 生成今日快报")
@@ -210,6 +214,7 @@ class NewsPanel(QDialog):
         self.btn_generate.clicked.connect(self.generate_requested.emit)
         bar.addWidget(self.lbl_latest)
         bar.addStretch()
+        bar.addWidget(self.btn_history)
         bar.addWidget(self.btn_refresh)
         bar.addWidget(self.btn_generate)
         root.addLayout(bar)
@@ -226,6 +231,8 @@ class NewsPanel(QDialog):
         self.date_list.setMaximumWidth(240)
         self.date_list.currentItemChanged.connect(self._on_select)
         split.addWidget(self.date_list)
+        self._history_visible = False
+        self.date_list.setVisible(False)
 
         self.viewer = QTextBrowser()
         self.viewer.setOpenExternalLinks(True)
@@ -236,14 +243,15 @@ class NewsPanel(QDialog):
         split.setSizes([220, 620])
         root.addWidget(split, 1)
 
-        bottom = QHBoxLayout()
-        hint = QLabel("点击日期查看历史快报；标题可直接点击打开；生成失败会自动回退为标题列表。")
-        hint.setStyleSheet("color: #%02X%02X%02X;" % get_colors(self._theme)["HINT"])
-        bottom.addWidget(hint)
-        bottom.addStretch()
-        root.addLayout(bottom)
-
         self.news_read.emit()
+
+    def _toggle_history(self, checked):
+        """历史记录列表默认隐藏，点击按钮展开/收起"""
+        self._history_visible = bool(checked)
+        self.date_list.setVisible(self._history_visible)
+        self.btn_history.setText("历史 ▾" if self._history_visible else "历史 ▸")
+        if self._history_visible and self._archives and self.date_list.currentRow() < 0:
+            self.date_list.setCurrentRow(0)
 
     # ── 数据 ────────────────────────────────────
     def refresh(self):
@@ -259,11 +267,10 @@ class NewsPanel(QDialog):
             self.date_list.addItem(it)
         self.date_list.blockSignals(False)
         if latest:
-            self.lbl_latest.setText("最近生成 %s · %d 条%s" % (
-                latest.get("date", "?"), latest.get("count", 0),
-                " · AI 摘要" if latest.get("used_ai") else " · 标题列表"))
+            mode = "AI 摘要" if latest.get("used_ai") else "标题列表"
+            self.lbl_latest.setText("今日 %d 条 · %s" % (latest.get("count", 0), mode))
         else:
-            self.lbl_latest.setText("暂无快报，点击「⚡ 生成今日快报」开始")
+            self.lbl_latest.setText("今日暂无快报")
         if self._archives:
             self.date_list.setCurrentRow(0)
         else:
@@ -276,9 +283,7 @@ class NewsPanel(QDialog):
             '<div style="text-align:center; margin-top:120px;">'
             '<p style="font-size:34px; margin:0;">📰</p>'
             '<p style="color:%s; font-size:14px; margin-top:14px;">尚无快报</p>'
-            '<p style="color:%s; font-size:12px;">点击右上角「⚡ 生成今日快报」，'
-            'AgentFloat 将抓取 Hacker News / GitHub Trending / 少数派 / 量子位，'
-            '并用你的本地 Agent 生成今日 AI 速览。</p></div>' % (hi, hi))
+            '<p style="color:%s; font-size:12px;">点击右上角「⚡ 生成今日快报」开始</p></div>' % (hi, hi))
 
     def on_generated(self, payload):
         self.refresh()

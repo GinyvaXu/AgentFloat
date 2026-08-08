@@ -34,7 +34,7 @@ DEFAULT_NEWS = {
     "agent_id": "",              # 空 = 默认主 Agent
     "sources": ["hackernews", "github_trending", "sspai", "qbitai"],
     "notify": True,
-    "badge": True,
+    "auto_show_panel": True,
     "unread_count": 0,
     "last_generated": "",
     "interests": [],   # [{"label": "新模型发布", "weight": 3, "color": "#5B8DEF"}]
