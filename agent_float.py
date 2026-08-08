@@ -229,7 +229,7 @@ IOS_HINT       = _LIGHT["HINT"]
 IOS_SURFACE    = _LIGHT["SURFACE"]
 
 FONT_FAMILY = "Microsoft YaHei"
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 # ── 浮窗参数 ──────────────────────────────────────────
 DEFAULT_SIZE  = 52          # 默认边长 px
@@ -2365,41 +2365,37 @@ class FloatingWidget(QWidget):
 
 
 
-# ── 全局报错导出（每次报错 → 时间戳命名错误日志）──────────────────
+# ── 全局错误收集（会话内收集，关闭程序时统一导出）────────────────
 def _install_error_handlers():
-    """安装全局异常/崩溃导出：
-    - 未捕获 Python 异常（含 Qt 槽函数内）→ v{版本}_{时间戳}_{异常类型}_error.txt
-    - Qt 关键/致命消息 → 同样导出 error 报告；普通警告写入主日志
+    """安装全局错误收集：
+    - 未捕获 Python 异常（含 Qt 槽函数内）与 Qt 关键消息 → 先收集在内存
+    - 程序退出时由 main() 调用返回的 flush() 一次性导出
+      logs/reports/v{VERSION}_{时间戳}_errors.txt（汇总会话内全部错误）
     """
     report_dir = os.path.join(_get_config_dir(), "logs", "reports")
     os.makedirs(report_dir, exist_ok=True)
+    errors = []
+    _seen_exc = set()
 
-    def _write_error_report(kind, exc_type, exc, body):
+    def _record(kind, exc_type, exc, tb_text):
         from datetime import datetime as _dt
-        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
-        name = "v%s_%s_%s_%s.txt" % (VERSION, ts, exc_type or "unknown", kind)
-        path = os.path.join(report_dir, name)
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write("AgentFloat v%s %s报告\n" % (VERSION, kind))
-                f.write("时间: %s\n" % _dt.now().isoformat())
-                f.write("类型: %s\n" % (exc_type or "-"))
-                f.write("信息: %s\n" % (exc or "-"))
-                f.write("PID: %s | Frozen: %s\n" % (os.getpid(), _IS_FROZEN))
-                f.write("Python: %s\n" % sys.version)
-                f.write("-" * 40 + "\n\n")
-                f.write(body or "")
-            return path
-        except Exception:
-            return None
+        errors.append({
+            "time": _dt.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "kind": kind,
+            "type": exc_type or "-",
+            "message": (str(exc) if exc is not None else "-"),
+            "traceback": tb_text or "",
+        })
 
     def _on_unhandled_exception(exc_type, exc, tb):
+        if exc in _seen_exc:
+            return
+        _seen_exc.add(exc)
         import traceback
         tb_text = "".join(traceback.format_exception(exc_type, exc, tb))
-        _log().critical("未捕获异常 [%s]: %s\n%s", getattr(exc_type, "__name__", str(exc_type)), exc, tb_text)
-        path = _write_error_report("error", getattr(exc_type, "__name__", str(exc_type)), str(exc), tb_text)
-        if path:
-            _log().info("错误报告已导出: %s", path)
+        _log().critical("未捕获异常 [%s]: %s\n%s",
+                        getattr(exc_type, "__name__", str(exc_type)), exc, tb_text)
+        _record("error", getattr(exc_type, "__name__", str(exc_type)), exc, tb_text)
 
     sys.excepthook = _on_unhandled_exception
 
@@ -2414,15 +2410,43 @@ def _install_error_handlers():
         elif msg_type == QtMsgType.QtWarningMsg:
             _log().warning("Qt: %s", msg)
         elif msg_type in (QtMsgType.QtCriticalMsg, QtMsgType.QtFatalMsg):
-            _log().error("Qt[%s]: %s", msg_type.name if hasattr(msg_type, "name") else msg_type, msg)
-            path = _write_error_report("qterror", "QtCritical", msg, msg)
-            if path:
-                _log().info("Qt 错误报告已导出: %s", path)
+            _log().error("Qt: %s", msg)
+            _record("qterror", "QtCritical", None, msg)
 
     try:
         qInstallMessageHandler(_qt_message_handler)
     except Exception as e:
         _log().debug("Qt 消息处理器安装失败: %s", e)
+
+    def flush_error_report():
+        """关闭程序时调用：将本会话收集到的所有错误一次性导出"""
+        if not errors:
+            return None
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(report_dir, "v%s_%s_errors.txt" % (VERSION, ts))
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("AgentFloat v%s 错误汇总报告（共 %d 条）\n" % (VERSION, len(errors)))
+                f.write("导出时间: %s\n" % _dt.now().isoformat())
+                f.write("PID: %s | Frozen: %s\n" % (os.getpid(), _IS_FROZEN))
+                f.write("Python: %s\n" % sys.version)
+                f.write("-" * 40 + "\n\n")
+                for i, e in enumerate(errors, 1):
+                    f.write("[%d] %s @ %s\n" % (i, e["kind"], e["time"]))
+                    f.write("    类型: %s\n" % e["type"])
+                    f.write("    信息: %s\n" % e["message"])
+                    tb = e["traceback"].strip()
+                    if tb:
+                        f.write("    堆栈:\n")
+                        for line in tb.splitlines():
+                            f.write("      %s\n" % line)
+                    f.write("-" * 40 + "\n")
+            return path
+        except Exception:
+            return None
+
+    return flush_error_report
 
 
 # ── 主入口 ──────────────────────────────────────────
@@ -2436,7 +2460,7 @@ def main():
     _start_ts = _dt.now().strftime("%Y%m%d_%H%M%S")
     _report_dir = os.path.join(_get_config_dir(), "logs", "reports")
     os.makedirs(_report_dir, exist_ok=True)
-    _install_error_handlers()
+    _flush_error_report = _install_error_handlers()
     _session_path = os.path.join(_report_dir, f"v{VERSION}_{_start_ts}_session.txt")
 
     # 写入会话报告开头
@@ -2460,6 +2484,9 @@ def main():
                 _sf.write("状态: 正常退出\n")
         except Exception:
             pass
+        _flush = _flush_error_report()
+        if _flush:
+            _log().info("错误汇总报告已导出: %s", _flush)
     except Exception:
         import traceback
         tb = traceback.format_exc()
@@ -2488,6 +2515,13 @@ def main():
                 _sf.write(f"详情: {_crash_path}\n")
         except Exception:
             pass
+        try:
+            sys.excepthook(*sys.exc_info())
+        except Exception:
+            pass
+        _flush = _flush_error_report()
+        if _flush:
+            _log().info("错误汇总报告已导出: %s", _flush)
         raise
 
 
