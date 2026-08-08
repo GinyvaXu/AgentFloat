@@ -43,7 +43,21 @@ def _pick_agent(agents, agent_id):
     return (agents or [None])[0]
 
 
-def build_ai_prompt(items, language="zh", max_items=6):
+def _interests_block(interests):
+    """关注主题 → 提示词段落（按权重降序）"""
+    rows = [r for r in (interests or []) if (r.get("label") or "").strip()]
+    if not rows:
+        return ""
+    rows = sorted(rows, key=lambda r: int(r.get("weight") or 0), reverse=True)
+    lines = "\n".join("- [权重%d] %s" % (int(r.get("weight") or 1), r["label"].strip())
+                       for r in rows)
+    return (
+        "用户关注主题（权重从高到低，越靠前越要优先覆盖）：\n%s\n\n"
+        "要求：优先收录与上述主题相关的条目；若某主题当日无相关内容可跳过，不要硬凑。\n\n" % lines
+    )
+
+
+def build_ai_prompt(items, language="zh", max_items=6, interests=None):
     """构造快报摘要提示词（结构化 JSON 输出）"""
     lang_rule = {
         "zh": "使用简体中文撰写摘要",
@@ -59,6 +73,7 @@ def build_ai_prompt(items, language="zh", max_items=6):
     return (
         "你是 AgentFloat 的 AI 快报编辑。\n"
         "任务：把下面抓取到的 AI 行业资讯精选并改写为今日速览。\n\n"
+        "%s"
         "抓取条目（标题 + 来源 + 链接）：\n%s\n\n"
         "要求：\n"
         "1. 精选最值得关注的 %d 条，去重、去广告与无关内容；\n"
@@ -75,7 +90,7 @@ def build_ai_prompt(items, language="zh", max_items=6):
         "  ]\n"
         "}\n"
         "URL 必须原样保留上面给出的链接，禁止捏造。"
-    ) % (items_text, max_items, lang_rule)
+    ) % (_interests_block(interests), items_text, max_items, lang_rule)
 
 
 def parse_ai_result(text):
@@ -143,6 +158,7 @@ class NewsWorker(QThread):
         enabled = cfg.get("sources") or DEFAULT_NEWS["sources"]
         max_items = max(1, min(20, int(cfg.get("max_items") or 6)))
         language = cfg.get("language") or "zh"
+        interests = cfg.get("interests") or []
         date = _cur_date()
 
         logger.info("AI 快报开始生成: date=%s sources=%s max=%d", date, enabled, max_items)
@@ -160,7 +176,7 @@ class NewsWorker(QThread):
             agent = _pick_agent(self._agents, cfg.get("agent_id"))
             if agent and build_headless_command(agent, "ping")[0] is not None:
                 try:
-                    prompt = build_ai_prompt(items, language, max_items)
+                    prompt = build_ai_prompt(items, language, max_items, interests)
                     out, err = run_headless(agent, prompt, cancel=self._cancel)
                     if out is None:
                         raise RuntimeError(err or "Agent 调用失败")
@@ -195,14 +211,15 @@ class NewsWorker(QThread):
             raw_md = _render_ai_markdown({"items": final_items, "headline": headline},
                                          date, language)
         else:
+            ranked = _boost_by_interests(items, interests)
             final_items = [{
                 "title": it.get("title", "?"),
                 "url": it.get("url", "#"),
                 "category": guess_category(it.get("title", ""), it.get("url", "")),
                 "summary": "",
                 "source": it.get("source", ""),
-            } for it in items[:max_items]]
-            raw_md = build_raw_markdown(items[:max_items], date, language)
+            } for it in ranked[:max_items]]
+            raw_md = build_raw_markdown(ranked[:max_items], date, language)
 
         if self._cancel.is_set():
             self.failed.emit("用户退出，生成已取消")
@@ -210,6 +227,23 @@ class NewsWorker(QThread):
         payload = save_report(date, final_items, raw_md, language, used_ai, errors)
         logger.info("AI 快报完成: date=%s count=%d used_ai=%s", date, len(final_items), used_ai)
         self.done.emit(payload)
+
+
+def _boost_by_interests(items, interests):
+    """纯列表模式：命中关注主题关键词的条目按权重提前，其余保持时间序"""
+    rows = [r for r in (interests or []) if (r.get("label") or "").strip()]
+    if not rows:
+        return items
+    def score(it):
+        text = ("%s %s" % (it.get("title", ""), it.get("url", ""))).lower()
+        s = 0
+        for r in rows:
+            for kw in r["label"].replace("，", ",").split(","):
+                kw = kw.strip()
+                if kw and kw.lower() in text:
+                    s += int(r.get("weight") or 1)
+        return s
+    return sorted(items, key=lambda it: (-score(it), -(it.get("ts") or 0)))
 
 
 def _guess_source(url, fetched):

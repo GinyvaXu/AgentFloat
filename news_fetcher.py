@@ -37,6 +37,7 @@ DEFAULT_NEWS = {
     "badge": True,
     "unread_count": 0,
     "last_generated": "",
+    "interests": [],   # [{"label": "新模型发布", "weight": 3, "color": "#5B8DEF"}]
 }
 
 

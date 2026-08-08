@@ -33,7 +33,8 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QSystemTrayIcon, QMenu,
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QPushButton,
     QSpinBox, QGroupBox, QRadioButton, QCheckBox, QLineEdit, QFileDialog, QMessageBox,
-    QScrollArea, QComboBox, QListWidget, QListWidgetItem, QTabWidget, QTimeEdit
+    QScrollArea, QComboBox, QListWidget, QListWidgetItem, QTabWidget, QTimeEdit,
+    QFrame, QColorDialog
 )
 from PyQt5.QtCore import (
     Qt, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QCoreApplication,
@@ -236,7 +237,7 @@ IOS_HINT       = _LIGHT["HINT"]
 IOS_SURFACE    = _LIGHT["SURFACE"]
 
 FONT_FAMILY = "Microsoft YaHei"
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 # ── 浮窗参数 ──────────────────────────────────────────
 DEFAULT_SIZE  = 52          # 默认边长 px
@@ -471,6 +472,7 @@ class SettingsDialog(QDialog):
         self.theme = self.config.get("theme", "light")
         self._c = get_colors(self.theme)
         self._original_theme = self.theme  # 用于取消时还原
+        self._persisted_theme = self.theme  # 最近一次「应用/保存」的主题（取消时回退到它）
         self._theme_widgets = {}  # 存储控件引用用于即时换肤
         self._api_config = self.config.get("api_monitor", API_MONITOR_DEFAULTS).copy()
         self._agents = normalize_agents(self.config.get("agents"))
@@ -1180,6 +1182,47 @@ class SettingsDialog(QDialog):
             self._news_source_cbs[sid] = cb
             vn.addWidget(cb)
 
+        # ── 关注主题（定向偏好：权重越高越优先，不同颜色标注）──
+        vn.addSpacing(6)
+        vn.addWidget(self._label("关注主题（可选）：定向获取某类内容，权重越高越优先", size=10,
+                                 color=s["text_secondary"]))
+        self._interests_frame = QFrame()
+        self._interests_frame.setStyleSheet(
+            "QFrame { background: %s; border: 1px solid %s; border-radius: 8px; }"
+            % (s["card_bg"], s["bd"]))
+        self._interests_lay = QVBoxLayout(self._interests_frame)
+        self._interests_lay.setContentsMargins(8, 8, 8, 8)
+        self._interests_lay.setSpacing(4)
+        self._interest_rows = []
+        for entry in (n_cfg.get("interests") or [])[:12]:
+            self._add_interest_row(entry.get("label") or "", int(entry.get("weight") or 3),
+                                   entry.get("color") or "#5B8DEF")
+        vn.addWidget(self._interests_frame)
+
+        in_btn_row = QHBoxLayout()
+        self.btn_add_interest = QPushButton("＋ 添加主题")
+        self.btn_add_interest.setStyleSheet(s["btn"])
+        self.btn_add_interest.clicked.connect(lambda: self._add_interest_row("", 3, "#5B8DEF"))
+        self.btn_preset_interest = QPushButton("预设主题 ▾")
+        self.btn_preset_interest.setStyleSheet(s["btn"])
+        self._preset_menu = QMenu(self.btn_preset_interest)
+        for lb, color in (("价格调整 / 资费变化", "#E74C3C"),
+                          ("新模型发布", "#5B8DEF"),
+                          ("优秀 skills / 工具推荐", "#8E44AD"),
+                          ("开源项目动态", "#16A085"),
+                          ("论文突破", "#2E86C1"),
+                          ("行业融资 / 收购", "#E67E22"),
+                          ("产品更新 / 上线", "#27AE60"),
+                          ("安全事件", "#C0392B")):
+            act = self._preset_menu.addAction(lb)
+            act.triggered.connect(lambda _c, lb=lb, color=color:
+                                  self._add_interest_row(lb, 3, color))
+        self.btn_preset_interest.setMenu(self._preset_menu)
+        in_btn_row.addWidget(self.btn_add_interest)
+        in_btn_row.addWidget(self.btn_preset_interest)
+        in_btn_row.addStretch()
+        vn.addLayout(in_btn_row)
+
         vn.addSpacing(4)
         self.cb_news_notify = QCheckBox("生成完成时托盘通知")
         self.cb_news_notify.setChecked(bool(n_cfg.get("notify", True)))
@@ -1391,9 +1434,9 @@ class SettingsDialog(QDialog):
             self.skills_root_list.setStyleSheet(s['list'])
 
     def reject(self):
-        """取消时还原原始主题"""
-        if self.theme != self._original_theme:
-            self._live_switch_theme(self._original_theme)
+        """取消时回退到最近一次「应用/保存」的主题（未应用过则还原原始主题）"""
+        if self.theme != self._persisted_theme:
+            self._live_switch_theme(self._persisted_theme)
         super().reject()
 
     def _slot_choices(self):
@@ -1440,6 +1483,75 @@ class SettingsDialog(QDialog):
                 if it and it.widget():
                     it.widget().setVisible(i < n)
             row.setEnabled(i < n)
+
+    # ── 关注主题行管理 ─────────────────────────────
+    def _add_interest_row(self, label, weight, color):
+        """新增一行关注主题：颜色按钮 + 名称 + 权重 + 删除"""
+        row = QFrame()
+        row.setStyleSheet("QFrame { background: transparent; border: none; }")
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+
+        btn_color = QPushButton("●")
+        btn_color.setFixedSize(26, 24)
+        btn_color.setToolTip("点击选择该主题的标注颜色")
+        btn_color.setStyleSheet(
+            "QPushButton { color: %s; background: rgba(127,127,127,0.10);"
+            " border: 1px solid %s; border-radius: 6px; font-size: 13px; }" % (color, color))
+        lay.addWidget(btn_color)
+
+        ed = QLineEdit(label)
+        ed.setPlaceholderText("主题名称，如：新模型发布")
+        ed.setStyleSheet(self._s["lineedit"])
+        lay.addWidget(ed, 1)
+
+        wt = QSpinBox()
+        wt.setRange(1, 5)
+        wt.setValue(weight)
+        wt.setToolTip("权重：1 最低，5 最高")
+        wt.setStyleSheet(self._s["combo"])
+        lay.addWidget(wt)
+
+        del_btn = QPushButton("✕")
+        del_btn.setFixedSize(26, 24)
+        del_btn.setToolTip("删除该主题")
+        del_btn.setStyleSheet(self._s["btn"])
+        lay.addWidget(del_btn)
+
+        def _pick_color():
+            c0 = btn_color.styleSheet().split("color:")[1].split(";")[0].strip()
+            c = QColorDialog.getColor(QColor(c0) if c0 else QColor("#5B8DEF"),
+                                      self, "选择主题标注颜色")
+            if c.isValid():
+                hexc = c.name()
+                btn_color.setStyleSheet(
+                    "QPushButton { color: %s; background: rgba(127,127,127,0.10);"
+                    " border: 1px solid %s; border-radius: 6px; font-size: 13px; }" % (hexc, hexc))
+        btn_color.clicked.connect(_pick_color)
+        del_btn.clicked.connect(lambda: self._remove_interest_row(row))
+
+        self._interests_lay.addWidget(row)
+        self._interest_rows.append({"frame": row, "label": ed, "weight": wt, "color": btn_color})
+
+    def _remove_interest_row(self, frame):
+        for i, r in enumerate(self._interest_rows):
+            if r["frame"] is frame:
+                self._interests_lay.removeWidget(frame)
+                frame.deleteLater()
+                self._interest_rows.pop(i)
+                break
+
+    def _collect_interests(self):
+        out = []
+        for r in self._interest_rows:
+            label = r["label"].text().strip()
+            if not label:
+                continue
+            css = r["color"].styleSheet()
+            color = css.split("color:")[1].split(";")[0].strip() if "color:" in css else "#5B8DEF"
+            out.append({"label": label, "weight": r["weight"].value(), "color": color})
+        return out
 
     def _collect(self):
         # 主 Agent 启动模式同步到 Agent 记录
@@ -1515,6 +1627,7 @@ class SettingsDialog(QDialog):
                 "badge": self.cb_news_badge.isChecked(),
                 "unread_count": self._news_cfg.get("unread_count", 0),
                 "last_generated": self._news_cfg.get("last_generated", ""),
+                "interests": self._collect_interests(),
             },
         }
     def _on_api_config_changed(self, config):
@@ -1628,31 +1741,48 @@ class SettingsDialog(QDialog):
             self.dir_edit.setText(folder)
     def _reset_dir(self):
         self.dir_edit.setText(os.environ.get("USERPROFILE", ""))
+    def _confirm_skip(self):
+        """启用跳过权限模式前弹出安全确认；返回是否继续"""
+        if not self.rb_skip.isChecked():
+            return True
+        reply = QMessageBox.warning(
+            self, "安全确认 — 跳过权限模式",
+            "您正在启用「跳过权限」模式。\n\n"
+            "在此模式下，Agent 可以：\n"
+            "• 执行任意终端命令\n"
+            "• 读取和修改文件系统中的任何文件\n"
+            "• 访问网络资源\n"
+            "• 以上操作均不会弹出权限确认提示\n\n"
+            "这可能导致数据丢失或安全风险。\n"
+            "建议仅在完全受信任的项目中使用。\n\n"
+            "确定要启用此模式吗？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        return reply == QMessageBox.Yes
+
+    def _apply_to_parent(self, cfg):
+        """把收集到的配置立即应用到浮窗并持久化"""
+        p = self.parent()
+        if p is not None and hasattr(p, "apply_settings"):
+            p.apply_settings(cfg, preview_only=False)
+        self._persisted_theme = cfg.get("theme", self.theme)
+
     def _preview(self):
-        self.result_config = self._collect()
-        self.result_config["_preview"] = True
-        self.accept()
+        """应用：立即生效并保存，窗口保持打开，便于继续调整"""
+        if not self._confirm_skip():
+            return
+        cfg = self._collect()
+        self._apply_to_parent(cfg)
+        self.result_config = cfg
+
     def _save(self):
-        # 如果选中跳过权限模式，弹出安全确认
-        if self.rb_skip.isChecked():
-            reply = QMessageBox.warning(
-                self, "安全确认 — 跳过权限模式",
-                "您正在启用「跳过权限」模式。\n\n"
-                "在此模式下，Agent 可以：\n"
-                "• 执行任意终端命令\n"
-                "• 读取和修改文件系统中的任何文件\n"
-                "• 访问网络资源\n"
-                "• 以上操作均不会弹出权限确认提示\n\n"
-                "这可能导致数据丢失或安全风险。\n"
-                "建议仅在完全受信任的项目中使用。\n\n"
-                "确定要启用此模式吗？",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            if reply != QMessageBox.Yes:
-                return
-        self.result_config = self._collect()
-        self.result_config["_preview"] = False
+        """保存：立即生效并保存，然后关闭窗口"""
+        if not self._confirm_skip():
+            return
+        cfg = self._collect()
+        self._apply_to_parent(cfg)
+        self.result_config = cfg
         self.accept()
 
 # ── 浮窗主体 ──────────────────────────────────────────
@@ -2938,23 +3068,24 @@ class FloatingWidget(QWidget):
             painter.setPen(Qt.NoPen)
             painter.drawEllipse(QPointF(dot_cx, dot_cy), dot_r, dot_r)
 
-        # ── AI 快报未读角标：左上角红色圆点（带未读数）──
+        # ── AI 快报未读角标：左上角精致红点（无数字，渐变 + 白描边 + 投影）──
         if self._news_unread > 0 and (self._news_cfg or {}).get("badge", True):
-            dot_r = max(5, s * 0.09)
-            dot_margin = s * 0.16
-            dot_cx = dot_margin
-            dot_cy = dot_margin
-            painter.setBrush(QColor(255, 59, 48, 235))
-            painter.setPen(QPen(QColor(255, 255, 255, 230), 1.5))
+            dot_r = max(4.5, s * 0.075)
+            dot_margin = s * 0.15
+            dot_cx, dot_cy = dot_margin, dot_margin
+            # 柔和投影
+            painter.setBrush(QColor(0, 0, 0, 60))
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(QPointF(dot_cx + 1.0, dot_cy + 1.5), dot_r, dot_r)
+            # 渐变红点
+            grad = QRadialGradient(QPointF(dot_cx - dot_r * 0.3, dot_cy - dot_r * 0.3),
+                                   dot_r * 2.0)
+            grad.setColorAt(0.0, QColor(255, 121, 121, 255))
+            grad.setColorAt(0.55, QColor(255, 59, 48, 255))
+            grad.setColorAt(1.0, QColor(199, 37, 26, 255))
+            painter.setBrush(QBrush(grad))
+            painter.setPen(QPen(QColor(255, 255, 255, 235), 1.4))
             painter.drawEllipse(QPointF(dot_cx, dot_cy), dot_r, dot_r)
-            if s >= 40 and self._news_unread <= 99:
-                painter.setPen(QPen(QColor(255, 255, 255, 255), 1))
-                font = QFont(FONT_FAMILY, max(7, int(s * 0.16)), QFont.Bold)
-                painter.setFont(font)
-                painter.drawText(
-                    QRect(int(dot_cx - dot_r), int(dot_cy - dot_r),
-                          int(dot_r * 2), int(dot_r * 2)),
-                    Qt.AlignCenter, str(self._news_unread))
 
         painter.end()
 
@@ -3377,9 +3508,8 @@ def _main():
     def open_settings():
         _log().debug("打开设置对话框")
         dlg = SettingsDialog(widget.config, parent=widget)
-        if dlg.exec_() == QDialog.Accepted and dlg.result_config:
-            preview = dlg.result_config.pop("_preview", False)
-            widget.apply_settings(dlg.result_config, preview_only=preview)
+        # 「应用/保存」由对话框直接生效（应用=即时生效并保存、不关闭；保存=生效并关闭）
+        dlg.exec_()
 
     def do_launch():
         launch_agent(get_primary_agent(widget.config.get("agents", default_agents())), widget.config)

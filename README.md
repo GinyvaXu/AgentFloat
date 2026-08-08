@@ -12,7 +12,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 </p>
 
 <p align="center">
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-v1.2.0-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-v1.2.1-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%2010%2F11-8E44AD?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"></a>
@@ -31,7 +31,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 | 🧩 **通用多 Agent 启动** | 点击浮窗即启动 Claude Code / Codex CLI / 自定义命令，右键或托盘可快速切换主 Agent，实时状态指示灯 |
 | 🧠 **Skills 辅助窗** | 无边框窗口扫描本机已安装 skills，分类树浏览 + 中英对照切换 + 触发指令一键复制（右侧完整展示，溢出自动滚动） |
 | 📊 **API 用量监控** | 通用 JSONPath 框架轮询任意 API 用量，浮窗角标实时显示余额，<5¥ 低余额变色警告，环绕菜单一键跳转对应平台用量页 |
-| 📰 **AI 快报** | 多源聚合（Hacker News / GitHub Trending / 少数派 / 量子位 / arXiv）+ 本地 Agent 一键生成今日 AI 速览，无边框面板浏览、链接可点击，未读红点 + 托盘通知 |
+| 📰 **AI 快报** | 多源聚合（Hacker News / GitHub Trending / 少数派 / 量子位 / arXiv）+ 本地 Agent 一键生成今日 AI 速览，支持关注主题定向偏好（预设 + 权重 + 彩色标注），无边框面板浏览、链接可点击，未读红点 + 托盘通知 |
 | 🤖 **本地 AI 自检服务** | 校验 API 余额端点、查找并翻译缺失的 skills；自动部署翻译 skill，检测到新 skill 自动触发补译（可在设置中关闭） |
 | 🔔 **系统托盘 / 开机自启** | 最小化至托盘、双击显示浮窗、可注册 Windows 自启动，全局热键 `Ctrl+Alt+C` 随时唤起 |
 | 🎬 **动态退出动画** | 退出时播放全新收拢动画，配合窗口淡出，告别生硬关闭 |

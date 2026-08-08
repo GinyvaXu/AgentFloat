@@ -124,6 +124,18 @@
     "notify": true,
     "badge": true,
     "unread_count": 0,
-    "last_generated": ""
+    "last_generated": "",
+    "interests": [
+      {
+        "label": "新模型发布",
+        "weight": 4,
+        "color": "#5B8DEF"
+      },
+      {
+        "label": "价格调整",
+        "weight": 3,
+        "color": "#E74C3C"
+      }
+    ]
   }
 }
