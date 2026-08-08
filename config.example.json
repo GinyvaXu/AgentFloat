@@ -50,7 +50,16 @@
     "trigger_mode": "both",
     "hover_delay_ms": 400,
     "long_press_delay_ms": 500,
-    "radius": 120
+    "radius": 120,
+    "slot_count": 6,
+    "slots": [
+      "agent:claude",
+      "agent:codex",
+      "skills",
+      "api",
+      "settings",
+      "quit"
+    ]
   },
   "skills": {
     "roots": [],

@@ -50,6 +50,11 @@ DEFAULT_RADIAL_MENU = {
     "hover_delay_ms": 400,
     "long_press_delay_ms": 500,
     "radius": 120,
+    # 扇区功能模块化：每个元素是一个动作 id（可用：
+    #   agent:<id> 启动某 Agent / skills / api / settings / news / quit）
+    # 空列表 = 自动（所有 Agent + 固定 4 项）
+    "slot_count": 6,
+    "slots": [],
 }
 
 DEFAULT_SKILLS = {

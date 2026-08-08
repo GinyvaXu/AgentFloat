@@ -397,13 +397,7 @@ class RadialMenu(QWidget):
 
         # ── 悬停/按压扇区：中性灰高亮，无蓝无描边；按住时灰色加深 ──
         if 0 <= self._hover_idx < n:
-            a0 = -90.0 + self._hover_idx * sweep
-            hp = QPainterPath()
-            hp.moveTo(self._polar(a0, self._outer))
-            hp.arcTo(QRectF(-self._outer, -self._outer, self._outer * 2, self._outer * 2), a0, sweep)
-            hp.arcTo(QRectF(-self._inner, -self._inner, self._inner * 2, self._inner * 2),
-                     a0 + sweep, -sweep)
-            hp.closeSubpath()
+            hp = self._sector_path(self._hover_idx)
             press = self._press_progress if self._press_idx == self._hover_idx else 0.0
             if is_dark:
                 fill = QColor(255, 255, 255, int(26 + 26 * press))
@@ -454,6 +448,28 @@ class RadialMenu(QWidget):
             painter.restore()
 
         painter.restore()
+
+    def _sector_path(self, idx):
+        """返回扇区 idx 的填充路径（数学角度约定，与命中测试/图标一致）。
+        不使用 QPainterPath.arcTo：其角度约定（90°=正上方、正角度逆时针）
+        与 _polar 的数学角度（-90°=正上方）相差 180°，
+        会导致高亮路径画到错误扇区（“灰块乱飞”根因）。"""
+        n = len(self._items)
+        if n == 0 or not (0 <= idx < n):
+            return QPainterPath()
+        sweep = 360.0 / n
+        a0 = -90.0 + idx * sweep
+        a1 = a0 + sweep
+        steps = 20
+        path = QPainterPath()
+        path.moveTo(self._polar(a0, self._outer))
+        for k in range(1, steps + 1):
+            path.lineTo(self._polar(a0 + sweep * k / steps, self._outer))
+        path.lineTo(self._polar(a1, self._inner))
+        for k in range(steps - 1, -1, -1):
+            path.lineTo(self._polar(a0 + sweep * k / steps, self._inner))
+        path.closeSubpath()
+        return path
 
     def _polar(self, angle_deg, radius):
         rad = math.radians(angle_deg)

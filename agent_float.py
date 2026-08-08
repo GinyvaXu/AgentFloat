@@ -233,7 +233,7 @@ IOS_HINT       = _LIGHT["HINT"]
 IOS_SURFACE    = _LIGHT["SURFACE"]
 
 FONT_FAMILY = "Microsoft YaHei"
-VERSION = "1.0.9"
+VERSION = "1.1.0"
 
 # ── 浮窗参数 ──────────────────────────────────────────
 DEFAULT_SIZE  = 52          # 默认边长 px
@@ -958,6 +958,36 @@ class SettingsDialog(QDialog):
         self.slider_radius.valueChanged.connect(lambda v: self.lbl_radius.setText("%dpx" % v))
         vr.addLayout(rad_row)
 
+        # ── 扇区功能模块化配置（用户可自选每个扇区用于什么功能）──
+        vr.addWidget(self._label("扇区功能（自选每个轮盘区域的作用）", size=11, color=s["text_secondary"]))
+        cnt_row = QHBoxLayout()
+        cnt_row.addWidget(self._label("扇区数量", size=10, color=s["text_secondary"]))
+        self.cmb_slot_count = QComboBox()
+        self.cmb_slot_count.addItem("4", 4)
+        self.cmb_slot_count.addItem("6", 6)
+        self.cmb_slot_count.addItem("8", 8)
+        self.cmb_slot_count.setStyleSheet(s["combo"])
+        cur_cnt = int(self._radial_cfg.get("slot_count", 6) or 6)
+        ci = self.cmb_slot_count.findData(cur_cnt)
+        self.cmb_slot_count.setCurrentIndex(max(0, ci))
+        cnt_row.addWidget(self.cmb_slot_count, 1)
+        vr.addLayout(cnt_row)
+
+        self.slot_rows = []
+        self.slot_combos = []
+        for i in range(8):
+            row = QHBoxLayout()
+            row.addWidget(self._label("扇区 %d" % (i + 1), size=9, color=s["text_secondary"]))
+            cb = QComboBox()
+            cb.setStyleSheet(s["combo"])
+            self._fill_slot_combo(cb, i)
+            row.addWidget(cb, 1)
+            self.slot_combos.append(cb)
+            self.slot_rows.append(row)
+            vr.addLayout(row)
+        self._refresh_slot_rows()
+        self.cmb_slot_count.currentIndexChanged.connect(lambda _i: self._refresh_slot_rows())
+
         pi.addWidget(box_radial)
         pi.addStretch()
         tabs.addTab(page_interact, "交互")
@@ -1243,6 +1273,51 @@ class SettingsDialog(QDialog):
             self._live_switch_theme(self._original_theme)
         super().reject()
 
+    def _slot_choices(self):
+        """可用的扇区动作列表（Agent + 固定功能 + 预留）"""
+        choices = []
+        for a in self._agents:
+            choices.append(("agent:%s" % a.get("id"), "启动 %s" % (a.get("name") or "Agent")))
+        choices += [
+            ("skills", "Skills 辅助窗"),
+            ("api", "API 余额 / 用量"),
+            ("settings", "设置"),
+            ("news", "AI 快报（预留）"),
+            ("quit", "退出"),
+            ("", "（空）"),
+        ]
+        return choices
+
+    def _fill_slot_combo(self, cb, idx):
+        cfg_slots = self._radial_cfg.get("slots") or []
+        has_cfg = bool(cfg_slots)
+        cur = cfg_slots[idx] if idx < len(cfg_slots) else None
+        if cur is None and not has_cfg:
+            # 完全无配置：默认分配（优先 Agent ，再固定功能）
+            if idx < len(self._agents):
+                cur = "agent:%s" % self._agents[idx].get("id")
+            else:
+                fixed = ["skills", "api", "settings", "quit"]
+                cur = fixed[idx - len(self._agents)] if idx - len(self._agents) < len(fixed) else ""
+        elif cur is None:
+            # 已有配置但该槽未配：留空（避免重复动作）
+            cur = ""
+        cb.blockSignals(True)
+        for data, label in self._slot_choices():
+            cb.addItem(label, data)
+        ti = cb.findData(cur)
+        cb.setCurrentIndex(max(0, ti))
+        cb.blockSignals(False)
+
+    def _refresh_slot_rows(self):
+        n = int(self.cmb_slot_count.currentData() or 6)
+        for i, row in enumerate(self.slot_rows):
+            for k in range(row.count()):
+                it = row.itemAt(k)
+                if it and it.widget():
+                    it.widget().setVisible(i < n)
+            row.setEnabled(i < n)
+
     def _collect(self):
         # 主 Agent 启动模式同步到 Agent 记录
         mode = "skip_permissions" if self.rb_skip.isChecked() else "normal"
@@ -1274,12 +1349,20 @@ class SettingsDialog(QDialog):
             a["primary"] = (a.get("id") == self._primary_agent_id)
             if a.get("id") == self._primary_agent_id:
                 a["launch_mode"] = mode
+        slots = []
+        slot_cnt = int(self.cmb_slot_count.currentData() or 6)
+        for i in range(min(slot_cnt, len(self.slot_combos))):
+            v = (self.slot_combos[i].currentData() or "").strip()
+            if v:
+                slots.append(v)
         radial = {
             "enabled": True,
             "trigger_mode": self.cmb_trigger.currentData(),
             "hover_delay_ms": self.spin_hover.value(),
             "long_press_delay_ms": self.spin_press.value(),
             "radius": self.slider_radius.value(),
+            "slot_count": slot_cnt,
+            "slots": slots,
         }
         self._skills_cfg["auto_translate_new_skills"] = self.cb_auto_translate.isChecked()
         return {
@@ -2272,16 +2355,7 @@ class FloatingWidget(QWidget):
             return
         if source == "long_press":
             self._long_press_fired = True
-        items = []
-        for a in self._agents:
-            items.append(RadialMenuItem(
-                "agent:%s" % a.get("id"), a.get("name"),
-                a.get("command", ""), a.get("icon_color", "#5B8DEF"),
-                a.get("icon_char", "A")))
-        items.append(RadialMenuItem("skills", "Skills", "辅助窗", "#8E44AD", "S"))
-        items.append(RadialMenuItem("api", "API 用量", "余额监控", "#16A085", "¥"))
-        items.append(RadialMenuItem("settings", "设置", "偏好", "#5B8DEF", "⚙"))
-        items.append(RadialMenuItem("quit", "退出", "AgentFloat", "#E74C3C", "✕"))
+        items = self._build_radial_items()
         if self._radial_menu is None:
             self._radial_menu = RadialMenu()
             self._radial_menu.action_triggered.connect(self._on_radial_action)
@@ -2315,6 +2389,64 @@ class FloatingWidget(QWidget):
                 and (self.config.get("api_monitor") or {}).get("enabled")):
             self._api_badge.show()
 
+    def _build_radial_items(self):
+        """按配置构建扇区菜单项（模块化：用户可自选每个扇区功能）"""
+        cfg = self._radial_cfg or {}
+        slots = cfg.get("slots") or []
+        items = []
+        if slots:
+            for action in slots:
+                it = self._radial_item_for(action)
+                if it is not None:
+                    items.append(it)
+            if items:
+                return items
+        # 旧配置/空配置回退：所有 Agent + 固定功能
+        for a in self._agents:
+            items.append(RadialMenuItem(
+                "agent:%s" % a.get("id"), a.get("name"),
+                a.get("command", ""), a.get("icon_color", "#5B8DEF"),
+                a.get("icon_char", "A")))
+        items.append(RadialMenuItem("skills", "Skills", "辅助窗", "#8E44AD", "S"))
+        items.append(RadialMenuItem("api", "API 用量", "余额监控", "#16A085", "¥"))
+        items.append(RadialMenuItem("settings", "设置", "偏好", "#5B8DEF", "⚙"))
+        items.append(RadialMenuItem("quit", "退出", "AgentFloat", "#E74C3C", "✕"))
+        return items
+
+    def _radial_item_for(self, action):
+        """将配置中的动作 id 转换为 RadialMenuItem；无效动作返回 None"""
+        if isinstance(action, dict):
+            action = action.get("action") or ""
+        action = str(action or "").strip()
+        if action.startswith("agent:"):
+            agent = find_agent(self._agents, action[6:])
+            if not agent:
+                return None
+            return RadialMenuItem(action, agent.get("name") or "Agent",
+                                  agent.get("command", ""),
+                                  agent.get("icon_color", "#5B8DEF"),
+                                  agent.get("icon_char", "A"))
+        if action.startswith("launch:"):
+            agent = find_agent(self._agents, action[7:])
+            if not agent:
+                return None
+            return RadialMenuItem("agent:%s" % agent.get("id"),
+                                  agent.get("name") or "Agent",
+                                  agent.get("command", ""),
+                                  agent.get("icon_color", "#5B8DEF"),
+                                  agent.get("icon_char", "A"))
+        labels = {
+            "skills": ("Skills", "辅助窗", "#8E44AD", "S"),
+            "api": ("API 余额", "用量监控", "#16A085", "¥"),
+            "settings": ("设置", "偏好", "#5B8DEF", "⚙"),
+            "news": ("AI 快报", "每日资讯", "#2E86C1", "N"),
+            "quit": ("退出", "AgentFloat", "#E74C3C", "✕"),
+        }
+        if action in labels:
+            label, sub, color, char = labels[action]
+            return RadialMenuItem(action, label, sub, color, char)
+        return None
+
     def _on_radial_action(self, action_id):
         if action_id.startswith("agent:"):
             agent = find_agent(self._agents, action_id[6:])
@@ -2326,6 +2458,11 @@ class FloatingWidget(QWidget):
             self._open_api_platform()
         elif action_id == "settings":
             self.settings_requested.emit()
+        elif action_id == "news":
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.information(
+                None, "AI 快报",
+                "AI 快报功能正在开发中，将在后续版本上线（每日 AI 行业速览）。")
         elif action_id == "quit":
             self._animate_quit()
 
