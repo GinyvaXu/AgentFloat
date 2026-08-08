@@ -1,6 +1,6 @@
 # AgentFloat — AI Agent 桌面悬浮助手
 
-[![Version](https://img.shields.io/badge/version-1.0.7-blue)](VERSION)
+[![Version](https://img.shields.io/badge/version-1.0.8-blue)](VERSION)
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)]()
 
@@ -15,9 +15,9 @@
 - 🎨 **iOS 风格毛玻璃** — 7 层渐变绘制，亮色/暗色双主题
 - 🖱️ **自由拖拽** — 任意位置拖放，带按压缩放和涟漪动画
 - 📌 **边缘吸附** — 拖到屏幕边缘自动贴边，支持自动隐藏
-- 🌓 **即时换肤** — 设置对话框中一键切换，无需重启
-- ⚡ **通用多 Agent 启动** — 点击浮窗启动主 Agent；右键/托盘可切换其他 Agent
-- 🎯 **悬停/长按环绕菜单** — 悬停或长按浮窗唤出环形菜单（双通道，可在设置中调整，整环统一配色、鼠标移走后 2 秒宽限关闭），一键切换 Agent、打开 Skills 辅助窗、查看 API 用量、设置与退出
+- 🌓 **即时换肤 + 分页设置** — 设置窗采用顶部横向标签页（通用/外观/交互/Skills/API 用量/关于），布局清晰不平铺
+- ⚡ **通用多 Agent 启动** — 点击浮窗启动主 Agent；默认启动方式可选 Claude Code / Codex CLI / 自定义程序路径；右键、托盘可切换其他 Agent
+- 🎯 **悬停/长按环绕菜单** — 悬停或长按浮窗唤出环形菜单（双通道，可在设置中调整，整环统一配色；悬停灰显无蓝色，按下有缩放触感，关闭向中心收拢），一键切换 Agent、打开 Skills 辅助窗、查看 API 用量、设置与退出
 - 🧩 **Skills 辅助窗** — 一键查看本机已安装 skills、功能描述与手动触发指令（无边框窗口，分类树浏览，支持中英对照与一键复制）
 - 🤖 **本地 AI 自检服务** — 手动运行：校验 API 余额端点、查找并翻译缺失的 skills；自动部署本地翻译 skill，检测到新装 skill 自动触发补译（可在设置中关闭）
 - 🔔 **系统托盘** — 最小化到托盘，右键菜单快速操作

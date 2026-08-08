@@ -16,6 +16,7 @@ import shutil
 import ctypes
 import logging
 import copy
+import time
 from logging.handlers import RotatingFileHandler
 from ctypes import wintypes
 
@@ -32,7 +33,7 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QSystemTrayIcon, QMenu,
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QPushButton,
     QSpinBox, QGroupBox, QRadioButton, QCheckBox, QLineEdit, QFileDialog, QMessageBox,
-    QScrollArea, QComboBox, QListWidget, QListWidgetItem
+    QScrollArea, QComboBox, QListWidget, QListWidgetItem, QTabWidget
 )
 from PyQt5.QtCore import (
     Qt, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve,
@@ -231,7 +232,7 @@ IOS_HINT       = _LIGHT["HINT"]
 IOS_SURFACE    = _LIGHT["SURFACE"]
 
 FONT_FAMILY = "Microsoft YaHei"
-VERSION = "1.0.7"
+VERSION = "1.0.8"
 
 # ── 浮窗参数 ──────────────────────────────────────────
 DEFAULT_SIZE  = 52          # 默认边长 px
@@ -563,6 +564,13 @@ class SettingsDialog(QDialog):
                 f"QPushButton:hover {{ background: {sp}; color: {tx}; }}"
                 f"QPushButton:pressed {{ background: {bd}; color: #000; }}"
             ),
+            "tabs": (
+                f"QTabWidget::pane {{ border: 1px solid {bd}; border-radius: 10px; top: -1px; }}"
+                f"QTabBar::tab {{ background: transparent; color: {text_secondary};"
+                f" padding: 7px 16px; margin-right: 4px; border-radius: 8px; font-size: 12px; }}"
+                f"QTabBar::tab:selected {{ background: {ac}; color: #FFF; font-weight: bold; }}"
+                f"QTabBar::tab:hover:!selected {{ background: {card_bg}; color: {tx}; }}"
+            ),
             # 安全警告标签 — 主题感知（暗色模式下低饱和背景 + 柔和文字）
             "warn_label": (
                 f"QLabel {{ color: {warn_fg}; background: {warn_bg};"
@@ -591,8 +599,8 @@ class SettingsDialog(QDialog):
     def _setup_ui(self):
         s = self._s
         self.setWindowTitle("浮窗设置")
-        # 双列布局：窗口加宽，各模块并列放置，降低纵向高度
-        self.setMinimumSize(800, 560)
+        # 顶部横向标签页布局：各模块分页放置，避免所有内容平铺在一个窗口
+        self.setMinimumSize(880, 560)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFont(self._font(9))
@@ -609,17 +617,16 @@ class SettingsDialog(QDialog):
 
         layout = QVBoxLayout(container)
         layout.setSpacing(8)
-        layout.setContentsMargins(20, 10, 20, 14)
+        layout.setContentsMargins(16, 10, 16, 14)
 
         # ── 自定义标题栏 ──
         title_bar = QHBoxLayout()
         title_bar.setSpacing(0)
 
-        # 标题 + 版本
         title_block = QVBoxLayout()
         title_block.setSpacing(0)
-        title_text = self._label("AgentFloat 设置", size=16, color=s["tx"])
-        title_text.setFont(self._font(16, bold=True))
+        title_text = self._label("AgentFloat 设置", size=15, color=s["tx"])
+        title_text.setFont(self._font(15, bold=True))
         title_block.addWidget(title_text)
         ver_text = self._label(f"v{VERSION}", size=9, color=s["hi"])
         title_block.addWidget(ver_text)
@@ -627,7 +634,6 @@ class SettingsDialog(QDialog):
 
         title_bar.addStretch()
 
-        # ✕ 关闭按钮
         close_btn = QPushButton("✕")
         close_btn.setFixedSize(28, 28)
         close_btn.setFont(self._font(14))
@@ -645,18 +651,22 @@ class SettingsDialog(QDialog):
         self._sep = sep
         layout.addWidget(sep)
 
-        # 通用按钮样式（使用主题缓存）
+        # 通用按钮样式
         btn_css = s["btn"]
         save_css = s["save_btn"]
 
-        # ── 主内容区：左右两列，各模块并列放置 ──
-        main_row = QHBoxLayout()
-        main_row.setSpacing(14)
+        # ── 顶部横向标签页 ──
+        tabs = QTabWidget()
+        tabs.setDocumentMode(True)
+        tabs.setStyleSheet(s["tabs"])
+        self._tabs = tabs
+        layout.addWidget(tabs, 1)
 
-        left_col = QVBoxLayout()
-        left_col.setSpacing(8)
-        right_col = QVBoxLayout()
-        right_col.setSpacing(8)
+        # ================= 通用 =================
+        page_general = QWidget()
+        pg = QVBoxLayout(page_general)
+        pg.setSpacing(8)
+        pg.setContentsMargins(6, 10, 6, 6)
 
         # 主 Agent 启动
         box = QGroupBox("主 Agent 启动")
@@ -671,6 +681,8 @@ class SettingsDialog(QDialog):
         self.cmb_primary_agent = QComboBox()
         self.cmb_primary_agent.setStyleSheet(s["combo"])
         self.cmb_primary_agent.currentIndexChanged.connect(self._on_primary_agent_changed)
+        # 仅用户实际选择「自定义…」项时才弹出文件选择器
+        self.cmb_primary_agent.activated.connect(self._on_combo_activated)
         agent_row.addWidget(self.cmb_primary_agent, 1)
         self.btn_manage_agent = QPushButton("管理…")
         self.btn_manage_agent.setStyleSheet(btn_css)
@@ -693,7 +705,6 @@ class SettingsDialog(QDialog):
             "⚠ 存在数据丢失及安全风险，建议仅在完全受信任的项目中使用"
         )
 
-        # "ℹ" 信息图标 — 悬停显示安全说明
         info_icon = QLabel(" ℹ")
         info_icon.setFont(self._font(11))
         info_icon.setStyleSheet(f"color: {s['ac']}; font-size: 13px;")
@@ -719,7 +730,7 @@ class SettingsDialog(QDialog):
         vl.addWidget(self.rb_normal)
         vl.addLayout(skip_row)
 
-        # 安全警告标签容器（固定高度，避免显示/隐藏时布局跳动）
+        # 安全警告标签容器
         warn_container = QWidget()
         warn_container.setMinimumHeight(40)
         warn_inner = QVBoxLayout(warn_container)
@@ -737,9 +748,66 @@ class SettingsDialog(QDialog):
         self.rb_skip.toggled.connect(lambda checked: self.warn_label.setVisible(checked))
 
         vl.addWidget(warn_container)
-        left_col.addWidget(box)
+        pg.addWidget(box)
 
-        # ── 外观主题 ──
+        # 默认启动目录
+        box4 = QGroupBox("默认启动目录")
+        box4.setFont(self._font(13, bold=True))
+        box4.setStyleSheet(s["group"])
+        vl4 = QVBoxLayout(box4)
+        vl4.setSpacing(8)
+        vl4.setContentsMargins(14, 14, 14, 10)
+
+        self.dir_edit = QLineEdit()
+        self.dir_edit.setFont(self._font(10))
+        self.dir_edit.setReadOnly(True)
+        self.dir_edit.setStyleSheet(s["lineedit"])
+        wd = self.config.get("working_directory", "").strip()
+        if not wd:
+            wd = os.environ.get("USERPROFILE", "")
+        self.dir_edit.setText(wd)
+        self.dir_edit.setToolTip("Agent 将在此目录下启动。留空则使用用户主目录。")
+        vl4.addWidget(self.dir_edit)
+
+        dir_btn_row = QHBoxLayout()
+        dir_btn_row.setSpacing(8)
+        browse_btn = QPushButton("浏览...")
+        browse_btn.setStyleSheet(btn_css)
+        browse_btn.clicked.connect(self._browse_folder)
+        dir_btn_row.addWidget(browse_btn)
+        reset_btn = QPushButton("重置为默认")
+        reset_btn.setStyleSheet(btn_css)
+        reset_btn.clicked.connect(self._reset_dir)
+        dir_btn_row.addWidget(reset_btn)
+        dir_btn_row.addStretch()
+        vl4.addLayout(dir_btn_row)
+        pg.addWidget(box4)
+
+        # 退出行为
+        box_cleanup = QGroupBox("退出行为")
+        box_cleanup.setFont(self._font(13, bold=True))
+        box_cleanup.setStyleSheet(s["group"])
+        vl_cleanup = QVBoxLayout(box_cleanup)
+        vl_cleanup.setSpacing(6)
+        vl_cleanup.setContentsMargins(14, 14, 14, 10)
+
+        self.cb_cleanup = QCheckBox("退出时关闭主 Agent 进程")
+        self.cb_cleanup.setFont(self._font(11))
+        self.cb_cleanup.setStyleSheet(s["checkbox"])
+        self.cb_cleanup.setChecked(self.config.get("cleanup_on_quit", False))
+        self.cb_cleanup.setToolTip("启用后，退出浮窗时将自动结束正在运行的主 Agent 进程")
+        vl_cleanup.addWidget(self.cb_cleanup)
+        pg.addWidget(box_cleanup)
+
+        pg.addStretch()
+        tabs.addTab(page_general, "通用")
+
+        # ================= 外观 =================
+        page_appearance = QWidget()
+        pa = QVBoxLayout(page_appearance)
+        pa.setSpacing(8)
+        pa.setContentsMargins(6, 10, 6, 6)
+
         box_theme = QGroupBox("外观主题")
         box_theme.setFont(self._font(13, bold=True))
         box_theme.setStyleSheet(s["group"])
@@ -759,15 +827,22 @@ class SettingsDialog(QDialog):
         self.rb_light.setChecked(self.theme != "dark")
         self.rb_dark.setChecked(self.theme == "dark")
 
-        # 主题即时切换（仅响应选中，避免 radio group 双次信号）
         self.rb_light.toggled.connect(lambda checked: checked and self._live_switch_theme("light"))
         self.rb_dark.toggled.connect(lambda checked: checked and self._live_switch_theme("dark"))
 
         vl_theme.addWidget(self.rb_light)
         vl_theme.addWidget(self.rb_dark)
-        left_col.addWidget(box_theme)
+        pa.addWidget(box_theme)
+        pa.addStretch()
+        tabs.addTab(page_appearance, "外观")
 
-        # ── 边缘吸附 ──
+        # ================= 交互 =================
+        page_interact = QWidget()
+        pi = QVBoxLayout(page_interact)
+        pi.setSpacing(8)
+        pi.setContentsMargins(6, 10, 6, 6)
+
+        # 边缘吸附
         box_snap = QGroupBox("边缘吸附")
         box_snap.setFont(self._font(13, bold=True))
         box_snap.setStyleSheet(s["group"])
@@ -790,70 +865,9 @@ class SettingsDialog(QDialog):
         self.cb_snap_hidden.setEnabled(self.cb_snap_enabled.isChecked())
         self.cb_snap_enabled.toggled.connect(lambda v: self.cb_snap_hidden.setEnabled(v))
         vl_snap.addWidget(self.cb_snap_hidden)
-        left_col.addWidget(box_snap)
+        pi.addWidget(box_snap)
 
-        # ── Skills 辅助 ──
-        box_skills = QGroupBox("Skills 辅助")
-        box_skills.setFont(self._font(13, bold=True))
-        box_skills.setStyleSheet(s["group"])
-        vsk = QVBoxLayout(box_skills)
-        vsk.setSpacing(6)
-        vsk.setContentsMargins(14, 14, 14, 10)
-
-        self.skills_root_list = QListWidget()
-        for r in (self._skills_cfg.get("roots") or default_skill_roots()):
-            li = QListWidgetItem(os.path.basename(r) or r)
-            li.setToolTip(r)
-            self.skills_root_list.addItem(li)
-        self.skills_root_list.setMaximumHeight(78)
-        self.skills_root_list.setStyleSheet(s["list"])
-        vsk.addWidget(self.skills_root_list)
-
-        sk_row = QHBoxLayout()
-        self.btn_skills_set = QPushButton("目录设置…")
-        self.btn_skills_set.setStyleSheet(btn_css)
-        self.btn_skills_set.clicked.connect(self._open_skills_settings)
-        self.btn_skills_open = QPushButton("打开辅助窗")
-        self.btn_skills_open.setStyleSheet(btn_css)
-        self.btn_skills_open.clicked.connect(self._open_skills_panel)
-        sk_row.addWidget(self.btn_skills_set)
-        sk_row.addWidget(self.btn_skills_open)
-        vsk.addLayout(sk_row)
-
-        # 本地 AI 待处理服务（首次自动运行，此处可再次手动触发）
-        ai_row = QHBoxLayout()
-        self.btn_ai_service = QPushButton("⚡ AI 自检服务")
-        self.btn_ai_service.setStyleSheet(btn_css)
-        self.btn_ai_service.setToolTip(
-            "调用本地主 Agent（非交互模式）手动完成待处理服务：\n"
-            "· 校验 / 补全 API 余额监控端点\n"
-            "· 扫描 skills 并生成缺失的中文翻译\n"
-            "不会自动触发；新装 skill 的翻译可由本地「AgentFloat 翻译助手」skill 完成。")
-        self.btn_ai_service.clicked.connect(self._run_ai_service)
-        ai_row.addWidget(self.btn_ai_service)
-        self.lbl_ai_service = QLabel("")
-        self.lbl_ai_service.setFont(self._font(9))
-        self.lbl_ai_service.setStyleSheet(f"color: {s['hi']};")
-        ai_row.addWidget(self.lbl_ai_service, 1)
-        vsk.addLayout(ai_row)
-
-        self.cb_auto_translate = QCheckBox("新装 skill 自动翻译（启动时检测，自动调用本地 Agent 补译）")
-        self.cb_auto_translate.setFont(self._font(11))
-        self.cb_auto_translate.setStyleSheet(s["checkbox"])
-        self.cb_auto_translate.setChecked(bool(self._skills_cfg.get("auto_translate_new_skills", True)))
-        self.cb_auto_translate.setToolTip(
-            "开启后：检测到新安装且缺少中文翻译的 skill，会自动调用本地主 Agent（非交互）补译。\n"
-            "关闭后：新 skill 不会自动触发翻译，可在「⚡ AI 自检服务」中手动补译。")
-        vsk.addWidget(self.cb_auto_translate)
-
-        _svc = self.config.get("services") or {}
-        _last = (_svc.get("last_run") or "").strip()
-        self.lbl_ai_service.setText(("上次运行 %s" % _last) if _last else "尚未运行")
-
-        left_col.addWidget(box_skills)
-        left_col.addStretch()
-
-        # ── 浮窗大小 ──
+        # 浮窗大小
         box2 = QGroupBox("浮窗大小")
         box2.setFont(self._font(13, bold=True))
         box2.setStyleSheet(s["group"])
@@ -871,9 +885,9 @@ class SettingsDialog(QDialog):
         row.addWidget(self.size_label)
         self.size_slider.valueChanged.connect(lambda v: self.size_label.setText(f"{v} px"))
         vl2.addLayout(row)
-        right_col.addWidget(box2)
+        pi.addWidget(box2)
 
-        # ── 透明度 ──
+        # 透明度
         box3 = QGroupBox("透明度")
         box3.setFont(self._font(13, bold=True))
         box3.setStyleSheet(s["group"])
@@ -891,63 +905,9 @@ class SettingsDialog(QDialog):
         row3.addWidget(self.op_label)
         self.op_slider.valueChanged.connect(lambda v: self.op_label.setText(f"{v}%"))
         vl3.addLayout(row3)
-        right_col.addWidget(box3)
+        pi.addWidget(box3)
 
-        # ── 退出行为 ──
-        box_cleanup = QGroupBox("退出行为")
-        box_cleanup.setFont(self._font(13, bold=True))
-        box_cleanup.setStyleSheet(s["group"])
-        vl_cleanup = QVBoxLayout(box_cleanup)
-        vl_cleanup.setSpacing(6)
-        vl_cleanup.setContentsMargins(14, 14, 14, 10)
-
-        self.cb_cleanup = QCheckBox("退出时关闭主 Agent 进程")
-        self.cb_cleanup.setFont(self._font(11))
-        self.cb_cleanup.setStyleSheet(s["checkbox"])
-        self.cb_cleanup.setChecked(self.config.get("cleanup_on_quit", False))
-        self.cb_cleanup.setToolTip("启用后，退出浮窗时将自动结束正在运行的主 Agent 进程")
-        vl_cleanup.addWidget(self.cb_cleanup)
-        right_col.addWidget(box_cleanup)
-
-        # ── 默认启动目录 ──
-        box4 = QGroupBox("默认启动目录")
-        box4.setFont(self._font(13, bold=True))
-        box4.setStyleSheet(s["group"])
-        vl4 = QVBoxLayout(box4)
-        vl4.setSpacing(8)
-        vl4.setContentsMargins(14, 14, 14, 10)
-
-        # 当前目录显示
-        self.dir_edit = QLineEdit()
-        self.dir_edit.setFont(self._font(10))
-        self.dir_edit.setReadOnly(True)
-        self.dir_edit.setStyleSheet(s["lineedit"])
-        wd = self.config.get("working_directory", "").strip()
-        if not wd:
-            wd = os.environ.get("USERPROFILE", "")
-        self.dir_edit.setText(wd)
-        self.dir_edit.setToolTip("Agent 将在此目录下启动。留空则使用用户主目录。")
-        vl4.addWidget(self.dir_edit)
-
-        # 浏览 + 重置按钮
-        dir_btn_row = QHBoxLayout()
-        dir_btn_row.setSpacing(8)
-
-        browse_btn = QPushButton("浏览...")
-        browse_btn.setStyleSheet(btn_css)
-        browse_btn.clicked.connect(self._browse_folder)
-        dir_btn_row.addWidget(browse_btn)
-
-        reset_btn = QPushButton("重置为默认")
-        reset_btn.setStyleSheet(btn_css)
-        reset_btn.clicked.connect(self._reset_dir)
-        dir_btn_row.addWidget(reset_btn)
-
-        dir_btn_row.addStretch()
-        vl4.addLayout(dir_btn_row)
-        right_col.addWidget(box4)
-
-        # ── 环绕菜单 ──
+        # 环绕菜单
         box_radial = QGroupBox("环绕菜单")
         box_radial.setFont(self._font(13, bold=True))
         box_radial.setStyleSheet(s["group"])
@@ -997,30 +957,125 @@ class SettingsDialog(QDialog):
         self.slider_radius.valueChanged.connect(lambda v: self.lbl_radius.setText("%dpx" % v))
         vr.addLayout(rad_row)
 
-        right_col.addWidget(box_radial)
-        right_col.addStretch()
+        pi.addWidget(box_radial)
+        pi.addStretch()
+        tabs.addTab(page_interact, "交互")
 
-        main_row.addLayout(left_col, 1)
-        main_row.addLayout(right_col, 1)
-        layout.addLayout(main_row)
+        # ================= Skills =================
+        page_skills = QWidget()
+        psk = QVBoxLayout(page_skills)
+        psk.setSpacing(8)
+        psk.setContentsMargins(6, 10, 6, 6)
 
-        # ── API 用量监控设置 ──
+        box_skills = QGroupBox("Skills 辅助")
+        box_skills.setFont(self._font(13, bold=True))
+        box_skills.setStyleSheet(s["group"])
+        vsk = QVBoxLayout(box_skills)
+        vsk.setSpacing(6)
+        vsk.setContentsMargins(14, 14, 14, 10)
+
+        self.skills_root_list = QListWidget()
+        for r in (self._skills_cfg.get("roots") or default_skill_roots()):
+            li = QListWidgetItem(os.path.basename(r) or r)
+            li.setToolTip(r)
+            self.skills_root_list.addItem(li)
+        self.skills_root_list.setMaximumHeight(78)
+        self.skills_root_list.setStyleSheet(s["list"])
+        vsk.addWidget(self.skills_root_list)
+
+        sk_row = QHBoxLayout()
+        self.btn_skills_set = QPushButton("目录设置…")
+        self.btn_skills_set.setStyleSheet(btn_css)
+        self.btn_skills_set.clicked.connect(self._open_skills_settings)
+        self.btn_skills_open = QPushButton("打开辅助窗")
+        self.btn_skills_open.setStyleSheet(btn_css)
+        self.btn_skills_open.clicked.connect(self._open_skills_panel)
+        sk_row.addWidget(self.btn_skills_set)
+        sk_row.addWidget(self.btn_skills_open)
+        vsk.addLayout(sk_row)
+
+        ai_row = QHBoxLayout()
+        self.btn_ai_service = QPushButton("⚡ AI 自检服务")
+        self.btn_ai_service.setStyleSheet(btn_css)
+        self.btn_ai_service.setToolTip(
+            "调用本地主 Agent（非交互模式）手动完成待处理服务：\n"
+            "· 校验 / 补全 API 余额监控端点\n"
+            "· 扫描 skills 并生成缺失的中文翻译\n"
+            "不会自动触发；新装 skill 的翻译可由本地「AgentFloat 翻译助手」skill 完成。")
+        self.btn_ai_service.clicked.connect(self._run_ai_service)
+        ai_row.addWidget(self.btn_ai_service)
+        self.lbl_ai_service = QLabel("")
+        self.lbl_ai_service.setFont(self._font(9))
+        self.lbl_ai_service.setStyleSheet(f"color: {s['hi']};")
+        ai_row.addWidget(self.lbl_ai_service, 1)
+        vsk.addLayout(ai_row)
+
+        self.cb_auto_translate = QCheckBox("新装 skill 自动翻译（启动时检测，自动调用本地 Agent 补译）")
+        self.cb_auto_translate.setFont(self._font(11))
+        self.cb_auto_translate.setStyleSheet(s["checkbox"])
+        self.cb_auto_translate.setChecked(bool(self._skills_cfg.get("auto_translate_new_skills", True)))
+        self.cb_auto_translate.setToolTip(
+            "开启后：检测到新安装且缺少中文翻译的 skill，会自动调用本地主 Agent（非交互）补译。\n"
+            "关闭后：新 skill 不会自动触发翻译，可在「⚡ AI 自检服务」中手动补译。")
+        vsk.addWidget(self.cb_auto_translate)
+
+        _svc = self.config.get("services") or {}
+        _last = (_svc.get("last_run") or "").strip()
+        self.lbl_ai_service.setText(("上次运行 %s" % _last) if _last else "尚未运行")
+
+        psk.addWidget(box_skills)
+        psk.addStretch()
+        tabs.addTab(page_skills, "Skills")
+
+        # ================= API 用量 =================
+        page_api = QWidget()
+        pap = QVBoxLayout(page_api)
+        pap.setSpacing(8)
+        pap.setContentsMargins(6, 10, 6, 6)
+
         api_config = self.config.get("api_monitor", API_MONITOR_DEFAULTS)
         self._api_monitor_tab = ApiMonitorSettingsTab(api_config, theme=self.theme)
         self._api_monitor_tab.config_changed.connect(self._on_api_config_changed)
-        # 放入滚动区域
         api_scroll = QScrollArea()
         api_scroll.setWidgetResizable(True)
         api_scroll.setWidget(self._api_monitor_tab)
-        api_scroll.setMaximumHeight(200)
+        api_scroll.setFrameShape(QScrollArea.NoFrame)
         self._api_scroll = api_scroll
         api_scroll.setStyleSheet(
             f"QScrollArea {{ border: 1px solid {s['bd']}; border-radius: 10px; background: {s['card_bg']}; }}"
             f"QScrollBar:vertical {{ width: 6px; }}"
         )
-        layout.addWidget(api_scroll)
+        pap.addWidget(api_scroll)
+        tabs.addTab(page_api, "API 用量")
 
-        # 按钮
+        # ================= 关于 =================
+        page_about = QWidget()
+        pab = QVBoxLayout(page_about)
+        pab.setSpacing(8)
+        pab.setContentsMargins(6, 10, 6, 6)
+
+        box_about = QGroupBox("关于 AgentFloat")
+        box_about.setFont(self._font(13, bold=True))
+        box_about.setStyleSheet(s["group"])
+        va = QVBoxLayout(box_about)
+        va.setSpacing(8)
+        va.setContentsMargins(14, 14, 14, 10)
+        va.addWidget(self._label("AgentFloat — AI Agent 浮窗助手", size=12, color=s["tx"], bold=True))
+        va.addWidget(self._label(
+            "点击浮窗启动主 Agent；悬停/长按唤出环绕菜单；\n"
+            "辅助窗管理 skills、查看 API 用量。", size=10))
+        va.addSpacing(6)
+        log_hint = self._label(
+            "日志文件: %APPDATA%\\AgentFloat\\logs\\AgentFloat.log", size=9, color=s["hi"])
+        cfg_hint = self._label(
+            "配置文件: %APPDATA%\\AgentFloat\\config.json", size=9, color=s["hi"])
+        va.addWidget(log_hint)
+        va.addWidget(cfg_hint)
+        pab.addWidget(box_about)
+        pab.addStretch()
+        tabs.addTab(page_about, "关于")
+
+        # ── 底部按钮行 ──
         bl = QHBoxLayout()
         bl.setSpacing(10)
 
@@ -1041,19 +1096,14 @@ class SettingsDialog(QDialog):
         bl.addWidget(save_btn)
         layout.addLayout(bl)
 
-        # 日志文件路径提示
-        log_hint = self._label(
-            f"日志文件: %APPDATA%\\AgentFloat\\logs\\AgentFloat.log", size=9, color=s["hi"]
-        )
-        layout.addWidget(log_hint)
-
         # ── 存储控件引用，用于即时换肤 ──
         self._tw = {
             'container': container,
-            'groups': [box, box_theme, box2, box3, box_snap, box4, box_cleanup, box_radial, box_skills],
+            'groups': [box, box_theme, box2, box3, box_snap, box4, box_cleanup, box_radial, box_skills, box_about],
             'radios': [self.rb_normal, self.rb_skip, self.rb_light, self.rb_dark],
-            'checkboxes': [self.cb_snap_enabled, self.cb_snap_hidden, self.cb_cleanup],
-            'buttons': [preview_btn, cancel_btn, browse_btn, reset_btn, self.btn_manage_agent, self.btn_skills_set, self.btn_skills_open, self.btn_ai_service],
+            'checkboxes': [self.cb_snap_enabled, self.cb_snap_hidden, self.cb_cleanup, self.cb_auto_translate],
+            'buttons': [preview_btn, cancel_btn, browse_btn, reset_btn, self.btn_manage_agent,
+                        self.btn_skills_set, self.btn_skills_open, self.btn_ai_service],
             'save_btn': save_btn,
             'close_btn': close_btn,
             'api_scroll': api_scroll,
@@ -1068,21 +1118,18 @@ class SettingsDialog(QDialog):
 
         outer.addWidget(container)
 
-        # ── 窗口尺寸：仅设最小，不设最大，避免与 Windows 布局引擎冲突 ──
-        # （无边框窗口用户无法调整大小，不设 setFixedSize 不会导致问题）
+        # 窗口尺寸：仅设最小，避免与 Windows 布局引擎冲突
         outer.activate()
         content_w = outer.sizeHint().width() + 24
         content_h = outer.sizeHint().height() + 40
-        content_h = max(content_h, 620)
-        self.resize(max(content_w, 840), content_h)
+        content_h = max(content_h, 560)
+        self.resize(max(content_w, 880), content_h)
         _log().debug("[设置] 布局计算: %dx%d (sizeHint=%dx%d)", content_w, content_h,
                      outer.sizeHint().width(), outer.sizeHint().height())
 
-        # 居中显示
         screen = QApplication.primaryScreen().geometry()
-        self.move((screen.width() - self.width()) // 2, (screen.height() - content_h) // 2)
+        self.move((screen.width() - self.width()) // 2, (screen.height() - self.height()) // 2)
 
-    # ── 无边框窗口拖拽支持 ──
     CLICK_THRESHOLD = 4
 
     def mousePressEvent(self, event):
@@ -1179,6 +1226,8 @@ class SettingsDialog(QDialog):
             self._api_monitor_tab.set_theme(self.theme)
 
         # 新增模块控件主题同步
+        if hasattr(self, '_tabs'):
+            self._tabs.setStyleSheet(s['tabs'])
         if hasattr(self, 'cmb_primary_agent'):
             self.cmb_primary_agent.setStyleSheet(s['combo'])
             self.cmb_trigger.setStyleSheet(s['combo'])
@@ -1196,7 +1245,32 @@ class SettingsDialog(QDialog):
     def _collect(self):
         # 主 Agent 启动模式同步到 Agent 记录
         mode = "skip_permissions" if self.rb_skip.isChecked() else "normal"
+        # 自定义启动程序：确保 id=custom 的 Agent 记录存在并指向所选路径
+        if self._primary_agent_id == "custom" and self._custom_path:
+            custom = find_agent(self._agents, "custom")
+            if custom is None:
+                self._agents.append({
+                    "id": "custom",
+                    "name": "自定义程序",
+                    "command": self._custom_path,
+                    "args": [],
+                    "skip_permissions_arg": "",
+                    "working_directory": "",
+                    "launch_mode": mode,
+                    "icon_color": "#5B8DEF",
+                    "icon_char": "A",
+                    "check": self._custom_path,
+                    "primary": True,
+                    "builtin": False,
+                    "description": "用户自定义启动程序（设置中直接选择的可执行文件）",
+                })
+            else:
+                custom["command"] = self._custom_path
+                custom["check"] = self._custom_path
+                custom["name"] = "自定义程序"
+                custom["launch_mode"] = mode
         for a in self._agents:
+            a["primary"] = (a.get("id") == self._primary_agent_id)
             if a.get("id") == self._primary_agent_id:
                 a["launch_mode"] = mode
         radial = {
@@ -1229,20 +1303,70 @@ class SettingsDialog(QDialog):
     def _refresh_agent_combo(self):
         self.cmb_primary_agent.blockSignals(True)
         self.cmb_primary_agent.clear()
+        # 定位自定义启动项（id=custom）并记录其路径
+        self._custom_path = ""
         for a in self._agents:
+            if a.get("id") == "custom":
+                self._custom_path = (a.get("command") or "").strip()
+                break
+        for a in self._agents:
+            if a.get("id") == "custom":
+                continue
             self.cmb_primary_agent.addItem(a.get("name"), a.get("id"))
-        idx = self.cmb_primary_agent.findData(self._primary_agent_id)
-        self.cmb_primary_agent.setCurrentIndex(max(0, idx))
+        self.cmb_primary_agent.addItem(
+            ("自定义…  (%s)" % self._custom_path) if self._custom_path else "自定义…",
+            "__custom__")
+        if self._primary_agent_id == "custom":
+            self.cmb_primary_agent.setCurrentIndex(self.cmb_primary_agent.count() - 1)
+        else:
+            idx = self.cmb_primary_agent.findData(self._primary_agent_id)
+            self.cmb_primary_agent.setCurrentIndex(max(0, idx))
         self.cmb_primary_agent.blockSignals(False)
         self._on_primary_agent_changed()
 
     def _on_primary_agent_changed(self):
         aid = self.cmb_primary_agent.currentData()
-        if aid:
+        if aid == "__custom__":
+            self._primary_agent_id = "custom"
+        elif aid:
             self._primary_agent_id = aid
         mode = primary_launch_mode(self._agents)
         self.rb_normal.setChecked(mode != "skip_permissions")
         self.rb_skip.setChecked(mode == "skip_permissions")
+
+    def _on_combo_activated(self, index):
+        """用户从下拉框实际选择了「自定义…」项时弹出文件选择器"""
+        if self.cmb_primary_agent.itemData(index) == "__custom__":
+            self._choose_custom_agent()
+
+    def _choose_custom_agent(self):
+        """选择自定义启动程序路径；取消则恢复原选择"""
+        prev_id = self._primary_agent_id
+        start_dir = self._custom_path or os.environ.get("USERPROFILE", "")
+        if start_dir and not os.path.isdir(start_dir):
+            start_dir = os.path.dirname(start_dir) or os.environ.get("USERPROFILE", "")
+        picked, _ = QFileDialog.getOpenFileName(
+            self, "选择点击浮窗时要启动的程序", start_dir,
+            "可执行文件 (*.exe);;批处理文件 (*.bat *.cmd);;所有文件 (*.*)")
+        if picked:
+            self._custom_path = os.path.normpath(picked)
+            self._primary_agent_id = "custom"
+            self.cmb_primary_agent.blockSignals(True)
+            self.cmb_primary_agent.setItemText(
+                self.cmb_primary_agent.count() - 1, "自定义…  (%s)" % self._custom_path)
+            self.cmb_primary_agent.blockSignals(False)
+            self.rb_normal.setChecked(True)
+            self.rb_skip.setChecked(False)
+        else:
+            # 取消选择 → 恢复原主 Agent
+            self.cmb_primary_agent.blockSignals(True)
+            if prev_id == "custom":
+                idx = self.cmb_primary_agent.count() - 1
+            else:
+                idx = self.cmb_primary_agent.findData(prev_id)
+            self.cmb_primary_agent.setCurrentIndex(max(0, idx))
+            self.cmb_primary_agent.blockSignals(False)
+            self._on_primary_agent_changed()
 
     def _open_agent_manager(self):
         dlg = AgentManagerDialog(self._agents, theme=self.theme, parent=self)
@@ -1349,6 +1473,8 @@ class FloatingWidget(QWidget):
         self._drag_active = False
         self._drag_origin = QPoint()
         self._window_origin = QPoint()
+        # 拖拽结束后的悬停冷却截止时间戳（monotonic 秒）
+        self._drag_cooldown_until = 0.0
 
         # 按压缩放 (0.0 ~ 1.0，1.0 = 正常)
         self._press_scale = 1.0
@@ -2124,6 +2250,9 @@ class FloatingWidget(QWidget):
     def _maybe_start_hover_open(self):
         if not self._radial_cfg.get("enabled", True):
             return
+        # 拖拽中或冷却期内不启动悬停展开
+        if self._drag_active or time.monotonic() < self._drag_cooldown_until:
+            return
         mode = self._radial_cfg.get("trigger_mode", "both")
         if mode in ("hover", "both"):
             self._hover_open_timer.start(int(self._radial_cfg.get("hover_delay_ms", 400)))
@@ -2132,6 +2261,9 @@ class FloatingWidget(QWidget):
         self._hover_open_timer.stop()
         self._long_press_timer.stop()
         if not self._radial_cfg.get("enabled", True):
+            return
+        # 防御：拖拽中或冷却期内绝不弹菜单
+        if self._drag_active or time.monotonic() < self._drag_cooldown_until:
             return
         if source == "long_press":
             self._long_press_fired = True
@@ -2351,6 +2483,8 @@ class FloatingWidget(QWidget):
             self._drag_origin = event.globalPos()
             self._window_origin = self.pos()
             self._drag_active = False
+            # 按住即取消悬停展开，避免拖拽时误弹菜单
+            self._hover_open_timer.stop()
             # 按压反馈
             self.is_pressed = True
             self._press_anim.stop()
@@ -2375,13 +2509,18 @@ class FloatingWidget(QWidget):
         if not self._drag_active and delta > self.CLICK_THRESHOLD:
             self._drag_active = True
             self._long_press_timer.stop()
+            # 拖拽开始：取消悬停展开，并关闭已打开的环绕菜单
+            self._hover_open_timer.stop()
+            if self._radial_menu is not None and self._radial_menu.isVisible():
+                self._close_radial_menu()
         if self._drag_active:
             new_pos = self._window_origin + (event.globalPos() - self._drag_origin)
             self.move(new_pos)
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
-            if not self._drag_active:
+            was_dragging = self._drag_active
+            if not was_dragging:
                 if self._long_press_fired:
                     # 长按已触发环绕菜单，本次释放不再启动
                     self._long_press_fired = False
@@ -2398,6 +2537,9 @@ class FloatingWidget(QWidget):
                 self.config["window_x"] = self.pos().x()
                 self.config["window_y"] = self.pos().y()
                 save_config(self.config)
+                # 拖拽结束后 500ms 内不响应悬停，避免松手瞬间误弹菜单
+                self._drag_cooldown_until = time.monotonic() + 0.5
+                _log().debug("拖拽结束，悬停冷却 500ms")
             self._drag_active = False
             # 同步 API 面板位置
             self._sync_api_panel_position()
