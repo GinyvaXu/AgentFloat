@@ -128,7 +128,9 @@ class RadialMenu(QWidget):
         if not self.isVisible():
             return
         pos = QCursor.pos()
-        in_menu = self.frameGeometry().contains(pos)
+        # 用 geometry()（顶层窗口为全局坐标）替代 frameGeometry()，
+        # 避免 WA_ShowWithoutActivating 下 frameGeometry 坐标偏移导致菜单误关
+        in_menu = self.geometry().contains(pos)
         in_anchor = self._anchor_rect is not None and self._anchor_rect.contains(pos)
         if in_menu:
             self._close_pending = False

@@ -296,7 +296,7 @@ class AgentManagerDialog(QDialog):
 
 
 class SkillsSettingsDialog(QDialog):
-    """Skills 扫描设置：扫描根目录 + AI 优化工具"""
+    """Skills 扫描设置：扫描根目录"""
 
     def __init__(self, skills_cfg, theme="light", parent=None):
         super().__init__(parent)
@@ -338,21 +338,6 @@ class SkillsSettingsDialog(QDialog):
         vb.addLayout(btns)
         root.addWidget(box, 1)
 
-        box2 = QGroupBox("AI 优化描述")
-        vb2 = QVBoxLayout(box2)
-        vb2.setSpacing(8)
-        vb2.setContentsMargins(12, 12, 12, 10)
-        hint2 = QLabel("点击「AI 优化描述」时调用的本地 AI 工具（固定模板个性化改写）")
-        hint2.setWordWrap(True)
-        vb2.addWidget(hint2)
-        self.cmb_tool = QComboBox()
-        self.cmb_tool.addItem("codex exec（推荐）", "codex exec")
-        self.cmb_tool.addItem("claude -p", "claude -p")
-        idx = self.cmb_tool.findData(self._cfg.get("ai_tool") or "codex exec")
-        self.cmb_tool.setCurrentIndex(max(0, idx))
-        vb2.addWidget(self.cmb_tool)
-        root.addWidget(box2)
-
         foot = QHBoxLayout()
         foot.addStretch()
         cancel = QPushButton("取消")
@@ -383,7 +368,7 @@ class SkillsSettingsDialog(QDialog):
 
     def _save(self):
         self._cfg["roots"] = [self.root_list.item(i).text() for i in range(self.root_list.count())]
-        self._cfg["ai_tool"] = self.cmb_tool.currentData()
+        self._cfg.pop("ai_tool", None)
         self.accept()
 
     @property

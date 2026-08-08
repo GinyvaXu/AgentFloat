@@ -1,60 +1,21 @@
-# -*- mode: python ; coding: utf-8 -*-
+﻿# -*- mode: python ; coding: utf-8 -*-
 """AgentFloat — Skills 辅助窗
 
-双栏布局：左列表（搜索 / 来源过滤）+ 右详情（描述 / 触发指令 / 复制 / AI 优化）。
+双栏布局：左列表（搜索 / 来源过滤 / 中英对照切换）+ 右详情（中英描述 / 触发指令 / 复制）。
 """
 import os
-import subprocess
 
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
     QListWidget, QListWidgetItem, QPushButton, QTextBrowser, QFrame,
-    QApplication, QMessageBox, QSplitter,
+    QApplication, QSplitter,
 )
 
 from af_theme import get_colors
 from skills_scanner import scan_skills, default_skill_roots
-
-AI_OPTIMIZE_TEMPLATE = (
-    "你是技能描述优化助手。请把下面这个 AI Agent skill 的原始描述，"
-    "改写为面向用户的、简洁的功能简介（中文，不超过 80 字，保留关键能力，不要解释过程）。\n\n"
-    "技能名称：{name}\n原始描述：{desc}\n\n直接输出优化后的简介："
-)
-
-
-class _OptimizeWorker(QThread):
-    done = pyqtSignal(str)
-    failed = pyqtSignal(str)
-
-    def __init__(self, ai_tool, template, parent=None):
-        super().__init__(parent)
-        self._ai_tool = ai_tool
-        self._template = template
-
-    def run(self):
-        tool = (self._ai_tool or "codex exec").strip()
-        if tool.startswith("codex"):
-            cmd = ["codex", "exec", "--skip-git-repo-check", self._template]
-        else:
-            cmd = ["claude", "-p", self._template]
-        try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=240,
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            out = (proc.stdout or "").strip() or (proc.stderr or "").strip()
-            if not out:
-                self.failed.emit("AI 未返回内容")
-            else:
-                self.done.emit(out)
-        except FileNotFoundError:
-            self.failed.emit("未找到 AI 工具（%s）" % tool)
-        except subprocess.TimeoutExpired:
-            self.failed.emit("AI 优化超时（240s）")
-        except Exception as e:
-            self.failed.emit("AI 优化失败: %s" % e)
+from skills_translations import get_zh
 
 
 class SkillsPanel(QDialog):
@@ -63,11 +24,12 @@ class SkillsPanel(QDialog):
         self._skills_cfg = skills_cfg or {}
         self._theme = theme
         self._all_skills = []
-        self._worker = None
         self._current = None
+        self._lang_mode = "both"          # en / zh / both
+        self._lang_cycle = ["en", "zh", "both"]
         self._cjk = "Microsoft YaHei"
         self.setWindowTitle("AgentFloat — Skills 辅助窗")
-        self.setMinimumSize(860, 560)
+        self.setMinimumSize(880, 580)
         self.setStyleSheet(self._stylesheet())
         self._setup_ui()
         self.refresh()
@@ -112,24 +74,34 @@ class SkillsPanel(QDialog):
 
         bar = QHBoxLayout()
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("搜索 skill 名称 / 描述…")
+        self.search_edit.setPlaceholderText("搜索 skill 名称 / 描述（中英文均可）…")
         self.search_edit.textChanged.connect(self._apply_filter)
         self.source_combo = QComboBox()
         self.source_combo.currentIndexChanged.connect(self._apply_filter)
+        self.btn_lang = QPushButton("中英对照")
+        self.btn_lang.setToolTip("切换显示语言：英文 / 中文 / 中英对照")
+        self.btn_lang.clicked.connect(self._cycle_lang)
         bar.addWidget(self.search_edit, 3)
         bar.addWidget(self.source_combo, 1)
+        bar.addWidget(self.btn_lang)
         root.addLayout(bar)
 
         split = QSplitter(Qt.Horizontal)
+
+        # 左：列表
+        left = QFrame()
+        ll = QVBoxLayout(left)
+        ll.setContentsMargins(0, 0, 0, 0)
         self.list = QListWidget()
         self.list.currentRowChanged.connect(self._on_select)
-        self.list.setMinimumWidth(280)
-        split.addWidget(self.list)
+        ll.addWidget(self.list)
+        split.addWidget(left)
 
+        # 右：详情
         detail = QFrame()
         detail.setObjectName("detailCard")
         dv = QVBoxLayout(detail)
-        dv.setContentsMargins(14, 12, 14, 12)
+        dv.setContentsMargins(14, 14, 14, 14)
         dv.setSpacing(8)
         self.lbl_name = QLabel("—")
         self.lbl_name.setFont(QFont(self._cjk, 14, QFont.Bold))
@@ -138,22 +110,21 @@ class SkillsPanel(QDialog):
         self.lbl_source.setStyleSheet("color: #%02X%02X%02X;" % get_colors(self._theme)["HINT"])
         dv.addWidget(self.lbl_source)
         self.desc_view = QTextBrowser()
+        self.desc_view.setOpenExternalLinks(False)
         dv.addWidget(self.desc_view, 1)
 
         act = QHBoxLayout()
         self.btn_copy = QPushButton("复制触发指令")
+        self.btn_copy.setEnabled(False)
         self.btn_copy.clicked.connect(self._copy_trigger)
-        self.btn_optimize = QPushButton("AI 优化描述")
-        self.btn_optimize.clicked.connect(self._optimize_desc)
         act.addWidget(self.btn_copy)
-        act.addWidget(self.btn_optimize)
         act.addStretch()
         self.lbl_status = QLabel("")
         act.addWidget(self.lbl_status)
         dv.addLayout(act)
 
         split.addWidget(detail)
-        split.setSizes([300, 540])
+        split.setSizes([320, 540])
         root.addWidget(split, 1)
 
         bottom = QHBoxLayout()
@@ -185,6 +156,29 @@ class SkillsPanel(QDialog):
             self.source_combo.addItem(os.path.basename(r) or r, r)
         self.source_combo.blockSignals(False)
 
+    def _zh(self, s):
+        zh_name, zh_desc = get_zh(s.name, os.path.basename(os.path.dirname(s.path)))
+        return zh_name, zh_desc
+
+    def _display_name(self, s):
+        if self._lang_mode == "en":
+            return s.name
+        zh_name, _ = self._zh(s)
+        if zh_name and self._lang_mode == "both":
+            return "%s（%s）" % (zh_name, s.name)
+        if zh_name:
+            return zh_name
+        return s.name
+
+    def _searchable_text(self, s):
+        parts = [s.name, s.description]
+        zh_name, zh_desc = self._zh(s)
+        if zh_name:
+            parts.append(zh_name)
+        if zh_desc:
+            parts.append(zh_desc)
+        return " ".join(parts).lower()
+
     def _apply_filter(self):
         kw = self.search_edit.text().strip().lower()
         src = self.source_combo.currentData()
@@ -193,10 +187,10 @@ class SkillsPanel(QDialog):
         for s in self._all_skills:
             if src and s.root != src:
                 continue
-            if kw and kw not in s.name.lower() and kw not in s.description.lower():
+            if kw and kw not in self._searchable_text(s):
                 continue
             item = QListWidgetItem()
-            item.setText("%s%s" % (s.name, "  ⚡" if s.trigger else ""))
+            item.setText("%s%s" % (self._display_name(s), "  ⚡" if s.trigger else ""))
             item.setData(Qt.UserRole, s)
             item.setToolTip(s.path)
             self.list.addItem(item)
@@ -214,9 +208,24 @@ class SkillsPanel(QDialog):
             return
         s = item.data(Qt.UserRole)
         self._current = s
-        self.lbl_name.setText(s.name)
-        self.lbl_source.setText(s.root)
-        txt = s.description or "（无描述）"
+        zh_name, zh_desc = self._zh(s)
+        has_zh = bool(zh_name and zh_desc)
+        if self._lang_mode == "en":
+            self.lbl_name.setText(s.name)
+            txt = s.description or "（无描述）"
+        elif self._lang_mode == "zh":
+            self.lbl_name.setText(zh_name or s.name)
+            if zh_desc:
+                txt = zh_desc
+            else:
+                txt = "%s\n\n（暂无中文翻译，以下为原文）\n%s" % (s.description or "（无描述）", s.description or "")
+        else:  # both
+            self.lbl_name.setText("%s（%s）" % (zh_name, s.name) if zh_name else s.name)
+            if has_zh:
+                txt = "【中文】%s\n\n【English】%s" % (zh_desc, s.description or "（无描述）")
+            else:
+                txt = s.description or "（无描述）"
+                txt += "\n\n（暂无中文翻译）"
         if s.trigger:
             txt += "\n\n⚡ 触发指令：`%s`" % s.trigger
         if s.has_manual_trigger and not s.trigger:
@@ -226,6 +235,15 @@ class SkillsPanel(QDialog):
         self.lbl_status.setText("")
         self.btn_copy.setEnabled(bool(s.trigger))
 
+    # ── 语言切换 ────────────────────────────────
+    def _cycle_lang(self):
+        idx = (self._lang_cycle.index(self._lang_mode) + 1) % len(self._lang_cycle)
+        self._lang_mode = self._lang_cycle[idx]
+        label = {"en": "English", "zh": "中文", "both": "中英对照"}[self._lang_mode]
+        self.btn_lang.setText(label)
+        self.btn_lang.setToolTip("切换显示语言：英文 / 中文 / 中英对照（当前：%s）" % label)
+        self._apply_filter()
+
     # ── 动作 ────────────────────────────────────
     def _copy_trigger(self):
         s = getattr(self, "_current", None)
@@ -233,35 +251,3 @@ class SkillsPanel(QDialog):
             QApplication.clipboard().setText(s.trigger)
             self.lbl_status.setText("已复制 ✓")
             QTimer.singleShot(1500, lambda: self.lbl_status.setText(""))
-
-    def _optimize_desc(self):
-        s = getattr(self, "_current", None)
-        if s is None:
-            return
-        ai_tool = self._skills_cfg.get("ai_tool") or "codex exec"
-        template = AI_OPTIMIZE_TEMPLATE.format(name=s.name, desc=(s.description or "无"))
-        self.lbl_status.setText("AI 优化中…")
-        self.btn_optimize.setEnabled(False)
-        self._worker = _OptimizeWorker(ai_tool, template, self)
-        self._worker.done.connect(self._on_optimized)
-        self._worker.failed.connect(self._on_optimize_failed)
-        self._worker.start()
-
-    def _on_optimized(self, text):
-        s = getattr(self, "_current", None)
-        if s is not None:
-            s.description = text.strip()
-            self.desc_view.setPlainText(
-                "%s\n\n（AI 优化）\n\n路径：%s" % (text.strip(), s.path))
-        self.lbl_status.setText("优化完成 ✓")
-        self.btn_optimize.setEnabled(True)
-
-    def _on_optimize_failed(self, msg):
-        self.lbl_status.setText(msg)
-        self.btn_optimize.setEnabled(True)
-        QMessageBox.information(self, "AI 优化", msg)
-
-    def closeEvent(self, event):
-        if self._worker and self._worker.isRunning():
-            self._worker.wait(1000)
-        super().closeEvent(event)

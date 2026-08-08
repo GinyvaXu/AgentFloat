@@ -229,7 +229,7 @@ IOS_HINT       = _LIGHT["HINT"]
 IOS_SURFACE    = _LIGHT["SURFACE"]
 
 FONT_FAMILY = "Microsoft YaHei"
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 
 # ── 浮窗参数 ──────────────────────────────────────────
 DEFAULT_SIZE  = 52          # 默认边长 px
@@ -1968,8 +1968,11 @@ class FloatingWidget(QWidget):
 
         hover_size = int(self.base_size * HOVER_SCALE)
         if self.is_hovered and not was:
+            _log().debug("悬停进入: local=%s size=%d", local_pos, hover_size)
             self._animate_size(hover_size)
             self._maybe_start_hover_open()
+        elif not self.is_hovered and was:
+            _log().debug("悬停离开")
         elif not self.is_hovered and was:
             self._animate_size(self.base_size)
             self._hover_open_timer.stop()
@@ -2006,7 +2009,11 @@ class FloatingWidget(QWidget):
         self._radial_menu.set_theme(self.theme)
         self._radial_menu.set_items(items, radius=int(self._radial_cfg.get("radius", 120)))
         center = self.geometry().center()
-        self._radial_menu.open_at(self.mapToGlobal(center), anchor_rect=self.frameGeometry())
+        _log().debug("环绕菜单打开: source=%s items=%d center=%s", source, len(items), center)
+        # 锚定区域用 pos()+size()（顶层窗口全局坐标），避免 frameGeometry 偏移
+        self._radial_menu.open_at(
+            self.mapToGlobal(center),
+            anchor_rect=QRect(self.pos(), self.size()))
 
     def _close_radial_menu(self):
         if self._radial_menu is not None:

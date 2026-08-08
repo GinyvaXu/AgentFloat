@@ -71,12 +71,14 @@ def parse_skill_md(path, root=""):
     fm = re.match(r"\A---\s*\n(.*?)\n---", text, re.S)
     if fm:
         body = fm.group(1)
-        m = re.search(r"^name\s*:\s*(.+)$", body, re.M)
+        m = re.search(r"^name\s*:\s*(.*)$", body, re.M)
         if m:
-            name = m.group(1).strip().strip("\"'")
-        m = re.search(r"^description\s*:\s*(.+)$", body, re.M | re.I)
-        if m:
-            desc = m.group(1).strip().strip("\"'")
+            first = m.group(1).strip()
+            if first in ("|", ">", "|-", ">-"):
+                name = _first_block_line(body[m.end():]) or name
+            else:
+                name = first.strip("\"'")
+        desc = _parse_desc(body)
     if not desc:
         # 取正文首段作为描述兜底
         body2 = re.sub(r"^---.*?---", "", text, count=1, flags=re.S)
@@ -104,3 +106,37 @@ def parse_skill_md(path, root=""):
     has_manual = bool(trigger) or "trigger" in text.lower() or ("手动" in text and "触发" in text)
     return SkillInfo(name=name, description=desc, path=path, root=root,
                      trigger=trigger, has_manual_trigger=has_manual)
+
+
+def _parse_desc(body):
+    """解析 frontmatter 中的 description：支持块标量（> 折叠 / | 字面量）与单行"""
+    m = re.search(r"^description\s*:\s*(.*)$", body, re.M | re.I)
+    if not m:
+        return ""
+    first = m.group(1).strip()
+    # 块标量：>、|、>-、|- 后跟缩进行
+    if first in (">", "|", ">-", ">- ", "|-", "|- ", ">+", "|+"):
+        indent = None
+        lines = []
+        for ln in body[m.end():].splitlines():
+            if not ln.strip():
+                lines.append("")
+                continue
+            cur = len(ln) - len(ln.lstrip(" "))
+            if indent is None:
+                indent = cur
+            if cur < indent:
+                break
+            lines.append(ln[indent:])
+        joined = " ".join(x.strip() for x in lines) if first.startswith(">") else "\n".join(x for x in lines)
+        return joined.strip().strip("\"'")
+    return first.strip("\"'")
+
+
+def _first_block_line(body_tail):
+    """块标量取首个非空缩进行"""
+    for ln in body_tail.splitlines():
+        s = ln.strip()
+        if s and not s.startswith("#"):
+            return s.strip("\"'")
+    return ""
