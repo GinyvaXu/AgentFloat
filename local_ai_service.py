@@ -6,8 +6,11 @@
   1. API 用量端点配置校验 / 补全（含 DeepSeek 等常见平台）
   2. Skills 查找与中英翻译补全
 
-首次启动自动运行一次（config.services.ai_first_run_done 标记），
-之后可在「设置 → Skills 辅助 → AI 自检服务」中再次手动运行。
+「设置 → Skills 辅助 → AI 自检服务」手动运行；
+检测到新安装且缺中文翻译的 skill 时，会以受限任务自动触发补译
+（skills.auto_translate_new_skills 开关，默认开启，不跑完整流程）。
+翻译 skill 本体（agentfloat-skills-translator）会在启动时自动部署到
+~/.codex/skills/，供本地 Agent 按需运行以补齐后续翻译。
 
 安全策略：Agent 只负责「读取配置并输出结构化 JSON」，所有文件写入
 （config.json / 翻译文件）均由本模块校验后自行完成。
@@ -28,6 +31,49 @@ from api_monitor_config import validate_endpoint, DEFAULTS as API_MONITOR_DEFAUL
 from skills_translations import SKILL_ZH, _ALIAS
 
 SERVICE_TIMEOUT_SECONDS = 600
+
+TRANSLATOR_SKILL_NAME = "agentfloat-skills-translator"
+
+# 本地翻译 skill 的 SKILL.md 内容（AgentFloat 启动时自动部署，不存在才写入）
+TRANSLATOR_SKILL_MD = r'''---
+name: agentfloat-skills-translator
+description: Scan local AI agent skills and generate Chinese translations for any newly installed skills missing from the AgentFloat translation file, then merge them in. 扫描本地已安装的 skills，为缺少中文翻译的新技能生成翻译并合并到 AgentFloat 翻译文件。在安装新 skill 之后运行此 skill。
+---
+
+# AgentFloat Skills 翻译助手
+
+在用户安装新 skill 后，用本 skill 自动补齐其中文翻译，供 AgentFloat 的 Skills 辅助窗使用。
+
+## 任务步骤
+
+1. **扫描 skills 目录**：用 Read 工具（或 `ls`/`Get-ChildItem`）读取以下目录中的每个 `SKILL.md`：
+   - `%USERPROFILE%\.codex\skills\`
+   - `%USERPROFILE%\.codex\skills\.system\`
+   - `%USERPROFILE%\.agents\skills\`
+   - `%USERPROFILE%\.codex\plugins\cache\*\*\skills\`（插件类技能，如 latex / spreadsheets / documents / presentations / pdf / browser）
+   每个 SKILL.md 的 frontmatter 含 `name` 与 `description`。
+
+2. **读取现有翻译**：读取 `%APPDATA%\AgentFloat\skills_translations_ai.json`。该文件是 JSON 对象：
+   ```json
+   {
+     "<skill-name>": ["<中文名>", "<中文简介>"]
+   }
+   ```
+
+3. **找出缺失项**：对比上一步，列出「已安装但 JSON 中不存在」的 skill（注意 skill 名可能带插件前缀，如 `latex:latex-compile`、`browser:control-in-app-browser`，以 frontmatter 的 name 为准）。
+
+4. **生成翻译**：为每个缺失 skill 生成：
+   - 中文名称：简洁贴切，2~12 字；
+   - 中文简介：一句 20~80 字的说明，准确概括该 skill 的用途。
+
+5. **合并写入**：把新条目合并进 `%APPDATA%\AgentFloat\skills_translations_ai.json`（**保留已有条目，不要覆盖**），用 UTF-8 写入，JSON 缩进 2 空格，`ensure_ascii=false`。写入完成后向用户报告新增了哪些条目。
+
+## 注意事项
+- 只做翻译合并，不要修改任何 SKILL.md 原文。
+- 如果所有已安装 skill 都已有翻译，直接告诉用户「无需新增」。
+- 文件路径含 `%APPDATA%` 与 `%USERPROFILE%` 环境变量，请先展开再读写。
+- 本技能专为 AgentFloat 服务；不要删除或重命名 JSON 中已有的键。
+'''
 
 logger = logging.getLogger("AgentFloat.LocalAI")
 
@@ -241,6 +287,110 @@ def _save_custom_translations(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+# ── 翻译 skill 自动部署 ────────────────────────────────
+def ensure_translator_skill():
+    """自动部署本地翻译 skill 到 ~/.codex/skills/（不存在时写入）。返回路径或 None"""
+    d = os.path.join(os.path.expanduser("~"), ".codex", "skills", TRANSLATOR_SKILL_NAME)
+    p = os.path.join(d, "SKILL.md")
+    try:
+        if os.path.exists(p):
+            return p
+        os.makedirs(d, exist_ok=True)
+        with open(p, "w", encoding="utf-8", newline="\n") as f:
+            f.write(TRANSLATOR_SKILL_MD)
+        logger.info("已自动部署翻译 skill: %s", p)
+        return p
+    except Exception as e:
+        logger.warning("翻译 skill 自动部署失败: %s", e)
+        return None
+
+
+# ── skill 状态跟踪（检测「新安装」的 skill）─────────────
+SKILL_STATE_PATH = os.path.join(_config_dir(), "skill_state.json")
+
+
+def _load_skill_state():
+    try:
+        with open(SKILL_STATE_PATH, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_skill_state(state):
+    try:
+        os.makedirs(os.path.dirname(SKILL_STATE_PATH), exist_ok=True)
+        with open(SKILL_STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def _has_translation(name):
+    if name in SKILL_ZH or name in _ALIAS:
+        return True
+    if name in _load_custom_translations():
+        return True
+    return False
+
+
+def find_new_skills(roots):
+    """检测「新安装且缺少中文翻译」的 skill，并完成状态记账。
+
+    返回 SkillInfo 列表；已触发过翻译的 skill 在 2 天内不重复触发（防止死循环），
+    超过 2 天或已补齐翻译则自动解除标记允许重试。
+    """
+    from skills_scanner import scan_skills
+    state = _load_skill_state()
+    first_run = "last_seen" not in state
+    last_seen = state.get("last_seen") or {}
+    triggered = state.get("triggered") or {}
+    now = time.time()
+    skills = scan_skills(roots)
+    new_last = {}
+    new_missing = []
+    for s in skills:
+        try:
+            mtime = os.path.getmtime(s.path)
+        except Exception:
+            mtime = 0.0
+        new_last[s.name] = mtime
+        if first_run:
+            continue
+        prev = last_seen.get(s.name)
+        is_new = prev is None or abs(float(prev) - mtime) > 1.0
+        if not is_new:
+            continue
+        if _has_translation(s.name):
+            # 已补齐翻译：解除触发标记（自愈）
+            triggered.pop(s.name, None)
+            continue
+        if s.name in triggered:
+            try:
+                age_days = (now - float(triggered[s.name])) / 86400.0
+            except Exception:
+                age_days = 0.0
+            if age_days < 2.0:
+                continue  # 最近已触发过，避免重复调用
+        new_missing.append(s)
+        triggered[s.name] = now
+    if first_run:
+        # 首次运行：仅建立基线快照，不把存量 skill 当作「新安装」触发翻译
+        state["last_seen"] = new_last
+        state["triggered"] = {}
+        _save_skill_state(state)
+        return []
+    # 清理已卸载 skill 的触发记录
+    for name in [k for k in triggered if k not in new_last]:
+        triggered.pop(name, None)
+    state["last_seen"] = new_last
+    state["triggered"] = triggered
+    _save_skill_state(state)
+    return new_missing
+
+
 def _merge_translations(data):
     """合并 AI 生成翻译到自定义翻译文件；返回 (added_count, added_map)"""
     raw = data.get("translations")
@@ -301,7 +451,7 @@ def _build_summary(result):
 
 
 # ── 服务主流程 ─────────────────────────────────────
-def run_services(config, agent, tasks=("api", "skills")):
+def run_services(config, agent, tasks=("api", "skills"), only_skills=None):
     """同步执行全部服务；返回结构化结果 dict"""
     result = {"ok": False, "agent_name": (agent or {}).get("name") or "Agent"}
     if not agent:
@@ -323,7 +473,10 @@ def run_services(config, agent, tasks=("api", "skills")):
             if not roots:
                 roots = default_skill_roots()
             missing = []
+            scope = set(only_skills) if only_skills else None
             for s in scan_skills(roots):
+                if scope is not None and s.name not in scope:
+                    continue
                 if s.name in SKILL_ZH or s.name in _ALIAS:
                     continue
                 if s.name in _load_custom_translations():
@@ -412,3 +565,36 @@ class LocalAiWorker(QThread):
             except Exception:
                 pass
             self.failed.emit("本地 AI 服务异常: %s" % str(e))
+
+
+class AutoTranslateWorker(QThread):
+    """新装 skill 自动翻译：只对指定 skill 列表跑受限翻译任务（不跑完整流程）"""
+    done = pyqtSignal(int, list)      # (新增翻译条数, skill 名列表)
+    failed = pyqtSignal(str)
+
+    def __init__(self, config, agent, skills, parent=None):
+        super().__init__(parent)
+        self._config = config
+        self._agent = agent
+        self._skills = list(skills)
+        self._cancel = threading.Event()
+
+    def cancel(self):
+        self._cancel.set()
+
+    def run(self):
+        try:
+            _CURRENT_CANCEL.cancel = self._cancel
+            result = run_services(self._config, self._agent,
+                                  tasks=("skills",),
+                                  only_skills=[s.name for s in self._skills])
+            if self._cancel.is_set():
+                self.failed.emit("用户退出，任务已取消")
+            elif result.get("ok"):
+                added = (result.get("skills") or {}).get("added", 0)
+                self.done.emit(added, [s.name for s in self._skills])
+            else:
+                self.failed.emit(result.get("error", "未知错误"))
+        except Exception as e:
+            logger.error("自动翻译线程异常: %s", e)
+            self.failed.emit("自动翻译异常: %s" % str(e))

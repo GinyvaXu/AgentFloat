@@ -69,3 +69,5 @@ _gen_report.py
 # 本地个人配置（含用户私有设置，绝不上传）
 config.json
 launcher_config.json
+skill_state.json
+skills_translations_ai.json

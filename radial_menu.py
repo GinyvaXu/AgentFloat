@@ -6,10 +6,12 @@
   从根上消除「相邻扇区半透明重叠」的显示错误；
 - 悬停扇区用主题强调色整体高亮（唯一强调色），品牌色只保留为外缘 6px 小圆点；
 - 入场动画统一缩放+淡入（可随时打断重定向），非逐扇区交错扫描；
-- 关闭逻辑：光标在扇区上/浮窗上永不关闭；移开后 2 秒宽限期再关闭。
+- 关闭逻辑：光标在扇区上/浮窗上/菜单窗口矩形内永不关闭；整体移出后 2 秒宽限期再关闭；
+  点击菜单外任意处立即关闭（Win32 全局左键检测）。
 """
 import math
-from PyQt5.QtCore import Qt, QPointF, QRectF, QTimer, QVariantAnimation, QEasingCurve, pyqtSignal
+from PyQt5.QtCore import (Qt, QPointF, QRectF, QTimer, QVariantAnimation,
+                          QEasingCurve, QAbstractAnimation, pyqtSignal)
 from PyQt5.QtGui import QPainter, QColor, QPen, QFont, QPainterPath, QCursor
 from PyQt5.QtWidgets import QWidget, QApplication
 
@@ -31,6 +33,7 @@ class RadialMenuItem(object):
 
 class RadialMenu(QWidget):
     action_triggered = pyqtSignal(str)
+    closed = pyqtSignal()          # 菜单真正隐藏时发出（用于恢复余额角标等）
 
     def __init__(self, parent=None):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -48,12 +51,25 @@ class RadialMenu(QWidget):
         self._anchor_rect = None
         self._sector_cache = []    # (id, start_angle, sweep_angle)
 
-        # 入场动画：统一缩放 + 淡入（可打断）
+        # 入场动画：统一缩放 + 淡入（OutBack 轻微过冲，可打断）
         self._anim = QVariantAnimation(self)
-        self._anim.setDuration(260)
-        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._anim.setDuration(240)
+        self._anim.setEasingCurve(QEasingCurve.Linear)
         self._anim.valueChanged.connect(self._on_anim_value)
         self._anim.finished.connect(self._on_anim_finished)
+
+        # 关闭淡出动画
+        self._close_anim = QVariantAnimation(self)
+        self._close_anim.setDuration(150)
+        self._close_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._close_anim.valueChanged.connect(self._on_close_anim_value)
+        self._close_anim.finished.connect(self._really_hide)
+        self._close_progress = 1.0
+        self._closing = False
+
+        # 点击外部检测状态
+        self._btn_down = False
+        self._press_pos = None
 
         # 光标轮询（仅用于扇区悬停高亮；关闭由宽限计时器决定）
         self._poll = QTimer(self)
@@ -95,6 +111,11 @@ class RadialMenu(QWidget):
         self._hover_idx = -1
         self._sector_cache = []
         self._close_timer.stop()
+        self._close_anim.stop()
+        self._closing = False
+        self._close_progress = 1.0
+        self._btn_down = False
+        self._press_pos = None
         self.show()
         self.raise_()
         self._anim.stop()
@@ -106,8 +127,15 @@ class RadialMenu(QWidget):
     def close_menu(self):
         self._poll.stop()
         self._close_timer.stop()
-        self._anim.stop()
-        self.hide()
+        if not self.isVisible():
+            return
+        if self._close_anim.state() == QAbstractAnimation.Running:
+            return
+        self._closing = True
+        self._close_anim.stop()
+        self._close_anim.setStartValue(1.0)
+        self._close_anim.setEndValue(0.0)
+        self._close_anim.start()
 
     # ── 动画 ────────────────────────────────────
     def _on_anim_value(self, v):
@@ -117,6 +145,15 @@ class RadialMenu(QWidget):
     def _on_anim_finished(self):
         self._progress = 1.0
         self.update()
+
+    def _on_close_anim_value(self, v):
+        self._close_progress = float(v)
+        self.update()
+
+    def _really_hide(self):
+        self._closing = False
+        self.hide()
+        self.closed.emit()
 
     # ── 命中测试 ─────────────────────────────────
     def _center(self):
@@ -149,6 +186,12 @@ class RadialMenu(QWidget):
         pos = QCursor.pos()
         idx = self._sector_at(pos)
         in_anchor = self._anchor_rect is not None and self._anchor_rect.contains(pos)
+        in_menu = self._in_menu_rect(pos)
+
+        # 点击菜单外任意处 → 立即关闭（全局左键检测）
+        if self._detect_click_outside(pos):
+            self.close_menu()
+            return
 
         if idx >= 0:
             # 在扇区上：保持打开 + 高亮
@@ -156,30 +199,69 @@ class RadialMenu(QWidget):
             if idx != self._hover_idx:
                 self._hover_idx = idx
                 self.update()
-        elif in_anchor:
-            # 在触发浮窗上：保持打开，清除高亮
+        elif in_anchor or in_menu:
+            # 在触发浮窗上 / 菜单窗口矩形内（含中心孔与间隙）：保持打开，清除高亮
             self._close_timer.stop()
             if self._hover_idx != -1:
                 self._hover_idx = -1
                 self.update()
         else:
-            # 移出扇区与浮窗：进入宽限期
+            # 整体移出菜单与浮窗：进入宽限期
             if self._hover_idx != -1:
                 self._hover_idx = -1
                 self.update()
             if not self._close_timer.isActive():
                 self._close_timer.start()
 
+    def _outside_interactive(self, pos):
+        # pos 是否位于「菜单可交互区 + 浮窗」之外（即点击空白处）
+        if 0 <= self._sector_at(pos) < len(self._items):
+            return False
+        if self._anchor_rect is not None and self._anchor_rect.contains(pos):
+            return False
+        if self._in_menu_rect(pos):
+            return False
+        return True
+
+    def _detect_click_outside(self, pos):
+        # Win32 全局左键检测：按下或释放发生在菜单外 → 立即关闭。
+        # 轮询间隙内完成的快速点击（按下+释放）也会在释放时按释放位置判定。
+        try:
+            import ctypes
+            down = bool(ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000)
+        except Exception:
+            return False
+        prev = self._btn_down
+        self._btn_down = down
+        if down:
+            if not prev:
+                # 记录按下位置；若直接按在菜单外则立即关闭
+                self._press_pos = pos
+                return self._outside_interactive(pos)
+            return False
+        if prev:
+            # 刚释放：按下位置在菜单外（或未捕获按下、释放点在菜单外）→ 关闭
+            pp = self._press_pos
+            self._press_pos = None
+            if pp is None:
+                return self._outside_interactive(pos)
+            return self._outside_interactive(pp)
+        return False
+
     def _on_close_grace(self):
-        # 宽限期结束仍不在扇区/浮窗上 → 关闭
+        # 宽限期结束仍不在扇区/浮窗/菜单矩形内 → 关闭
         pos = QCursor.pos()
         idx = self._sector_at(pos)
         in_anchor = self._anchor_rect is not None and self._anchor_rect.contains(pos)
-        if idx < 0 and not in_anchor:
+        in_menu = self._in_menu_rect(pos)
+        if idx < 0 and not in_anchor and not in_menu:
             self.close_menu()
 
     # ── 鼠标 ────────────────────────────────────
     def mousePressEvent(self, event):
+        if self._closing:
+            event.accept()
+            return
         idx = self._sector_at(event.globalPos())
         if idx < 0:
             self.close_menu()
@@ -188,6 +270,9 @@ class RadialMenu(QWidget):
         event.accept()
 
     def mouseReleaseEvent(self, event):
+        if self._closing:
+            event.accept()
+            return
         idx = self._sector_at(event.globalPos())
         if 0 <= idx < len(self._items):
             item = self._items[idx]
@@ -224,8 +309,9 @@ class RadialMenu(QWidget):
         if n == 0:
             return
 
-        scale = 0.72 + 0.28 * self._progress
-        fade = self._progress
+        eased = self._ease_out_back(self._progress)
+        scale = 0.72 + 0.28 * eased
+        fade = min(1.0, self._progress) * self._close_progress
 
         painter.save()
         painter.translate(center_pt)
@@ -307,4 +393,12 @@ class RadialMenu(QWidget):
     def hideEvent(self, event):
         self._poll.stop()
         self._close_timer.stop()
+        self._close_anim.stop()
         super().hideEvent(event)
+
+    @staticmethod
+    def _ease_out_back(t, overshoot=0.9):
+        # OutBack 缓动：末端约 5% 过冲后回落（Apple 式轻回弹）
+        t -= 1.0
+        c = overshoot + 1.0
+        return 1.0 + c * (t ** 3) + overshoot * (t ** 2)

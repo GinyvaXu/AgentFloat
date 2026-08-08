@@ -56,6 +56,7 @@ DEFAULT_SKILLS = {
     "roots": [],
     "ai_tool": "codex exec",         # codex exec / claude -p
     "max_description_len": 160,
+    "auto_translate_new_skills": True,   # 装完新 skill 自动触发翻译
 }
 
 

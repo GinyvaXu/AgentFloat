@@ -8,12 +8,12 @@
 """
 import os
 
-from PyQt5.QtCore import Qt, QTimer, QPoint
-from PyQt5.QtGui import QFont, QBrush, QColor
+from PyQt5.QtCore import Qt, QTimer, QPoint, QPointF, QVariantAnimation, QEasingCurve
+from PyQt5.QtGui import QFont, QBrush, QColor, QPainter, QPainterPath, QPen
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
     QTreeWidget, QTreeWidgetItem, QPushButton, QTextBrowser, QFrame,
-    QApplication, QSplitter,
+    QApplication, QSplitter, QStyle, QProxyStyle,
 )
 
 from af_theme import get_colors
@@ -21,8 +21,111 @@ from skills_scanner import scan_skills, default_skill_roots, categorize_skills
 from skills_translations import get_zh
 
 
+class _CloseButton(QPushButton):
+    """精致版关闭按钮 B：灰圆底 ✕ → 悬停红实底 + 轻微放大（动画过渡）"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(28, 28)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("关闭")
+        self.setFocusPolicy(Qt.NoFocus)
+        self._hover = 0.0
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(140)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._anim.valueChanged.connect(self._set_hover)
+
+    def _set_hover(self, v):
+        self._hover = float(v)
+        self.update()
+
+    def enterEvent(self, event):
+        self._anim.stop()
+        self._anim.setStartValue(self._hover)
+        self._anim.setEndValue(1.0)
+        self._anim.start()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._anim.stop()
+        self._anim.setStartValue(self._hover)
+        self._anim.setEndValue(0.0)
+        self._anim.start()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        h = self._hover
+        r = self.rect().adjusted(1, 1, -1, -1)
+        # 底圆：灰 → 红
+        if h > 0.999:
+            bg = QColor(232, 66, 66)
+        else:
+            g = int(120 + (255 - 120) * h)
+            rv = int(120 + (66 - 120) * h)
+            b = int(120 + (66 - 120) * h)
+            a = int(30 + 215 * h)
+            bg = QColor(g, rv, b, a)
+        p.setPen(Qt.NoPen)
+        p.setBrush(bg)
+        p.drawEllipse(r)
+        # ✕ 两笔划线（悬停变白并轻微放大）
+        cx, cy = self.width() / 2.0, self.height() / 2.0
+        s_len = 4.6 + 0.6 * h
+        pen = QPen(QColor(255, 255, 255) if h > 0.45 else QColor(132, 132, 132),
+                   1.7 + 0.3 * h)
+        pen.setCapStyle(Qt.RoundCap)
+        p.setPen(pen)
+        p.save()
+        p.translate(cx, cy)
+        p.scale(1.0 + 0.08 * h, 1.0 + 0.08 * h)
+        p.drawLine(QPointF(-s_len, -s_len), QPointF(s_len, s_len))
+        p.drawLine(QPointF(-s_len, s_len), QPointF(s_len, -s_len))
+        p.restore()
+        p.end()
+
+
+class _ThemedTreeStyle(QProxyStyle):
+    """主题色分类树分支箭头（▶ / ▼），替代默认丑陋三角"""
+
+    def __init__(self, accent):
+        # 无 base：标准 QProxyStyle 用法，避免包装现有样式导致 teardown 崩溃
+        super().__init__()
+        self._accent = QColor(*accent)
+
+    def drawPrimitive(self, element, option, painter, widget=None):
+        if element == QStyle.PE_IndicatorBranch:
+            if option.state & QStyle.State_Children:
+                painter.save()
+                painter.setRenderHint(QPainter.Antialiasing)
+                cx = option.rect.center().x()
+                cy = option.rect.center().y()
+                s = 4.5
+                pen = QPen(self._accent, 1.6)
+                pen.setCapStyle(Qt.RoundCap)
+                pen.setJoinStyle(Qt.RoundJoin)
+                painter.setPen(pen)
+                painter.setBrush(self._accent)
+                path = QPainterPath()
+                if option.state & QStyle.State_Open:
+                    path.moveTo(cx - s, cy - s * 0.6)
+                    path.lineTo(cx + s, cy - s * 0.6)
+                    path.lineTo(cx, cy + s * 0.8)
+                else:
+                    path.moveTo(cx - s * 0.6, cy - s)
+                    path.lineTo(cx - s * 0.6, cy + s)
+                    path.lineTo(cx + s * 0.8, cy)
+                path.closeSubpath()
+                painter.drawPath(path)
+                painter.restore()
+            return
+        return super().drawPrimitive(element, option, painter, widget)
+
+
 class _TitleBar(QFrame):
-    """整合式标题栏：拖动窗口 + 计数 + 可见关闭按钮"""
+    """整合式标题栏：毛玻璃横幅 + 拖动窗口 + 计数 + 精致关闭按钮"""
 
     def __init__(self, parent, title):
         super().__init__(parent)
@@ -46,15 +149,7 @@ class _TitleBar(QFrame):
         self.lbl_count.setFont(QFont("Microsoft YaHei", 10))
         lay.addWidget(self.lbl_count)
 
-        btn = QPushButton("✕")
-        btn.setFixedSize(28, 28)
-        btn.setToolTip("关闭")
-        btn.setCursor(Qt.PointingHandCursor)
-        btn.setStyleSheet(
-            "QPushButton { border: none; border-radius: 14px; font-size: 13px;"
-            " background: rgba(128,128,128,0.14); color: #888; }"
-            "QPushButton:hover { background: rgba(255,60,60,0.85); color: #FFF; }"
-            "QPushButton:pressed { background: rgba(200,40,40,0.9); }")
+        btn = _CloseButton()
         btn.clicked.connect(parent.close)
         lay.addWidget(btn)
         self._btn_close = btn
@@ -103,13 +198,17 @@ class SkillsPanel(QDialog):
         ac = "#%02X%02X%02X" % c["ACCENT"]
         bd = "#%02X%02X%02X" % c["SEPARATOR"]
         card = "#333336" if is_dark else "#FFFFFF"
+        banner = "rgba(255,255,255,0.06)" if is_dark else "rgba(255,255,255,0.62)"
+        hover_bg = "rgba(255,255,255,0.09)" if is_dark else "rgba(120,120,128,0.10)"
         return (
             "QDialog { background: %s; border: 1px solid %s; border-radius: 14px; }" % (sf, bd) +
-            "QFrame#titleBar { background: transparent; border-bottom: 1px solid %s; }" % bd +
+            "QFrame#titleBar { background: %s; border-top-left-radius: 14px;"
+            " border-top-right-radius: 14px; border-bottom: 1px solid %s; }" % (banner, bd) +
             "QTreeWidget, QTextBrowser, QLineEdit, QComboBox { background: %s; color: %s;"
             " border: 1px solid %s; border-radius: 8px; padding: 6px; font-size: 12px; }" % (card, tx, bd) +
-            "QTreeWidget::item { padding: 5px 4px; border-radius: 6px; }" +
-            "QTreeWidget::item:selected { background: %s; color: #FFF; border-radius: 6px; }" % ac +
+            "QTreeWidget::item { padding: 6px 6px; border-radius: 7px; }" +
+            "QTreeWidget::item:hover { background: %s; }" % hover_bg +
+            "QTreeWidget::item:selected { background: %s; color: #FFF; border-radius: 7px; }" % ac +
             "QTreeWidget::branch { background: transparent; }" +
             "QPushButton { background: %s; color: %s; border: 1px solid %s;"
             " border-radius: 8px; padding: 6px 14px; font-size: 12px; }" % (card, ac, bd) +
@@ -121,7 +220,7 @@ class SkillsPanel(QDialog):
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 0, 14, 14)
+        root.setContentsMargins(0, 0, 0, 14)
         root.setSpacing(10)
 
         self._title = _TitleBar(self, "Skills 辅助窗")
@@ -149,7 +248,13 @@ class SkillsPanel(QDialog):
         ll.setContentsMargins(0, 0, 0, 0)
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
-        self.tree.setIndentation(18)
+        self.tree.setIndentation(16)
+        self.tree.setAnimated(True)   # 原生平滑展开/收起动画
+        self.tree.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # 保留引用：QProxyStyle 需存活于 widget 生命周期，否则 teardown 崩溃
+        self._tree_style = _ThemedTreeStyle(get_colors(self._theme)["ACCENT"])
+        self.tree.setStyle(self._tree_style)
         self.tree.itemClicked.connect(self._on_item_clicked)
         self.tree.currentItemChanged.connect(self._on_select)
         ll.addWidget(self.tree)
@@ -270,6 +375,7 @@ class SkillsPanel(QDialog):
                 child = QTreeWidgetItem(["%s%s" % (self._display_name(s), "  ⚡" if s.trigger else "")])
                 child.setData(0, Qt.UserRole, s)
                 child.setToolTip(0, s.path)
+                child.setFont(0, QFont(self._cjk, 11))
                 top.addChild(child)
             self.tree.addTopLevelItem(top)
             if kw:
@@ -284,7 +390,10 @@ class SkillsPanel(QDialog):
             self.btn_copy.setEnabled(False)
             self._current = None
         elif self.tree.topLevelItemCount():
-            self.tree.setCurrentItem(self.tree.topLevelItem(0))
+            top0 = self.tree.topLevelItem(0)
+            if not kw and not src:
+                top0.setExpanded(True)   # 默认展开第一个分类
+            self.tree.setCurrentItem(top0)
 
     # ── 选中 ────────────────────────────────────
     def _on_item_clicked(self, item, column):

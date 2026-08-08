@@ -62,7 +62,8 @@ from radial_menu import RadialMenu, RadialMenuItem
 from skills_scanner import default_skill_roots
 from skills_panel import SkillsPanel
 from agent_manager import AgentManagerDialog, SkillsSettingsDialog
-from local_ai_service import LocalAiWorker
+from local_ai_service import (LocalAiWorker, AutoTranslateWorker,
+                              find_new_skills, ensure_translator_skill)
 
 # ── 路径（兼容 PyInstaller 打包）──────────────────────
 import sys as _sys
@@ -230,7 +231,7 @@ IOS_HINT       = _LIGHT["HINT"]
 IOS_SURFACE    = _LIGHT["SURFACE"]
 
 FONT_FAMILY = "Microsoft YaHei"
-VERSION = "1.0.6"
+VERSION = "1.0.7"
 
 # ── 浮窗参数 ──────────────────────────────────────────
 DEFAULT_SIZE  = 52          # 默认边长 px
@@ -835,6 +836,16 @@ class SettingsDialog(QDialog):
         self.lbl_ai_service.setStyleSheet(f"color: {s['hi']};")
         ai_row.addWidget(self.lbl_ai_service, 1)
         vsk.addLayout(ai_row)
+
+        self.cb_auto_translate = QCheckBox("新装 skill 自动翻译（启动时检测，自动调用本地 Agent 补译）")
+        self.cb_auto_translate.setFont(self._font(11))
+        self.cb_auto_translate.setStyleSheet(s["checkbox"])
+        self.cb_auto_translate.setChecked(bool(self._skills_cfg.get("auto_translate_new_skills", True)))
+        self.cb_auto_translate.setToolTip(
+            "开启后：检测到新安装且缺少中文翻译的 skill，会自动调用本地主 Agent（非交互）补译。\n"
+            "关闭后：新 skill 不会自动触发翻译，可在「⚡ AI 自检服务」中手动补译。")
+        vsk.addWidget(self.cb_auto_translate)
+
         _svc = self.config.get("services") or {}
         _last = (_svc.get("last_run") or "").strip()
         self.lbl_ai_service.setText(("上次运行 %s" % _last) if _last else "尚未运行")
@@ -1195,6 +1206,7 @@ class SettingsDialog(QDialog):
             "long_press_delay_ms": self.spin_press.value(),
             "radius": self.slider_radius.value(),
         }
+        self._skills_cfg["auto_translate_new_skills"] = self.cb_auto_translate.isChecked()
         return {
             "launch_mode": mode,
             "agents": copy.deepcopy(self._agents),
@@ -1306,6 +1318,8 @@ class FloatingWidget(QWidget):
     theme_changed     = pyqtSignal(str)
     ai_service_done   = pyqtSignal(str)
     ai_service_failed = pyqtSignal(str)
+    auto_translate_done   = pyqtSignal(str)
+    auto_translate_failed = pyqtSignal(str)
 
     CLICK_THRESHOLD = 4
 
@@ -1370,6 +1384,7 @@ class FloatingWidget(QWidget):
 
         # 本地 AI 服务（仅手动触发；翻译任务由本地 skill 完成）
         self._ai_worker = None
+        self._auto_worker = None
 
         # 预缓存绘制资源
         self._cache = {}
@@ -1580,6 +1595,49 @@ class FloatingWidget(QWidget):
             self.ai_service_failed.emit(str(err))
         else:
             QMessageBox.warning(None, "AI 自检服务", "运行失败：\n%s" % err)
+
+    # ── 新装 skill 自动触发翻译（装完新 skill 后自动补译，不跑完整流程）──
+    def _auto_translate_new_skills(self):
+        """检测新安装且缺少中文翻译的 skill，自动调用本地 Agent 补译。"""
+        cfg = self.config.get("skills") or {}
+        if not cfg.get("auto_translate_new_skills", True):
+            _log().debug("自动翻译已关闭，跳过检测")
+            return
+        if self._ai_worker is not None and self._ai_worker.isRunning():
+            return
+        if self._auto_worker is not None and self._auto_worker.isRunning():
+            return
+        agent = get_primary_agent(self._agents)
+        if not agent:
+            _log().debug("自动翻译：未配置主 Agent，跳过")
+            return
+        roots = cfg.get("roots") or default_skill_roots()
+        try:
+            new_skills = find_new_skills(roots)
+        except Exception:
+            _log().warning("自动翻译：检测新 skill 异常", exc_info=True)
+            return
+        if not new_skills:
+            _log().info("自动翻译：未检测到需要翻译的新 skill")
+            return
+        _log().info("自动翻译：检测到 %d 个新 skill，调用 %s 补译",
+                    len(new_skills), agent.get("name"))
+        worker = AutoTranslateWorker(self.config, agent, new_skills, parent=self)
+        worker.done.connect(self._on_auto_translate_done)
+        worker.failed.connect(self._on_auto_translate_failed)
+        self._auto_worker = worker
+        worker.start()
+
+    def _on_auto_translate_done(self, added, names):
+        self._auto_worker = None
+        _log().info("自动翻译完成：新增 %d 条（%s）", added, ", ".join(names[:5]))
+        self.auto_translate_done.emit(
+            "检测到 %d 个新 skill，自动翻译完成：新增 %d 条中文翻译" % (len(names), added))
+
+    def _on_auto_translate_failed(self, err):
+        self._auto_worker = None
+        _log().warning("自动翻译失败: %s", err)
+        self.auto_translate_failed.emit(str(err))
 
     def _on_api_data_ready(self, results):
         """轮询数据就绪，更新余额角标（只显示剩余额度）"""
@@ -2058,7 +2116,9 @@ class FloatingWidget(QWidget):
             _log().debug("悬停离开")
             self._animate_size(self.base_size)
             self._hover_open_timer.stop()
-            self._close_radial_menu()
+            # 环绕菜单打开时不立即关闭：由菜单自身的宽限/点击外部逻辑处理
+            if self._radial_menu is None or not self._radial_menu.isVisible():
+                self._close_radial_menu()
 
     # ── 环绕菜单（悬停 / 长按双通道）──────────────────
     def _maybe_start_hover_open(self):
@@ -2088,6 +2148,10 @@ class FloatingWidget(QWidget):
         if self._radial_menu is None:
             self._radial_menu = RadialMenu()
             self._radial_menu.action_triggered.connect(self._on_radial_action)
+            self._radial_menu.closed.connect(self._on_radial_menu_closed)
+        if self._radial_menu.isVisible():
+            # 已在显示中：避免重复触发导致动画反复重启（抽搐）
+            return
         self._radial_menu.set_theme(self.theme)
         self._radial_menu.set_items(items, radius=int(self._radial_cfg.get("radius", 120)))
         center = self.geometry().center()
@@ -2103,7 +2167,13 @@ class FloatingWidget(QWidget):
     def _close_radial_menu(self):
         if self._radial_menu is not None:
             self._radial_menu.close_menu()
-        # 菜单关闭后恢复余额角标显示（监控启用且浮窗可见时）
+        self._restore_balance_badge()
+
+    def _on_radial_menu_closed(self):
+        # 菜单自行关闭（宽限/点击外部）后恢复余额角标
+        self._restore_balance_badge()
+
+    def _restore_balance_badge(self):
         if (self._api_badge is not None and self.isVisible()
                 and (self.config.get("api_monitor") or {}).get("enabled")):
             self._api_badge.show()
@@ -2648,11 +2718,13 @@ def _main():
     app.aboutToQuit.connect(_cleanup_on_quit)
 
     def _shutdown():
-        # 退出时先取消正在运行的本地 AI 服务，再等待线程结束
-        if widget._ai_worker is not None and widget._ai_worker.isRunning():
-            _log().info("正在取消本地 AI 服务…")
-            widget._ai_worker.cancel()
-            widget._ai_worker.wait(8000)
+        # 退出时先取消正在运行的本地 AI / 自动翻译服务，再等待线程结束
+        for attr in ("_ai_worker", "_auto_worker"):
+            w = getattr(widget, attr, None)
+            if w is not None and w.isRunning():
+                _log().info("正在取消 %s…", attr)
+                w.cancel()
+                w.wait(8000)
     app.aboutToQuit.connect(_shutdown)
 
     widget = FloatingWidget()
@@ -2800,6 +2872,10 @@ def _main():
     tray_icon.show()
     tray_icon.showMessage("AgentFloat", "AI Agent 浮窗助手已启动", QSystemTrayIcon.Information, 2000)
 
+    # 翻译 skill 自动部署 + 新装 skill 自动触发翻译（延迟执行，避免拖慢启动）
+    QTimer.singleShot(
+        3000, lambda: (ensure_translator_skill(), widget._auto_translate_new_skills()))
+
     widget.launch_requested.connect(do_launch)
     widget.quit_requested.connect(app.quit)
     widget.settings_requested.connect(open_settings)
@@ -2807,6 +2883,10 @@ def _main():
         "AgentFloat — AI 自检完成", summary, QSystemTrayIcon.Information, 5000))
     widget.ai_service_failed.connect(lambda err: tray_icon.showMessage(
         "AgentFloat — AI 自检失败", str(err), QSystemTrayIcon.Warning, 7000))
+    widget.auto_translate_done.connect(lambda msg: tray_icon.showMessage(
+        "AgentFloat — 自动翻译", msg, QSystemTrayIcon.Information, 5000))
+    widget.auto_translate_failed.connect(lambda err: tray_icon.showMessage(
+        "AgentFloat — 自动翻译失败", str(err), QSystemTrayIcon.Warning, 7000))
     # 主题切换时同步更新托盘菜单样式
     widget.theme_changed.connect(lambda t: tray_menu.setStyleSheet(_build_menu_stylesheet(t)))
     widget.show()

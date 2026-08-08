@@ -55,7 +55,8 @@
   "skills": {
     "roots": [],
     "ai_tool": "codex exec",
-    "max_description_len": 160
+    "max_description_len": 160,
+    "auto_translate_new_skills": true
   },
   "services": {
     "ai_first_run_done": false,
