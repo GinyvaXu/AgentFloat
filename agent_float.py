@@ -62,7 +62,7 @@ from agent_registry import (
     resolve_command, build_agent_args, primary_launch_mode,
     DEFAULT_RADIAL_MENU, DEFAULT_SKILLS,
 )
-from radial_menu import RadialMenu, RadialMenuItem
+from radial_menu import RadialMenu, RadialMenuItem, RADIAL_PAD
 from skills_scanner import default_skill_roots
 from skills_panel import SkillsPanel
 from agent_manager import AgentManagerDialog, SkillsSettingsDialog
@@ -491,6 +491,43 @@ def _get_cjk_font():
     return FONT_FAMILY
 
 # ── 设置对话框 ────────────────────────────────────────
+def _make_toast(title, body, theme, parent):
+    """极简毛玻璃 toast（数秒后自动关闭），用于「保存」后的修改摘要"""
+    dlg = QDialog(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+    dlg.setAttribute(Qt.WA_TranslucentBackground)
+    c = get_colors(theme)
+    sf = "#%02X%02X%02X" % c["SURFACE"]
+    tx = "#%02X%02X%02X" % c["TEXT"]
+    hi = "#%02X%02X%02X" % c["HINT"]
+    ac = "#%02X%02X%02X" % c["ACCENT"]
+    dlg.setStyleSheet(
+        "QDialog { background: %s; border: 1px solid %s; border-radius: 12px; }"
+        % (sf, hi))
+    lay = QVBoxLayout(dlg)
+    lay.setContentsMargins(18, 14, 18, 14)
+    lay.setSpacing(6)
+    t = QLabel(title)
+    t.setStyleSheet("color: %s; font-size: 13px; font-weight: bold;" % ac)
+    b = QLabel(body)
+    b.setStyleSheet("color: %s; font-size: 12px;" % tx)
+    b.setWordWrap(True)
+    lay.addWidget(t)
+    lay.addWidget(b)
+    dlg.setMaximumWidth(420)
+    dlg.adjustSize()
+    try:
+        ref = parent.parent() if parent is not None and parent.parent() is not None else parent
+        if ref is not None:
+            r = ref.geometry()
+            dlg.move(max(0, r.center().x() - dlg.width() // 2),
+                     max(0, r.top() - dlg.height() - 12))
+    except Exception:
+        dlg.move(40, 40)
+    dlg.show()
+    QTimer.singleShot(4200, dlg.close)
+    return dlg
+
+
 class SettingsDialog(QDialog):
     def __init__(self, config, parent=None):
         super().__init__(parent)
@@ -517,6 +554,10 @@ class SettingsDialog(QDialog):
         self._build_styles()
         self._setup_ui()
         self._update_state_init()
+        # 脏状态追踪：保存按钮仅在设置被修改后可点
+        self._wire_dirty_signals()
+        self._baseline = self._collect()
+        self._refresh_save_state()
         # 打开设置后自动静默检查一次更新
         QTimer.singleShot(600, self._update_check_clicked)
 
@@ -1135,9 +1176,9 @@ class SettingsDialog(QDialog):
         api_scroll.setFrameShape(QScrollArea.NoFrame)
         self._api_scroll = api_scroll
         api_scroll.setStyleSheet(
-            f"QScrollArea {{ background: transparent; border: 1px solid {s['bd']}; border-radius: 10px; }}"
-            f"QScrollArea > QWidget > QWidget {{ background: transparent; }}"
-            f"QScrollBar:vertical {{ width: 6px; }}"
+            "QScrollArea { background: transparent; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
+            "QScrollBar:vertical { width: 6px; }"
         )
         pap.addWidget(api_scroll)
         self._add_page(page_api, "📊  API 用量")
@@ -1148,7 +1189,8 @@ class SettingsDialog(QDialog):
         pnw.setContentsMargins(6, 10, 6, 6)
 
         news_content = QWidget()
-        news_content.setStyleSheet("background: transparent;")
+        news_content.setStyleSheet("background: %s;" % s["card_bg"])
+        self._news_content = news_content
         ncl = QVBoxLayout(news_content)
         ncl.setSpacing(8)
         ncl.setContentsMargins(14, 14, 14, 14)
@@ -1201,6 +1243,26 @@ class SettingsDialog(QDialog):
         self.spin_news_max.setValue(int(n_cfg.get("max_items") or 6))
         self.spin_news_max.setStyleSheet(s["combo"])
         form.addRow("条数上限", self.spin_news_max)
+
+        self.spin_news_w = QSpinBox()
+        self.spin_news_w.setRange(640, 1280)
+        self.spin_news_w.setSingleStep(20)
+        self.spin_news_w.setValue(int(n_cfg.get("panel_width") or 860))
+        self.spin_news_w.setStyleSheet(s["combo"])
+        form.addRow("窗口宽度 (px)", self.spin_news_w)
+
+        self.spin_news_h = QSpinBox()
+        self.spin_news_h.setRange(480, 960)
+        self.spin_news_h.setSingleStep(20)
+        self.spin_news_h.setValue(int(n_cfg.get("panel_height") or 680))
+        self.spin_news_h.setStyleSheet(s["combo"])
+        form.addRow("窗口高度 (px)", self.spin_news_h)
+
+        self.spin_news_font = QSpinBox()
+        self.spin_news_font.setRange(11, 18)
+        self.spin_news_font.setValue(int(n_cfg.get("font_size") or 13))
+        self.spin_news_font.setStyleSheet(s["combo"])
+        form.addRow("正文字号 (px)", self.spin_news_font)
 
         self.cmb_news_agent = QComboBox()
         self.cmb_news_agent.addItem("默认主 Agent（点击浮窗启动的那个）", "")
@@ -1256,7 +1318,7 @@ class SettingsDialog(QDialog):
         self._interests_frame = QFrame()
         self._interests_frame.setStyleSheet(
             "QFrame { background: %s; border: 1px solid %s; border-radius: 8px; }"
-            % (s["card_bg"], s["bd"]))
+            % (s["sf"], s["ibd"]))
         self._interests_lay = QVBoxLayout(self._interests_frame)
         self._interests_lay.setContentsMargins(10, 10, 10, 10)
         self._interests_lay.setSpacing(6)
@@ -1265,16 +1327,8 @@ class SettingsDialog(QDialog):
             self._add_interest_row(entry.get("label") or "", int(entry.get("weight") or 3),
                                    entry.get("color") or "#5B8DEF")
 
-        int_scroll = QScrollArea()
-        int_scroll.setWidgetResizable(True)
-        int_scroll.setFrameShape(QScrollArea.NoFrame)
-        int_scroll.setMaximumHeight(230)
-        int_scroll.setWidget(self._interests_frame)
-        int_scroll.setStyleSheet(
-            "QScrollArea { background: transparent; }"
-            "QScrollArea > QWidget > QWidget { background: transparent; }"
-            "QScrollBar:vertical { width: 6px; }")
-        vni.addWidget(int_scroll)
+        # 关注主题全部平铺显示（不再内滚动；整页由外层滚动区接管）
+        vni.addWidget(self._interests_frame)
 
         in_btn_row = QHBoxLayout()
         self.btn_add_interest = QPushButton("＋ 添加主题")
@@ -1307,9 +1361,9 @@ class SettingsDialog(QDialog):
         news_scroll.setFrameShape(QScrollArea.NoFrame)
         news_scroll.setWidget(news_content)
         news_scroll.setStyleSheet(
-            f"QScrollArea {{ background: transparent; border: 1px solid {s['bd']}; border-radius: 10px; }}"
-            f"QScrollArea > QWidget > QWidget {{ background: transparent; }}"
-            f"QScrollBar:vertical {{ width: 6px; }}")
+            "QScrollArea { background: transparent; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
+            "QScrollBar:vertical { width: 6px; }")
         pnw.addWidget(news_scroll)
         self._add_page(page_news, "📰  AI 快报")
 
@@ -1466,6 +1520,7 @@ class SettingsDialog(QDialog):
         preview_btn.setStyleSheet(btn_css)
         preview_btn.clicked.connect(self._preview)
         bl.addWidget(preview_btn)
+        self._preview_btn = preview_btn
 
         bl.addStretch()
         cancel_btn = QPushButton("取消")
@@ -1477,6 +1532,7 @@ class SettingsDialog(QDialog):
         save_btn.setStyleSheet(save_css)
         save_btn.clicked.connect(self._save)
         bl.addWidget(save_btn)
+        self._save_btn = save_btn
         layout.addLayout(bl)
 
         # ── 存储控件引用，用于即时换肤 ──
@@ -1604,10 +1660,9 @@ class SettingsDialog(QDialog):
         # API 滚动区边框主题同步
         if hasattr(self, '_api_scroll'):
             self._api_scroll.setStyleSheet(
-                f"QScrollArea {{ background: transparent; border: 1px solid {s['bd']};"
-                f" border-radius: 10px; }}"
-                f"QScrollArea > QWidget > QWidget {{ background: transparent; }}"
-                f"QScrollBar:vertical {{ width: 6px; }}"
+                "QScrollArea { background: transparent; }"
+                "QScrollArea > QWidget > QWidget { background: transparent; }"
+                "QScrollBar:vertical { width: 6px; }"
             )
 
         # API 监控页主题同步
@@ -1636,8 +1691,15 @@ class SettingsDialog(QDialog):
         # AI 快报页控件（组合框 / 条数 / 时间 / 主题行）
         if hasattr(self, 'cmb_news_lang'):
             for w in (self.cmb_news_lang, self.cmb_news_schedule, self.cmb_news_agent,
-                      self.spin_news_max, self.time_news):
+                      self.spin_news_max, self.time_news,
+                      self.spin_news_w, self.spin_news_h, self.spin_news_font):
                 w.setStyleSheet(s['combo'])
+        if hasattr(self, '_news_content'):
+            self._news_content.setStyleSheet("background: %s;" % s['card_bg'])
+        if hasattr(self, '_interests_frame'):
+            self._interests_frame.setStyleSheet(
+                "QFrame { background: %s; border: 1px solid %s; border-radius: 8px; }"
+                % (s['sf'], s['ibd']))
         if hasattr(self, 'btn_add_interest'):
             self.btn_add_interest.setStyleSheet(s['btn'])
             self.btn_preset_interest.setStyleSheet(s['btn'])
@@ -1776,7 +1838,11 @@ class SettingsDialog(QDialog):
                     "QPushButton { color: %s; background: rgba(127,127,127,0.10);"
                     " border: 1px solid %s; border-radius: 6px; font-size: 13px; }" % (hexc, hexc))
         btn_color.clicked.connect(_pick_color)
+        btn_color.clicked.connect(self._mark_dirty)
+        ed.textChanged.connect(self._mark_dirty)
+        wt.valueChanged.connect(self._mark_dirty)
         del_btn.clicked.connect(lambda: self._remove_interest_row(row))
+        del_btn.clicked.connect(self._mark_dirty)
 
         self._interests_lay.addWidget(row)
         self._interest_rows.append({"frame": row, "label": ed, "weight": wt, "color": btn_color, "del": del_btn})
@@ -1787,6 +1853,7 @@ class SettingsDialog(QDialog):
                 self._interests_lay.removeWidget(frame)
                 frame.deleteLater()
                 self._interest_rows.pop(i)
+                self._mark_dirty()
                 break
 
     def _collect_interests(self):
@@ -1867,6 +1934,9 @@ class SettingsDialog(QDialog):
                 "schedule_mode": self.cmb_news_schedule.currentData() or "off",
                 "schedule_time": self.time_news.time().toString("HH:mm"),
                 "max_items": self.spin_news_max.value(),
+                "panel_width": self.spin_news_w.value(),
+                "panel_height": self.spin_news_h.value(),
+                "font_size": self.spin_news_font.value(),
                 "use_ai": self.cb_news_ai.isChecked(),
                 "agent_id": self.cmb_news_agent.currentData() or "",
                 "sources": [sid for sid, cb in self._news_source_cbs.items() if cb.isChecked()],
@@ -1880,6 +1950,7 @@ class SettingsDialog(QDialog):
     def _on_api_config_changed(self, config):
         """API 监控配置实时变更回调"""
         self._api_config = config
+        self._mark_dirty()
 
     def _refresh_agent_combo(self):
         self.cmb_primary_agent.blockSignals(True)
@@ -2017,20 +2088,90 @@ class SettingsDialog(QDialog):
         self._applied_something = True
 
     def _preview(self):
-        """应用：立即生效并保存，窗口保持打开，便于继续调整"""
+        """应用：立即生效并保存，然后关闭设置窗口（v1.4.0 起不再停留）"""
         if not self._confirm_skip():
             return
         cfg = self._collect()
         self._apply_to_parent(cfg)
         self.result_config = cfg
+        self.accept()
 
     def _save(self):
-        """保存：立即生效并保存，然后关闭窗口"""
+        """保存：立即生效并保存，弹出本次修改摘要后关闭窗口"""
         if not self._confirm_skip():
             return
         cfg = self._collect()
         self._apply_to_parent(cfg)
         self.result_config = cfg
+        self._show_saved_summary(cfg)
+        self.accept()
+
+    # ── 脏状态追踪 + 修改摘要 ────────────────────────
+    _CHANGE_LABELS = {
+        "launch_mode": "主 Agent 启动模式",
+        "primary_agent_id": "主 Agent",
+        "agents": "Agent 列表",
+        "radial_menu": "环绕菜单",
+        "skills": "Skills 设置",
+        "widget_size": "浮窗大小",
+        "opacity": "不透明度",
+        "working_directory": "工作目录",
+        "snap_enabled": "边缘吸附",
+        "snap_hidden": "自动隐藏",
+        "theme": "主题",
+        "cleanup_on_quit": "退出清理",
+        "api_monitor": "API 用量监控",
+        "news": "AI 快报",
+    }
+
+    def _wire_dirty_signals(self):
+        """为所有设置控件挂接变更信号，用于保存按钮脏状态"""
+        for w in self.findChildren(QComboBox):
+            w.currentIndexChanged.connect(self._mark_dirty)
+        for w in self.findChildren(QCheckBox):
+            w.toggled.connect(self._mark_dirty)
+        for w in self.findChildren(QRadioButton):
+            w.toggled.connect(self._mark_dirty)
+        for w in self.findChildren(QSpinBox):
+            w.valueChanged.connect(self._mark_dirty)
+        for w in self.findChildren(QSlider):
+            w.valueChanged.connect(self._mark_dirty)
+        for w in self.findChildren(QLineEdit):
+            w.textChanged.connect(self._mark_dirty)
+        for w in self.findChildren(QTimeEdit):
+            w.timeChanged.connect(self._mark_dirty)
+
+    def _mark_dirty(self, *_):
+        QTimer.singleShot(0, self._refresh_save_state)
+
+    def _refresh_save_state(self):
+        """比较当前控件状态与初始基线，决定保存按钮是否可点"""
+        try:
+            dirty = self._collect() != getattr(self, "_baseline", {})
+        except Exception:
+            dirty = True
+        if hasattr(self, "_save_btn"):
+            self._save_btn.setEnabled(dirty)
+
+    def _diff_changes(self, old, new):
+        """对比两版配置，返回发生变化的模块名列表（按用户可读顺序）"""
+        order = ["launch_mode", "primary_agent_id", "agents", "radial_menu", "skills",
+                 "widget_size", "opacity", "working_directory", "snap_enabled", "snap_hidden",
+                 "theme", "cleanup_on_quit", "api_monitor", "news"]
+        keys = set(list(old.keys()) + list(new.keys()))
+        return [self._CHANGE_LABELS.get(k, k) for k in order
+                if k in keys and old.get(k) != new.get(k)]
+
+    def _show_saved_summary(self, cfg):
+        """保存后：弹出本次修改内容的精简摘要（toast，数秒后自动消失）"""
+        try:
+            changes = self._diff_changes(getattr(self, "_baseline", {}), cfg)
+            if not changes:
+                return
+            self._toast = _make_toast("设置已保存", "\n".join("• " + c for c in changes),
+                                      self.theme, self)
+        except Exception:
+            _log().warning("生成修改摘要失败", exc_info=True)
 
     # ── 软件更新（多源检查 + 下载 + 静默重装重启）──────────
     def _update_state_init(self):
@@ -2250,6 +2391,7 @@ class FloatingWidget(QWidget):
         # 吸附状态
         self._snapped = False
         self._snap_edge = ""
+        self._snap_menu_restore = None   # 打开环绕菜单时的临时移位（关闭菜单后恢复）
         self._hidden_now = False   # 当前是否处于“滑出屏幕外”的隐藏位
         self._visible_offset = 0  # 完全显示时的屏幕坐标
         self._hidden_offset = 0   # 隐藏时的偏移
@@ -3098,9 +3240,25 @@ class FloatingWidget(QWidget):
             # 已在显示中：避免重复触发导致动画反复重启（抽搐）
             return
         self._radial_menu.set_theme(self.theme)
-        self._radial_menu.set_items(items, radius=int(self._radial_cfg.get("radius", 120)))
+        radius = int(self._radial_cfg.get("radius", 120))
+        self._radial_menu.set_items(items, radius=radius)
         center = self.geometry().center()
         _log().debug("环绕菜单打开: source=%s items=%d center=%s", source, len(items), center)
+        # 吸附贴边时：环心受屏幕钳制后可能偏离浮窗中心，先把浮窗临时移到环心，
+        # 保证「浮窗位于圆环正中」，菜单关闭后再恢复原吸附位置
+        self._snap_menu_restore = None
+        if self._snapped:
+            side = int((radius + RADIAL_PAD) * 2)
+            g = self._screen_geometry()
+            cx, cy = center.x(), center.y()
+            if side < g.width():
+                cx = max(g.left() + side / 2.0, min(cx, g.right() - side / 2.0))
+            if side < g.height():
+                cy = max(g.top() + side / 2.0, min(cy, g.bottom() - side / 2.0))
+            if abs(cx - center.x()) > 1 or abs(cy - center.y()) > 1:
+                self._snap_menu_restore = self.pos()
+                self.move(int(cx - self.width() / 2.0), int(cy - self.height() / 2.0))
+                center = self.geometry().center()
         # 顶层窗口 geometry() 即全局坐标，直接作为菜单圆心（避免 mapToGlobal 高分屏偏移）
         self._radial_menu.open_at(
             center,
@@ -3112,11 +3270,20 @@ class FloatingWidget(QWidget):
     def _close_radial_menu(self):
         if self._radial_menu is not None:
             self._radial_menu.close_menu()
+        self._restore_snap_position()
         self._restore_balance_badge()
 
     def _on_radial_menu_closed(self):
         # 菜单自行关闭（宽限/点击外部）后恢复余额角标
+        self._restore_snap_position()
         self._restore_balance_badge()
+
+    def _restore_snap_position(self):
+        """环绕菜单关闭后：把临时移位的浮窗恢复到吸附位置"""
+        r = getattr(self, "_snap_menu_restore", None)
+        self._snap_menu_restore = None
+        if r is not None:
+            self.move(r)
 
     def _restore_balance_badge(self):
         if (self._api_badge is not None and self.isVisible()
@@ -3247,11 +3414,26 @@ class FloatingWidget(QWidget):
     def _open_news_panel(self):
         """打开 AI 快报面板（清除未读红点）"""
         self._mark_news_read()
-        panel = NewsPanel(theme=self.theme, parent=self)
+        panel = NewsPanel(theme=self.theme, config=self._news_cfg, parent=self)
         panel.generate_requested.connect(lambda: self._generate_news(auto=False))
         self._news_panel = panel
         panel.finished.connect(lambda _r: self._clear_news_panel_ref(panel))
+        self._place_news_panel(panel)
         panel.exec_()
+
+    def _place_news_panel(self, panel):
+        """把快报面板放到浮窗附近，且完整落在屏幕内"""
+        try:
+            g = self._screen_geometry()
+            pw, ph = panel.width(), panel.height()
+            x = self.geometry().left() - pw - 12
+            if x < g.left():
+                x = self.geometry().right() + 12
+            x = max(g.left(), min(x, g.right() - pw))
+            y = max(g.top(), min(self.geometry().center().y() - ph // 2, g.bottom() - ph))
+            panel.move(x, y)
+        except Exception:
+            _log().warning("放置快报面板失败", exc_info=True)
 
     def _clear_news_panel_ref(self, panel):
         if self._news_panel is panel:
@@ -3369,7 +3551,7 @@ class FloatingWidget(QWidget):
         now = time.localtime()
         if (now.tm_hour, now.tm_min) == target:
             _log().info("每日定时触发 AI 快报生成 (%02d:%02d)", target[0], target[1])
-            self._generate_news(auto=True)
+            self._generate_news(auto=True, pop_panel=True)
 
     def _show_api_summary(self):
         results = getattr(self, "_api_last_results", [])
@@ -3995,7 +4177,7 @@ def _main():
     def open_settings():
         _log().debug("打开设置对话框")
         dlg = SettingsDialog(widget.config, parent=widget)
-        # 「应用/保存」由对话框直接生效（应用=即时生效并保存、不关闭；保存=生效并关闭）
+        # 「应用/保存」由对话框直接生效并关闭；保存额外弹出修改摘要 toast（v1.4.0）
         dlg.exec_()
 
     def do_launch():

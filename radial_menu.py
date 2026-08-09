@@ -20,6 +20,7 @@ from PyQt5.QtWidgets import QWidget, QApplication
 from af_theme import get_colors
 
 CLOSE_GRACE_MS = 2000   # 移出扇区后的关闭宽限期（用户指定 1~3 秒）
+RADIAL_PAD = 30        # 菜单外缘阴影边距（供主程序计算环心对齐）
 
 
 class RadialMenuItem(object):
@@ -46,7 +47,7 @@ class RadialMenu(QWidget):
         self._items = []
         self._outer = 120          # 外环半径
         self._inner = 46           # 中心孔半径
-        self._pad = 30             # 阴影边距
+        self._pad = RADIAL_PAD      # 阴影边距
         self._progress = 0.0
         self._hover_idx = -1
         self._theme = "light"

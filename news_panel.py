@@ -100,9 +100,10 @@ def _esc(s):
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def render_html(text, theme="light"):
+def render_html(text, theme="light", font_size=13):
     """条目 → 卡片式 HTML：彩色分类标签 + 可点击标题 + 摘要 + 来源"""
     c = get_colors(theme)
+    fs = max(10, int(font_size or 13))
     tx = "#%02X%02X%02X" % c["TEXT"]
     hi = "#%02X%02X%02X" % c["HINT"]
     sec = "#%02X%02X%02X" % c["TEXT_SECONDARY"]
@@ -111,8 +112,8 @@ def render_html(text, theme="light"):
     # 标题下的 headline 行
     for ln in (text or "").splitlines():
         if ln.strip().startswith("**") and "**" in ln[2:]:
-            parts.append('<p style="font-size:13px; color:%s; margin:0 0 6px 0;">%s</p>'
-                         % (sec, _esc(ln.strip()).replace("**", "")))
+            parts.append('<p style="font-size:%dpx; color:%s; margin:0 0 6px 0;">%s</p>'
+                         % (fs, sec, _esc(ln.strip()).replace("**", "")))
             break
     items = parse_items(text)
     if not items:
@@ -129,19 +130,19 @@ def render_html(text, theme="light"):
         src_html = ""
         if url:
             host = re.sub(r"^https?://(www\.)?", "", url).rstrip("/").split("/")[0]
-            src_html = ('<span style="color:%s; font-size:11px;">↗ %s</span>'
-                        % (hi, _esc(host or source or "链接")))
+            src_html = ('<span style="color:%s; font-size:%dpx;">↗ %s</span>'
+                        % (hi, fs - 1, _esc(host or source or "链接")))
         elif source:
-            src_html = '<span style="color:%s; font-size:11px;">%s</span>' % (hi, source)
+            src_html = '<span style="color:%s; font-size:%dpx;">%s</span>' % (hi, fs - 1, source)
         parts.append(
             '<div style="border-bottom:1px solid %s; padding:10px 2px 12px 2px;">'
             '<div style="margin-bottom:5px;"><span style="display:inline-block;'
             ' background:%s; color:%s; border-radius:4px; padding:1px 8px;'
-            ' font-size:11px; margin-right:8px;">%s</span>%s</div>'
-            % (sep, bg, fg, _esc(cat), link_html))
+            ' font-size:%dpx; margin-right:8px;">%s</span>%s</div>'
+            % (sep, bg, fg, fs - 1, _esc(cat), link_html))
         if summary:
-            parts.append('<p style="color:%s; font-size:12.5px; line-height:1.6; margin:2px 0 4px 0;">%s</p>'
-                         % (sec, summary))
+            parts.append('<p style="color:%s; font-size:%dpx; line-height:1.6; margin:2px 0 4px 0;">%s</p>'
+                         % (sec, fs, summary))
         parts.append('<div>%s</div></div>' % src_html)
     return "\n".join(parts)
 
@@ -151,14 +152,18 @@ class NewsPanel(QDialog):
     news_read = pyqtSignal()
     generate_requested = pyqtSignal()
 
-    def __init__(self, theme="light", parent=None):
+    def __init__(self, theme="light", config=None, parent=None):
         super().__init__(parent)
         self._theme = theme
+        self._cfg = config or {}
+        self._font_size = max(10, int(self._cfg.get("font_size") or 13))
         self._archives = []
         self.setWindowTitle("AgentFloat — AI 快报")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setMinimumSize(720, 500)
+        self.setMinimumSize(680, 520)
+        self.resize(int(self._cfg.get("panel_width") or 860),
+                    int(self._cfg.get("panel_height") or 680))
         self.setStyleSheet(self._stylesheet())
         self._setup_ui()
         self.refresh()
@@ -179,15 +184,15 @@ class NewsPanel(QDialog):
             "QFrame#titleBar { background: %s; border-top-left-radius: 14px;"
             " border-top-right-radius: 14px; border-bottom: 1px solid %s; }" % (banner, bd) +
             "QListWidget, QTextBrowser { background: %s; color: %s;"
-            " border: 1px solid %s; border-radius: 8px; padding: 4px; font-size: 12px; }" % (card, tx, bd) +
+            " border: 1px solid %s; border-radius: 8px; padding: 4px; font-size: %dpx; }" % (card, tx, bd, self._font_size) +
             "QListWidget::item { padding: 8px 8px; border-radius: 7px; margin: 2px; }" +
             "QListWidget::item:hover { background: %s; }" % hover_bg +
             "QListWidget::item:selected { background: %s; color: #FFF; border-radius: 7px; }" % ac +
             "QPushButton { background: %s; color: %s; border: 1px solid %s;"
-            " border-radius: 8px; padding: 6px 14px; font-size: 12px; }" % (card, ac, bd) +
+            " border-radius: 8px; padding: 6px 14px; font-size: %dpx; }" % (card, ac, bd, max(11, self._font_size - 1)) +
             "QPushButton:hover { background: %s; }" % sf +
             "QPushButton:disabled { color: %s; }" % hi +
-            "QLabel { color: %s; font-size: 12px; }" % tx +
+            "QLabel { color: %s; font-size: %dpx; }" % (tx, max(11, self._font_size - 1)) +
             "QProgressBar { border: none; background: transparent; height: 6px; }" +
             "QProgressBar::chunk { background: %s; border-radius: 3px; }" % ac
         )
@@ -281,9 +286,10 @@ class NewsPanel(QDialog):
         hi = "#%02X%02X%02X" % c["HINT"]
         self.viewer.setHtml(
             '<div style="text-align:center; margin-top:120px;">'
-            '<p style="font-size:34px; margin:0;">📰</p>'
-            '<p style="color:%s; font-size:14px; margin-top:14px;">尚无快报</p>'
-            '<p style="color:%s; font-size:12px;">点击右上角「⚡ 生成今日快报」开始</p></div>' % (hi, hi))
+            '<p style="font-size:%dpx; margin:0;">📰</p>'
+            '<p style="color:%s; font-size:%dpx; margin-top:14px;">尚无快报</p>'
+            '<p style="color:%s; font-size:%dpx;">点击右上角「⚡ 生成今日快报」开始</p></div>'
+            % (self._font_size + 21, hi, self._font_size + 1, hi, max(10, self._font_size - 1)))
 
     def on_generated(self, payload):
         self.refresh()
@@ -307,12 +313,12 @@ class NewsPanel(QDialog):
         if not data:
             self.viewer.setHtml("<p>无法读取该日期数据。</p>")
             return
-        body = render_html(data.get("raw_md") or "", self._theme)
+        body = render_html(data.get("raw_md") or "", self._theme, self._font_size)
         err = (data.get("source_errors") or [])
         foot = ""
         if err:
-            foot = ('<p style="color:#%02X%02X%02X; font-size:11px; margin-top:12px;">'
+            foot = ('<p style="color:#%02X%02X%02X; font-size:%dpx; margin-top:12px;">'
                     '部分数据源不可用：%s</p>' % (
-                        get_colors(self._theme)["HINT"],
+                        get_colors(self._theme)["HINT"], max(10, self._font_size - 2),
                         "；".join(err[:3])))
         self.viewer.setHtml(body + foot)

@@ -138,6 +138,9 @@
         "weight": 3,
         "color": "#E74C3C"
       }
-    ]
+    ],
+    "panel_width": 860,
+    "panel_height": 680,
+    "font_size": 13
   }
 }

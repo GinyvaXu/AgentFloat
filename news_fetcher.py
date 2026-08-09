@@ -30,6 +30,9 @@ DEFAULT_NEWS = {
     "schedule_mode": "daily_startup",  # off / daily / startup / daily_startup
     "schedule_time": "09:00",
     "max_items": 6,
+    "panel_width": 860,          # 快报窗口宽度
+    "panel_height": 680,         # 快报窗口高度
+    "font_size": 13,             # 快报正文字号 (px)
     "use_ai": True,              # False = 纯标题列表（不调用本地 Agent）
     "agent_id": "",              # 空 = 默认主 Agent
     "sources": ["hackernews", "github_trending", "sspai", "qbitai"],
