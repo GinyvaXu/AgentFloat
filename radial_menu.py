@@ -37,6 +37,7 @@ class RadialMenuItem(object):
 class RadialMenu(QWidget):
     action_triggered = pyqtSignal(str)
     closed = pyqtSignal()          # 菜单真正隐藏时发出（用于恢复余额角标等）
+    center_clicked = pyqtSignal()  # 点击中心孔（浮窗所在位置）时发出，供快捷启动
 
     def __init__(self, parent=None):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -315,6 +316,11 @@ class RadialMenu(QWidget):
             return
         idx = self._sector_at(event.globalPos())
         if idx < 0:
+            # 中心孔区域：视为点击浮窗本身（快捷启动），由主程序处理
+            c = self._center()
+            p = self.mapFromGlobal(event.globalPos())
+            if math.hypot(p.x() - c.x(), p.y() - c.y()) <= self._inner:
+                self.center_clicked.emit()
             self.close_menu()
             event.accept()
             return

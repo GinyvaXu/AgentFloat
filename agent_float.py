@@ -1205,6 +1205,7 @@ class SettingsDialog(QDialog):
 
         self.cb_news_enabled = QCheckBox("启用 AI 快报（环绕菜单「AI 快报」扇区 / 托盘「AI 快报」打开）")
         self.cb_news_enabled.setChecked(bool(n_cfg.get("enabled", False)))
+        self.cb_news_enabled.setStyleSheet(s["checkbox"])
         vn.addWidget(self.cb_news_enabled)
 
         form = QFormLayout()
@@ -1218,7 +1219,7 @@ class SettingsDialog(QDialog):
         li = self.cmb_news_lang.findData(n_cfg.get("language", "zh"))
         self.cmb_news_lang.setCurrentIndex(max(0, li))
         self.cmb_news_lang.setStyleSheet(s["combo"])
-        form.addRow("生成语言", self.cmb_news_lang)
+        form.addRow(self._label("生成语言"), self.cmb_news_lang)
 
         self.cmb_news_schedule = QComboBox()
         for lb, dt in (("仅手动生成", "off"), ("每天定时生成", "daily"),
@@ -1227,7 +1228,7 @@ class SettingsDialog(QDialog):
         si = self.cmb_news_schedule.findData(n_cfg.get("schedule_mode", "daily_startup"))
         self.cmb_news_schedule.setCurrentIndex(max(0, si))
         self.cmb_news_schedule.setStyleSheet(s["combo"])
-        form.addRow("定时模式", self.cmb_news_schedule)
+        form.addRow(self._label("定时模式"), self.cmb_news_schedule)
 
         self.time_news = QTimeEdit()
         try:
@@ -1236,33 +1237,33 @@ class SettingsDialog(QDialog):
         except Exception:
             self.time_news.setTime(QTime(9, 0))
         self.time_news.setStyleSheet(s["combo"])
-        form.addRow("定时时间", self.time_news)
+        form.addRow(self._label("定时时间"), self.time_news)
 
         self.spin_news_max = QSpinBox()
         self.spin_news_max.setRange(3, 15)
         self.spin_news_max.setValue(int(n_cfg.get("max_items") or 6))
         self.spin_news_max.setStyleSheet(s["combo"])
-        form.addRow("条数上限", self.spin_news_max)
+        form.addRow(self._label("条数上限"), self.spin_news_max)
 
         self.spin_news_w = QSpinBox()
         self.spin_news_w.setRange(640, 1280)
         self.spin_news_w.setSingleStep(20)
         self.spin_news_w.setValue(int(n_cfg.get("panel_width") or 860))
         self.spin_news_w.setStyleSheet(s["combo"])
-        form.addRow("窗口宽度 (px)", self.spin_news_w)
+        form.addRow(self._label("窗口宽度 (px)"), self.spin_news_w)
 
         self.spin_news_h = QSpinBox()
         self.spin_news_h.setRange(480, 960)
         self.spin_news_h.setSingleStep(20)
         self.spin_news_h.setValue(int(n_cfg.get("panel_height") or 680))
         self.spin_news_h.setStyleSheet(s["combo"])
-        form.addRow("窗口高度 (px)", self.spin_news_h)
+        form.addRow(self._label("窗口高度 (px)"), self.spin_news_h)
 
         self.spin_news_font = QSpinBox()
         self.spin_news_font.setRange(11, 18)
         self.spin_news_font.setValue(int(n_cfg.get("font_size") or 13))
         self.spin_news_font.setStyleSheet(s["combo"])
-        form.addRow("正文字号 (px)", self.spin_news_font)
+        form.addRow(self._label("正文字号 (px)"), self.spin_news_font)
 
         self.cmb_news_agent = QComboBox()
         self.cmb_news_agent.addItem("默认主 Agent（点击浮窗启动的那个）", "")
@@ -1271,11 +1272,12 @@ class SettingsDialog(QDialog):
         ai = self.cmb_news_agent.findData(n_cfg.get("agent_id") or "")
         self.cmb_news_agent.setCurrentIndex(max(0, ai))
         self.cmb_news_agent.setStyleSheet(s["combo"])
-        form.addRow("摘要 Agent", self.cmb_news_agent)
+        form.addRow(self._label("摘要 Agent"), self.cmb_news_agent)
         vn.addLayout(form)
 
         self.cb_news_ai = QCheckBox("使用本地 AI 生成摘要（关闭则仅显示标题列表，零成本离线可用）")
         self.cb_news_ai.setChecked(bool(n_cfg.get("use_ai", True)))
+        self.cb_news_ai.setStyleSheet(s["checkbox"])
         vn.addWidget(self.cb_news_ai)
 
         vn.addSpacing(6)
@@ -1294,6 +1296,7 @@ class SettingsDialog(QDialog):
             if sen != szh:
                 cb.setToolTip(sen)
             cb.setChecked(sid in enabled_src)
+            cb.setStyleSheet(s["checkbox"])
             self._news_source_cbs[sid] = cb
             src_grid.addWidget(cb, k // 2, k % 2)
         vn.addLayout(src_grid)
@@ -1301,9 +1304,11 @@ class SettingsDialog(QDialog):
         vn.addSpacing(6)
         self.cb_news_notify = QCheckBox("生成完成时托盘通知")
         self.cb_news_notify.setChecked(bool(n_cfg.get("notify", True)))
+        self.cb_news_notify.setStyleSheet(s["checkbox"])
         vn.addWidget(self.cb_news_notify)
         self.cb_news_auto_show = QCheckBox("自动生成完成后弹出快报窗口")
         self.cb_news_auto_show.setChecked(bool(n_cfg.get("auto_show_panel", True)))
+        self.cb_news_auto_show.setStyleSheet(s["checkbox"])
         vn.addWidget(self.cb_news_auto_show)
         ncl.addWidget(box_news)
 
@@ -1700,6 +1705,8 @@ class SettingsDialog(QDialog):
             self._interests_frame.setStyleSheet(
                 "QFrame { background: %s; border: 1px solid %s; border-radius: 8px; }"
                 % (s['sf'], s['ibd']))
+        for cb in getattr(self, '_news_source_cbs', {}).values():
+            cb.setStyleSheet(s['checkbox'])
         if hasattr(self, 'btn_add_interest'):
             self.btn_add_interest.setStyleSheet(s['btn'])
             self.btn_preset_interest.setStyleSheet(s['btn'])
@@ -3081,6 +3088,11 @@ class FloatingWidget(QWidget):
         """将 widget 滑出屏幕（仅留一小部分可见）"""
         if not self._snapped:
             return
+        # 环绕菜单打开 / 拖拽期间绝不缩回
+        if self._drag_active:
+            return
+        if self._radial_menu is not None and self._radial_menu.isVisible():
+            return
         g = self._screen_geometry()
         s = self.current_size
         edge = self._snap_edge
@@ -3100,10 +3112,17 @@ class FloatingWidget(QWidget):
         self._animate_slide(target, edge)
         if self._api_badge:
             self._api_badge.hide()
+        # 隐藏后重建边缘检测器（显示时会被移除），供下次鼠标靠近时唤起
+        self._setup_edge_detector()
 
     def _show_full(self):
         """将 widget 完全滑入屏幕"""
         if not self._snapped:
+            return
+        # 环绕菜单打开时：浮窗已被临时移到环心对齐位置，不能移动它；
+        # 只确保不缩回，避免「菜单还开着、浮窗却缩回/错位」。
+        if self._radial_menu is not None and self._radial_menu.isVisible():
+            self._hide_timer.stop()
             return
         g = self._screen_geometry()
         s = self.current_size
@@ -3122,6 +3141,12 @@ class FloatingWidget(QWidget):
         self._animate_slide(target, edge)
         if self._api_badge:
             self._api_badge.show()
+        # 弹出后移除边缘检测器：避免它盖住浮窗（尤其贴边的小标签页）拦截点击/拖拽
+        self._remove_edge_detector()
+        # 拖拽中不调度自动隐藏
+        if self._drag_active:
+            self._hide_timer.stop()
+            return
         # 设置延迟重新隐藏
         self._hide_timer.start(self.config.get("hide_delay_ms", 800))
 
@@ -3147,14 +3172,21 @@ class FloatingWidget(QWidget):
             self._slide_anim.stop()
         self._hide_timer.stop()
         self._hidden_now = False
+        # 弹出后移除边缘检测器，避免盖住浮窗拦截按压/拖拽
+        self._remove_edge_detector()
         if self._api_badge:
             self._api_badge.show()
         _log().debug("吸附隐藏状态下立即弹出: edge=%s", edge)
 
     def _auto_hide(self):
-        """计时器触发：自动隐藏"""
-        if self._snapped and not self.is_hovered:
-            self._do_hide()
+        """计时器触发：自动隐藏（菜单打开 / 拖拽中不隐藏）"""
+        if not (self._snapped and not self.is_hovered):
+            return
+        if self._drag_active:
+            return
+        if self._radial_menu is not None and self._radial_menu.isVisible():
+            return
+        self._do_hide()
 
     def _animate_slide(self, target, edge):
         """滑动动画"""
@@ -3188,11 +3220,16 @@ class FloatingWidget(QWidget):
         self.is_hovered = self.rect().contains(local_pos)
 
         # 吸附模式下自动管理显示/隐藏
+        menu_open = self._radial_menu is not None and self._radial_menu.isVisible()
         if self._snapped and self.config.get("snap_hidden", True):
             if self.is_hovered and not was:
                 self._show_full()
             elif not self.is_hovered and was:
-                self._hide_timer.start(self.config.get("hide_delay_ms", 800))
+                if menu_open or self._drag_active:
+                    # 环绕菜单打开 / 拖拽期间不缩回
+                    self._hide_timer.stop()
+                else:
+                    self._hide_timer.start(self.config.get("hide_delay_ms", 800))
 
         hover_size = int(self.base_size * HOVER_SCALE)
         if self.is_hovered and not was:
@@ -3229,6 +3266,8 @@ class FloatingWidget(QWidget):
         # 吸附隐藏状态：先弹出到完全可见位置，避免菜单圆心在屏幕外
         if self._snapped and self._hidden_now:
             self._reveal_now()
+        # 菜单打开期间禁止自动缩回
+        self._hide_timer.stop()
         if source == "long_press":
             self._long_press_fired = True
         items = self._build_radial_items()
@@ -3236,6 +3275,7 @@ class FloatingWidget(QWidget):
             self._radial_menu = RadialMenu()
             self._radial_menu.action_triggered.connect(self._on_radial_action)
             self._radial_menu.closed.connect(self._on_radial_menu_closed)
+            self._radial_menu.center_clicked.connect(self._on_radial_center_clicked)
         if self._radial_menu.isVisible():
             # 已在显示中：避免重复触发导致动画反复重启（抽搐）
             return
@@ -3271,11 +3311,13 @@ class FloatingWidget(QWidget):
         if self._radial_menu is not None:
             self._radial_menu.close_menu()
         self._restore_snap_position()
+        self._maybe_arm_hide()
         self._restore_balance_badge()
 
     def _on_radial_menu_closed(self):
         # 菜单自行关闭（宽限/点击外部）后恢复余额角标
         self._restore_snap_position()
+        self._maybe_arm_hide()
         self._restore_balance_badge()
 
     def _restore_snap_position(self):
@@ -3284,6 +3326,16 @@ class FloatingWidget(QWidget):
         self._snap_menu_restore = None
         if r is not None:
             self.move(r)
+
+    def _maybe_arm_hide(self):
+        """菜单 / 拖拽结束后：若仍处于吸附隐藏模式且鼠标不在浮窗上，重新调度自动隐藏"""
+        if not (self._snapped and self.config.get("snap_hidden", True)):
+            return
+        if self.is_hovered or self._drag_active:
+            return
+        if self._radial_menu is not None and self._radial_menu.isVisible():
+            return
+        self._hide_timer.start(self.config.get("hide_delay_ms", 800))
 
     def _restore_balance_badge(self):
         if (self._api_badge is not None and self.isVisible()
@@ -3349,6 +3401,11 @@ class FloatingWidget(QWidget):
             label, sub, color, char = labels[action]
             return RadialMenuItem(action, label, sub, color, char)
         return None
+
+    def _on_radial_center_clicked(self):
+        """点击环绕菜单中心孔 → 视为点击浮窗，快捷启动主 Agent"""
+        self._close_radial_menu()
+        self.launch_requested.emit()
 
     def _on_radial_action(self, action_id):
         if action_id.startswith("agent:"):
@@ -3763,6 +3820,7 @@ class FloatingWidget(QWidget):
             # 吸附隐藏状态：按压即先弹出，保证点击/拖拽落在可见区域
             if self._snapped and self._hidden_now:
                 self._reveal_now()
+            self._hide_timer.stop()
             self._drag_origin = event.globalPos()
             self._window_origin = self.pos()
             self._drag_active = False
@@ -3794,6 +3852,8 @@ class FloatingWidget(QWidget):
             self._long_press_timer.stop()
             # 拖拽开始：取消悬停展开，并关闭已打开的环绕菜单
             self._hover_open_timer.stop()
+            if self._slide_anim is not None:
+                self._slide_anim.stop()
             if self._radial_menu is not None and self._radial_menu.isVisible():
                 self._close_radial_menu()
         if self._drag_active:
