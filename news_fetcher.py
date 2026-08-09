@@ -208,18 +208,37 @@ SOURCE_MAP = {s["id"]: s for s in SOURCES}
 
 
 def fetch_all(enabled_ids, per_source=12, timeout=15):
-    """并发抓取启用源；返回 (items, errors)"""
+    """并发抓取启用源；返回 (items, errors)。
+
+    单个源超时不中断整体：as_completed 到点抛 TimeoutError 时，
+    取消剩余任务并记为错误，已抓到的部分结果照常返回。
+    """
     enabled = [SOURCE_MAP[i] for i in enabled_ids if i in SOURCE_MAP]
     items, errors = [], []
-    with ThreadPoolExecutor(max_workers=max(2, len(enabled))) as pool:
-        futures = {pool.submit(s["fetch"], per_source): s for s in enabled}
+    if not enabled:
+        return items, errors
+    pool = ThreadPoolExecutor(max_workers=max(2, len(enabled)))
+    futures = {pool.submit(s["fetch"], per_source): s for s in enabled}
+    pending = set(futures)
+    try:
         for fut in as_completed(futures, timeout=timeout + 5):
+            pending.discard(fut)
             s = futures[fut]
             try:
                 got = fut.result() or []
                 items.extend(got)
             except Exception as e:
                 errors.append("%s：%s" % (s["name"], _brief_err(e)))
+    except TimeoutError:
+        # 剩余源在限时内未完成：取消并记为超时，不向调用方抛异常
+        for fut in list(pending):
+            fut.cancel()
+            errors.append("%s：超时未完成" % futures[fut]["name"])
+    finally:
+        try:
+            pool.shutdown(wait=False, cancel_futures=True)
+        except TypeError:
+            pool.shutdown(wait=False)
     return items, errors
 
 

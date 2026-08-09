@@ -74,3 +74,6 @@ skills_translations_ai.json
 
 # AI 快报数据（开发模式存脚本目录，打包后存 %APPDATA% ）
 news/
+
+# 安装包构建产物（本地保留，通过 GitHub Releases 发布）
+installer/*.exe

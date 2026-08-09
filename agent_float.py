@@ -33,8 +33,9 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QSystemTrayIcon, QMenu,
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QPushButton,
     QSpinBox, QGroupBox, QRadioButton, QCheckBox, QLineEdit, QFileDialog, QMessageBox,
-    QScrollArea, QComboBox, QListWidget, QListWidgetItem, QTabWidget, QTimeEdit,
-    QFrame, QColorDialog
+    QScrollArea, QComboBox, QListWidget, QListWidgetItem, QTimeEdit,
+    QFrame, QColorDialog, QStackedWidget, QGridLayout, QFormLayout,
+    QTextBrowser, QProgressBar
 )
 from PyQt5.QtCore import (
     Qt, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QCoreApplication,
@@ -52,7 +53,8 @@ from api_monitor_config import (
 from api_balance_badge import ApiBalanceBadge
 from api_monitor_worker import ApiMonitorWorker
 from api_monitor_settings import ApiMonitorSettingsTab
-from updater import UpdateWorker, DownloadWorker, pick_setup_asset
+import updater
+from updater import UpdateWorker, DownloadWorker
 
 # ── AgentFloat 通用多 Agent 模块 ────────────────────
 from agent_registry import (
@@ -104,6 +106,15 @@ def _get_config_path():
     d = _get_config_dir()
     os.makedirs(d, exist_ok=True)
     return os.path.join(d, "config.json")
+
+def _open_url(url):
+    """在默认浏览器中打开链接（设置「下载与支持」按钮用）"""
+    import webbrowser
+    try:
+        webbrowser.open(url)
+    except Exception:
+        _log().warning("打开链接失败: %s", url)
+
 
 # 旧配置路径（用于自动迁移）
 _OLD_CONFIG_PATH = os.path.join(SCRIPT_DIR, "launcher_config.json")
@@ -198,6 +209,7 @@ THEMES = {
     "light": {
         "GLASS_BG":        (255, 255, 255),   # 毛玻璃白底
         "BORDER":          (255, 255, 255),   # 玻璃边框
+        "INPUT_BORDER":    (209, 209, 214),   # 输入框边框 #D1D1D6
         "SHADOW":          (0, 0, 0),         # 柔和阴影
         "ACCENT":          (0, 122, 255),     # iOS 蓝 #007AFF
         "TEXT":            (28, 28, 30),      # 深色文字 #1C1C1E
@@ -211,6 +223,7 @@ THEMES = {
     "dark": {
         "GLASS_BG":        (28, 28, 30),      # 暗色毛玻璃 #1C1C1E
         "BORDER":          (72, 72, 74),      # 暗色边框 #48484A
+        "INPUT_BORDER":    (90, 90, 95),      # 输入框边框 #5A5A5F
         "SHADOW":          (0, 0, 0),         # 阴影（不变）
         "ACCENT":          (10, 132, 255),    # iOS 暗色蓝 #0A84FF
         "TEXT":            (242, 242, 247),   # 浅色文字 #F2F2F7
@@ -250,7 +263,7 @@ def _read_version():
             return _v
     except Exception:
         pass
-    return "1.2.2"
+    return "1.3.0"
 
 VERSION = _read_version()
 
@@ -483,6 +496,8 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.config = config.copy()
         self.result_config = None
+        self._original_config = copy.deepcopy(self.config)
+        self._applied_something = False
         self._cjk = _get_cjk_font()
         self.theme = self.config.get("theme", "light")
         self._c = get_colors(self.theme)
@@ -501,6 +516,9 @@ class SettingsDialog(QDialog):
         self._window_origin = QPoint()
         self._build_styles()
         self._setup_ui()
+        self._update_state_init()
+        # 打开设置后自动静默检查一次更新
+        QTimer.singleShot(600, self._update_check_clicked)
 
     def _build_styles(self):
         """根据当前主题预构建所有 stylesheet 字符串"""
@@ -512,6 +530,7 @@ class SettingsDialog(QDialog):
         ac = f"#{c['ACCENT'][0]:02X}{c['ACCENT'][1]:02X}{c['ACCENT'][2]:02X}"
         sp = f"#{c['SEPARATOR'][0]:02X}{c['SEPARATOR'][1]:02X}{c['SEPARATOR'][2]:02X}"
         bd = f"#{c['BORDER'][0]:02X}{c['BORDER'][1]:02X}{c['BORDER'][2]:02X}"
+        ibd = f"#{c['INPUT_BORDER'][0]:02X}{c['INPUT_BORDER'][1]:02X}{c['INPUT_BORDER'][2]:02X}"
         # 二级文字色 — 从 THEMES 读取（不再硬编码）
         ts_r, ts_g, ts_b = c['TEXT_SECONDARY']
         text_secondary = f"#{ts_r:02X}{ts_g:02X}{ts_b:02X}"
@@ -562,24 +581,24 @@ class SettingsDialog(QDialog):
                 f"QSlider::sub-page:horizontal {{ background:{ac}; border-radius:2px; }}"
             ),
             "combo": (
-                f"QComboBox {{ background: {card_bg}; color: {tx}; border: 1px solid {bd};"
+                f"QComboBox {{ background: {card_bg}; color: {tx}; border: 1px solid {ibd};"
                 f" border-radius: 8px; padding: 5px 8px; font-size: 12px; }}"
                 f"QComboBox::drop-down {{ border: none; width: 20px; }}"
                 f"QComboBox QAbstractItemView {{ background: {card_bg}; color: {tx};"
-                f" selection-background-color: {ac}; border: 1px solid {bd}; }}"
+                f" selection-background-color: {ac}; border: 1px solid {ibd}; }}"
             ),
             "spin": (
-                f"QSpinBox {{ background: {card_bg}; color: {tx}; border: 1px solid {bd};"
+                f"QSpinBox {{ background: {card_bg}; color: {tx}; border: 1px solid {ibd};"
                 f" border-radius: 8px; padding: 4px 6px; font-size: 12px; }}"
             ),
             "list": (
-                f"QListWidget {{ background: {card_bg}; color: {tx}; border: 1px solid {bd};"
+                f"QListWidget {{ background: {card_bg}; color: {tx}; border: 1px solid {ibd};"
                 f" border-radius: 8px; font-size: 11px; }}"
                 f"QListWidget::item {{ padding: 4px 6px; border-radius: 4px; }}"
                 f"QListWidget::item:selected {{ background: {ac}; color: #FFF; }}"
             ),
             "lineedit": (
-                f"QLineEdit {{ background: {card_bg}; color: {tx}; border: 1px solid {bd};"
+                f"QLineEdit {{ background: {card_bg}; color: {tx}; border: 1px solid {ibd};"
                 f" border-radius: 6px; padding: 6px 8px; }}"
             ),
             "close_btn": (
@@ -587,12 +606,18 @@ class SettingsDialog(QDialog):
                 f"QPushButton:hover {{ background: {sp}; color: {tx}; }}"
                 f"QPushButton:pressed {{ background: {bd}; color: #000; }}"
             ),
-            "tabs": (
-                f"QTabWidget::pane {{ border: 1px solid {bd}; border-radius: 10px; top: -1px; }}"
-                f"QTabBar::tab {{ background: transparent; color: {text_secondary};"
-                f" padding: 7px 16px; margin-right: 4px; border-radius: 8px; font-size: 12px; }}"
-                f"QTabBar::tab:selected {{ background: {ac}; color: #FFF; font-weight: bold; }}"
-                f"QTabBar::tab:hover:!selected {{ background: {card_bg}; color: {tx}; }}"
+            # 左侧导航（Apple 系统设置风格）
+            "nav": (
+                f"QListWidget {{ background: transparent; border: none; font-size: 13px;"
+                f" color: {text_secondary}; outline: 0; }}"
+                f"QListWidget::item {{ height: 42px; padding-left: 12px;"
+                f" border-radius: 9px; margin: 2px 8px; }}"
+                f"QListWidget::item:hover {{ background: {sp}; }}"
+                f"QListWidget::item:selected {{ background: {ac}; color: #FFF; font-weight: bold; }}"
+            ),
+            "stack": (
+                f"QStackedWidget {{ background: {card_bg}; border: 1px solid {bd};"
+                f" border-radius: 10px; }}"
             ),
             # 安全警告标签 — 主题感知（暗色模式下低饱和背景 + 柔和文字）
             "warn_label": (
@@ -600,7 +625,7 @@ class SettingsDialog(QDialog):
                 f" border: 1px solid {warn_fg}; border-radius: 6px; padding: 8px 10px; }}"
             ),
             # 通用颜色快捷方式
-            "sf": sf, "tx": tx, "hi": hi, "ac": ac, "sp": sp, "bd": bd,
+            "sf": sf, "tx": tx, "hi": hi, "ac": ac, "sp": sp, "bd": bd, "ibd": ibd,
             "card_bg": card_bg, "text_secondary": text_secondary,
         }
 
@@ -623,7 +648,7 @@ class SettingsDialog(QDialog):
         s = self._s
         self.setWindowTitle("浮窗设置")
         # 顶部横向标签页布局：各模块分页放置，避免所有内容平铺在一个窗口
-        self.setMinimumSize(880, 560)
+        self.setMinimumSize(960, 600)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFont(self._font(9))
@@ -678,12 +703,20 @@ class SettingsDialog(QDialog):
         btn_css = s["btn"]
         save_css = s["save_btn"]
 
-        # ── 顶部横向标签页 ──
-        tabs = QTabWidget()
-        tabs.setDocumentMode(True)
-        tabs.setStyleSheet(s["tabs"])
-        self._tabs = tabs
-        layout.addWidget(tabs, 1)
+        # ── 左侧图标导航 + 右侧内容区（Apple 系统设置风格）──
+        body = QHBoxLayout()
+        body.setSpacing(10)
+        self.nav_list = QListWidget()
+        self.nav_list.setObjectName("settingsNav")
+        self.nav_list.setStyleSheet(s["nav"])
+        self.nav_list.setFixedWidth(172)
+        self.nav_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.stack = QStackedWidget()
+        self.stack.setStyleSheet(s["stack"])
+        body.addWidget(self.nav_list)
+        body.addWidget(self.stack, 1)
+        layout.addLayout(body, 1)
+        self.nav_list.currentRowChanged.connect(self.stack.setCurrentIndex)
 
         # ================= 通用 =================
         page_general = QWidget()
@@ -696,11 +729,11 @@ class SettingsDialog(QDialog):
         box.setFont(self._font(13, bold=True))
         box.setStyleSheet(s["group"])
         vl = QVBoxLayout(box)
-        vl.setSpacing(6)
-        vl.setContentsMargins(14, 14, 14, 10)
+        vl.setSpacing(8)
+        vl.setContentsMargins(16, 16, 16, 12)
 
         agent_row = QHBoxLayout()
-        agent_row.setSpacing(6)
+        agent_row.setSpacing(8)
         self.cmb_primary_agent = QComboBox()
         self.cmb_primary_agent.setStyleSheet(s["combo"])
         self.cmb_primary_agent.currentIndexChanged.connect(self._on_primary_agent_changed)
@@ -745,7 +778,7 @@ class SettingsDialog(QDialog):
 
         # 跳过权限行：radio + info 图标
         skip_row = QHBoxLayout()
-        skip_row.setSpacing(6)
+        skip_row.setSpacing(8)
         skip_row.addWidget(self.rb_skip)
         skip_row.addWidget(info_icon)
         skip_row.addStretch()
@@ -779,7 +812,7 @@ class SettingsDialog(QDialog):
         box4.setStyleSheet(s["group"])
         vl4 = QVBoxLayout(box4)
         vl4.setSpacing(8)
-        vl4.setContentsMargins(14, 14, 14, 10)
+        vl4.setContentsMargins(16, 16, 16, 12)
 
         self.dir_edit = QLineEdit()
         self.dir_edit.setFont(self._font(10))
@@ -811,8 +844,8 @@ class SettingsDialog(QDialog):
         box_cleanup.setFont(self._font(13, bold=True))
         box_cleanup.setStyleSheet(s["group"])
         vl_cleanup = QVBoxLayout(box_cleanup)
-        vl_cleanup.setSpacing(6)
-        vl_cleanup.setContentsMargins(14, 14, 14, 10)
+        vl_cleanup.setSpacing(8)
+        vl_cleanup.setContentsMargins(16, 16, 16, 12)
 
         self.cb_cleanup = QCheckBox("退出时关闭主 Agent 进程")
         self.cb_cleanup.setFont(self._font(11))
@@ -823,7 +856,7 @@ class SettingsDialog(QDialog):
         pg.addWidget(box_cleanup)
 
         pg.addStretch()
-        tabs.addTab(page_general, "通用")
+        self._add_page(page_general, "⚙  通用")
 
         # ================= 外观 =================
         page_appearance = QWidget()
@@ -835,8 +868,8 @@ class SettingsDialog(QDialog):
         box_theme.setFont(self._font(13, bold=True))
         box_theme.setStyleSheet(s["group"])
         vl_theme = QVBoxLayout(box_theme)
-        vl_theme.setSpacing(6)
-        vl_theme.setContentsMargins(14, 14, 14, 10)
+        vl_theme.setSpacing(8)
+        vl_theme.setContentsMargins(16, 16, 16, 12)
 
         self.rb_light = QRadioButton("☀  浅色模式")
         self.rb_dark  = QRadioButton("☾  深色模式")
@@ -856,8 +889,48 @@ class SettingsDialog(QDialog):
         vl_theme.addWidget(self.rb_light)
         vl_theme.addWidget(self.rb_dark)
         pa.addWidget(box_theme)
+
+        # 浮窗大小
+        box2 = QGroupBox("浮窗大小")
+        box2.setFont(self._font(13, bold=True))
+        box2.setStyleSheet(s["group"])
+        vl2 = QVBoxLayout(box2)
+        vl2.setSpacing(8)
+        vl2.setContentsMargins(16, 16, 16, 12)
+        row = QHBoxLayout()
+        row.addWidget(self._label("边长", size=10, color=s["text_secondary"]))
+        self.size_slider = QSlider(Qt.Horizontal)
+        self.size_slider.setRange(40, 90)
+        self.size_slider.setValue(self.config.get("widget_size", DEFAULT_SIZE))
+        self.size_slider.setStyleSheet(s["slider"])
+        row.addWidget(self.size_slider, 1)
+        self.size_label = self._label(f"{self.size_slider.value()} px", size=10, bold=True)
+        row.addWidget(self.size_label)
+        self.size_slider.valueChanged.connect(lambda v: self.size_label.setText(f"{v} px"))
+        vl2.addLayout(row)
+        pa.addWidget(box2)
+
+        # 透明度
+        box3 = QGroupBox("透明度")
+        box3.setFont(self._font(13, bold=True))
+        box3.setStyleSheet(s["group"])
+        vl3 = QVBoxLayout(box3)
+        vl3.setSpacing(8)
+        vl3.setContentsMargins(16, 16, 16, 12)
+        row3 = QHBoxLayout()
+        row3.addWidget(self._label("不透明度", size=10, color=s["text_secondary"]))
+        self.op_slider = QSlider(Qt.Horizontal)
+        self.op_slider.setRange(40, 100)
+        self.op_slider.setValue(int(self.config.get("opacity", 0.88) * 100))
+        self.op_slider.setStyleSheet(s["slider"])
+        row3.addWidget(self.op_slider, 1)
+        self.op_label = self._label(f"{self.op_slider.value()}%", size=10, bold=True)
+        row3.addWidget(self.op_label)
+        self.op_slider.valueChanged.connect(lambda v: self.op_label.setText(f"{v}%"))
+        vl3.addLayout(row3)
+        pa.addWidget(box3)
         pa.addStretch()
-        tabs.addTab(page_appearance, "外观")
+        self._add_page(page_appearance, "🎨  外观")
 
         # ================= 交互 =================
         page_interact = QWidget()
@@ -870,8 +943,8 @@ class SettingsDialog(QDialog):
         box_snap.setFont(self._font(13, bold=True))
         box_snap.setStyleSheet(s["group"])
         vl_snap = QVBoxLayout(box_snap)
-        vl_snap.setSpacing(6)
-        vl_snap.setContentsMargins(14, 14, 14, 10)
+        vl_snap.setSpacing(8)
+        vl_snap.setContentsMargins(16, 16, 16, 12)
 
         self.cb_snap_enabled = QCheckBox("启用边缘吸附")
         self.cb_snap_enabled.setFont(self._font(11))
@@ -890,44 +963,6 @@ class SettingsDialog(QDialog):
         vl_snap.addWidget(self.cb_snap_hidden)
         pi.addWidget(box_snap)
 
-        # 浮窗大小
-        box2 = QGroupBox("浮窗大小")
-        box2.setFont(self._font(13, bold=True))
-        box2.setStyleSheet(s["group"])
-        vl2 = QVBoxLayout(box2)
-        vl2.setSpacing(6)
-        vl2.setContentsMargins(14, 14, 14, 10)
-        row = QHBoxLayout()
-        row.addWidget(self._label("边长:", size=9))
-        self.size_slider = QSlider(Qt.Horizontal)
-        self.size_slider.setRange(40, 90)
-        self.size_slider.setValue(self.config.get("widget_size", DEFAULT_SIZE))
-        self.size_slider.setStyleSheet(s["slider"])
-        row.addWidget(self.size_slider)
-        self.size_label = self._label(f"{self.size_slider.value()} px", bold=True)
-        row.addWidget(self.size_label)
-        self.size_slider.valueChanged.connect(lambda v: self.size_label.setText(f"{v} px"))
-        vl2.addLayout(row)
-        pi.addWidget(box2)
-
-        # 透明度
-        box3 = QGroupBox("透明度")
-        box3.setFont(self._font(13, bold=True))
-        box3.setStyleSheet(s["group"])
-        vl3 = QVBoxLayout(box3)
-        vl3.setSpacing(6)
-        vl3.setContentsMargins(14, 14, 14, 10)
-        row3 = QHBoxLayout()
-        row3.addWidget(self._label("不透明度:", size=9))
-        self.op_slider = QSlider(Qt.Horizontal)
-        self.op_slider.setRange(40, 100)
-        self.op_slider.setValue(int(self.config.get("opacity",0.88)*100))
-        self.op_slider.setStyleSheet(s["slider"])
-        row3.addWidget(self.op_slider)
-        self.op_label = self._label(f"{self.op_slider.value()}%", bold=True)
-        row3.addWidget(self.op_label)
-        self.op_slider.valueChanged.connect(lambda v: self.op_label.setText(f"{v}%"))
-        vl3.addLayout(row3)
         pi.addWidget(box3)
 
         # 环绕菜单
@@ -935,8 +970,8 @@ class SettingsDialog(QDialog):
         box_radial.setFont(self._font(13, bold=True))
         box_radial.setStyleSheet(s["group"])
         vr = QVBoxLayout(box_radial)
-        vr.setSpacing(6)
-        vr.setContentsMargins(14, 14, 14, 10)
+        vr.setSpacing(8)
+        vr.setContentsMargins(16, 16, 16, 12)
 
         vr.addWidget(self._label("触发方式", size=11, color=s["text_secondary"]))
         self.cmb_trigger = QComboBox()
@@ -997,22 +1032,27 @@ class SettingsDialog(QDialog):
 
         self.slot_rows = []
         self.slot_combos = []
+        slot_grid = QGridLayout()
+        slot_grid.setHorizontalSpacing(12)
+        slot_grid.setVerticalSpacing(6)
         for i in range(8):
-            row = QHBoxLayout()
-            row.addWidget(self._label("扇区 %d" % (i + 1), size=9, color=s["text_secondary"]))
+            cell = QHBoxLayout()
+            cell.setSpacing(6)
+            cell.addWidget(self._label("扇区 %d" % (i + 1), size=9, color=s["text_secondary"]))
             cb = QComboBox()
             cb.setStyleSheet(s["combo"])
             self._fill_slot_combo(cb, i)
-            row.addWidget(cb, 1)
+            cell.addWidget(cb, 1)
             self.slot_combos.append(cb)
-            self.slot_rows.append(row)
-            vr.addLayout(row)
+            self.slot_rows.append(cell)
+            slot_grid.addLayout(cell, i // 2, i % 2)
+        vr.addLayout(slot_grid)
         self._refresh_slot_rows()
         self.cmb_slot_count.currentIndexChanged.connect(lambda _i: self._refresh_slot_rows())
 
         pi.addWidget(box_radial)
         pi.addStretch()
-        tabs.addTab(page_interact, "交互")
+        self._add_page(page_interact, "🖱️  交互")
 
         # ================= Skills =================
         page_skills = QWidget()
@@ -1024,8 +1064,8 @@ class SettingsDialog(QDialog):
         box_skills.setFont(self._font(13, bold=True))
         box_skills.setStyleSheet(s["group"])
         vsk = QVBoxLayout(box_skills)
-        vsk.setSpacing(6)
-        vsk.setContentsMargins(14, 14, 14, 10)
+        vsk.setSpacing(8)
+        vsk.setContentsMargins(16, 16, 16, 12)
 
         self.skills_root_list = QListWidget()
         for r in (self._skills_cfg.get("roots") or default_skill_roots()):
@@ -1078,7 +1118,7 @@ class SettingsDialog(QDialog):
 
         psk.addWidget(box_skills)
         psk.addStretch()
-        tabs.addTab(page_skills, "Skills")
+        self._add_page(page_skills, "🧩  Skills")
 
         # ================= API 用量 =================
         page_api = QWidget()
@@ -1095,11 +1135,12 @@ class SettingsDialog(QDialog):
         api_scroll.setFrameShape(QScrollArea.NoFrame)
         self._api_scroll = api_scroll
         api_scroll.setStyleSheet(
-            f"QScrollArea {{ border: 1px solid {s['bd']}; border-radius: 10px; background: {s['card_bg']}; }}"
+            f"QScrollArea {{ background: transparent; border: 1px solid {s['bd']}; border-radius: 10px; }}"
+            f"QScrollArea > QWidget > QWidget {{ background: transparent; }}"
             f"QScrollBar:vertical {{ width: 6px; }}"
         )
         pap.addWidget(api_scroll)
-        tabs.addTab(page_api, "API 用量")
+        self._add_page(page_api, "📊  API 用量")
 
         # ================= AI 快报 =================
         page_news = QWidget()
@@ -1107,35 +1148,36 @@ class SettingsDialog(QDialog):
         pnw.setContentsMargins(6, 10, 6, 6)
 
         news_content = QWidget()
+        news_content.setStyleSheet("background: transparent;")
         ncl = QVBoxLayout(news_content)
         ncl.setSpacing(8)
         ncl.setContentsMargins(14, 14, 14, 14)
         n_cfg = self._news_cfg
 
-        box_news = QGroupBox("AI 快报")
+        box_news = QGroupBox("来源与生成")
         box_news.setFont(self._font(13, bold=True))
         box_news.setStyleSheet(s["group"])
         vn = QVBoxLayout(box_news)
         vn.setSpacing(8)
-        vn.setContentsMargins(14, 14, 14, 10)
+        vn.setContentsMargins(16, 16, 16, 12)
 
         self.cb_news_enabled = QCheckBox("启用 AI 快报（环绕菜单「AI 快报」扇区 / 托盘「AI 快报」打开）")
         self.cb_news_enabled.setChecked(bool(n_cfg.get("enabled", False)))
         vn.addWidget(self.cb_news_enabled)
 
-        lang_row = QHBoxLayout()
-        lang_row.addWidget(self._label("生成语言", size=10, color=s["text_secondary"]))
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(10)
+
         self.cmb_news_lang = QComboBox()
         for lb, dt in (("中文（推荐）", "zh"), ("English", "en"), ("中英双语", "both")):
             self.cmb_news_lang.addItem(lb, dt)
         li = self.cmb_news_lang.findData(n_cfg.get("language", "zh"))
         self.cmb_news_lang.setCurrentIndex(max(0, li))
         self.cmb_news_lang.setStyleSheet(s["combo"])
-        lang_row.addWidget(self.cmb_news_lang, 1)
-        vn.addLayout(lang_row)
+        form.addRow("生成语言", self.cmb_news_lang)
 
-        sched_row = QHBoxLayout()
-        sched_row.addWidget(self._label("定时模式", size=10, color=s["text_secondary"]))
         self.cmb_news_schedule = QComboBox()
         for lb, dt in (("仅手动生成", "off"), ("每天定时生成", "daily"),
                        ("启动时补生成", "startup"), ("每天定时 + 启动补生成", "daily_startup")):
@@ -1143,11 +1185,8 @@ class SettingsDialog(QDialog):
         si = self.cmb_news_schedule.findData(n_cfg.get("schedule_mode", "daily_startup"))
         self.cmb_news_schedule.setCurrentIndex(max(0, si))
         self.cmb_news_schedule.setStyleSheet(s["combo"])
-        sched_row.addWidget(self.cmb_news_schedule, 1)
-        vn.addLayout(sched_row)
+        form.addRow("定时模式", self.cmb_news_schedule)
 
-        time_row = QHBoxLayout()
-        time_row.addWidget(self._label("定时时间", size=10, color=s["text_secondary"]))
         self.time_news = QTimeEdit()
         try:
             hh, mm = str(n_cfg.get("schedule_time", "09:00")).split(":")
@@ -1155,24 +1194,14 @@ class SettingsDialog(QDialog):
         except Exception:
             self.time_news.setTime(QTime(9, 0))
         self.time_news.setStyleSheet(s["combo"])
-        time_row.addWidget(self.time_news, 1)
-        vn.addLayout(time_row)
+        form.addRow("定时时间", self.time_news)
 
-        cnt_row = QHBoxLayout()
-        cnt_row.addWidget(self._label("条数上限", size=10, color=s["text_secondary"]))
         self.spin_news_max = QSpinBox()
         self.spin_news_max.setRange(3, 15)
         self.spin_news_max.setValue(int(n_cfg.get("max_items") or 6))
         self.spin_news_max.setStyleSheet(s["combo"])
-        cnt_row.addWidget(self.spin_news_max, 1)
-        vn.addLayout(cnt_row)
+        form.addRow("条数上限", self.spin_news_max)
 
-        self.cb_news_ai = QCheckBox("使用本地 AI 生成摘要（关闭则仅显示标题列表，零成本离线可用）")
-        self.cb_news_ai.setChecked(bool(n_cfg.get("use_ai", True)))
-        vn.addWidget(self.cb_news_ai)
-
-        agent_row = QHBoxLayout()
-        agent_row.addWidget(self._label("摘要 Agent", size=10, color=s["text_secondary"]))
         self.cmb_news_agent = QComboBox()
         self.cmb_news_agent.addItem("默认主 Agent（点击浮窗启动的那个）", "")
         for a in self._agents:
@@ -1180,39 +1209,72 @@ class SettingsDialog(QDialog):
         ai = self.cmb_news_agent.findData(n_cfg.get("agent_id") or "")
         self.cmb_news_agent.setCurrentIndex(max(0, ai))
         self.cmb_news_agent.setStyleSheet(s["combo"])
-        agent_row.addWidget(self.cmb_news_agent, 1)
-        vn.addLayout(agent_row)
+        form.addRow("摘要 Agent", self.cmb_news_agent)
+        vn.addLayout(form)
 
-        vn.addSpacing(4)
+        self.cb_news_ai = QCheckBox("使用本地 AI 生成摘要（关闭则仅显示标题列表，零成本离线可用）")
+        self.cb_news_ai.setChecked(bool(n_cfg.get("use_ai", True)))
+        vn.addWidget(self.cb_news_ai)
+
+        vn.addSpacing(6)
         vn.addWidget(self._label("数据源（可多选，单个源失败不影响整体）", size=10, color=s["text_secondary"]))
         self._news_source_cbs = {}
         enabled_src = n_cfg.get("sources") or _NEWS_DEFAULTS["sources"]
-        for sid, szh, sen in (("hackernews", "Hacker News", "Hacker News"),
-                              ("github_trending", "GitHub 趋势", "GitHub Trending"),
-                              ("sspai", "少数派", "少数派"),
-                              ("qbitai", "量子位", "量子位"),
-                              ("arxiv_ai", "arXiv AI", "arXiv AI")):
-            cb = QCheckBox("%s（%s）" % (szh, sen))
+        src_grid = QGridLayout()
+        src_grid.setHorizontalSpacing(12)
+        src_grid.setVerticalSpacing(4)
+        for k, (sid, szh, sen) in enumerate((("hackernews", "Hacker News", "Hacker News"),
+                                             ("github_trending", "GitHub 趋势", "GitHub Trending"),
+                                             ("sspai", "少数派", "少数派"),
+                                             ("qbitai", "量子位", "量子位"),
+                                             ("arxiv_ai", "arXiv AI", "arXiv AI"))):
+            cb = QCheckBox(szh)
+            if sen != szh:
+                cb.setToolTip(sen)
             cb.setChecked(sid in enabled_src)
             self._news_source_cbs[sid] = cb
-            vn.addWidget(cb)
+            src_grid.addWidget(cb, k // 2, k % 2)
+        vn.addLayout(src_grid)
 
-        # ── 关注主题（定向偏好：权重越高越优先，不同颜色标注）──
         vn.addSpacing(6)
-        vn.addWidget(self._label("关注主题（可选）：定向获取某类内容，权重越高越优先", size=10,
-                                 color=s["text_secondary"]))
+        self.cb_news_notify = QCheckBox("生成完成时托盘通知")
+        self.cb_news_notify.setChecked(bool(n_cfg.get("notify", True)))
+        vn.addWidget(self.cb_news_notify)
+        self.cb_news_auto_show = QCheckBox("自动生成完成后弹出快报窗口")
+        self.cb_news_auto_show.setChecked(bool(n_cfg.get("auto_show_panel", True)))
+        vn.addWidget(self.cb_news_auto_show)
+        ncl.addWidget(box_news)
+
+        # ── 关注主题（独立子分组，内部滚动）──
+        box_news_int = QGroupBox("关注主题（定向获取某类内容，权重越高越优先）")
+        box_news_int.setFont(self._font(13, bold=True))
+        box_news_int.setStyleSheet(s["group"])
+        vni = QVBoxLayout(box_news_int)
+        vni.setSpacing(8)
+        vni.setContentsMargins(16, 16, 16, 12)
+
         self._interests_frame = QFrame()
         self._interests_frame.setStyleSheet(
             "QFrame { background: %s; border: 1px solid %s; border-radius: 8px; }"
             % (s["card_bg"], s["bd"]))
         self._interests_lay = QVBoxLayout(self._interests_frame)
-        self._interests_lay.setContentsMargins(8, 8, 8, 8)
-        self._interests_lay.setSpacing(4)
+        self._interests_lay.setContentsMargins(10, 10, 10, 10)
+        self._interests_lay.setSpacing(6)
         self._interest_rows = []
         for entry in (n_cfg.get("interests") or [])[:12]:
             self._add_interest_row(entry.get("label") or "", int(entry.get("weight") or 3),
                                    entry.get("color") or "#5B8DEF")
-        vn.addWidget(self._interests_frame)
+
+        int_scroll = QScrollArea()
+        int_scroll.setWidgetResizable(True)
+        int_scroll.setFrameShape(QScrollArea.NoFrame)
+        int_scroll.setMaximumHeight(230)
+        int_scroll.setWidget(self._interests_frame)
+        int_scroll.setStyleSheet(
+            "QScrollArea { background: transparent; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
+            "QScrollBar:vertical { width: 6px; }")
+        vni.addWidget(int_scroll)
 
         in_btn_row = QHBoxLayout()
         self.btn_add_interest = QPushButton("＋ 添加主题")
@@ -1236,17 +1298,8 @@ class SettingsDialog(QDialog):
         in_btn_row.addWidget(self.btn_add_interest)
         in_btn_row.addWidget(self.btn_preset_interest)
         in_btn_row.addStretch()
-        vn.addLayout(in_btn_row)
-
-        vn.addSpacing(4)
-        self.cb_news_notify = QCheckBox("生成完成时托盘通知")
-        self.cb_news_notify.setChecked(bool(n_cfg.get("notify", True)))
-        vn.addWidget(self.cb_news_notify)
-        self.cb_news_auto_show = QCheckBox("自动生成完成后弹出快报窗口")
-        self.cb_news_auto_show.setChecked(bool(n_cfg.get("auto_show_panel", True)))
-        vn.addWidget(self.cb_news_auto_show)
-
-        ncl.addWidget(box_news)
+        vni.addLayout(in_btn_row)
+        ncl.addWidget(box_news_int)
         ncl.addStretch()
 
         news_scroll = QScrollArea()
@@ -1254,10 +1307,11 @@ class SettingsDialog(QDialog):
         news_scroll.setFrameShape(QScrollArea.NoFrame)
         news_scroll.setWidget(news_content)
         news_scroll.setStyleSheet(
-            f"QScrollArea {{ border: 1px solid {s['bd']}; border-radius: 10px; background: {s['card_bg']}; }}"
+            f"QScrollArea {{ background: transparent; border: 1px solid {s['bd']}; border-radius: 10px; }}"
+            f"QScrollArea > QWidget > QWidget {{ background: transparent; }}"
             f"QScrollBar:vertical {{ width: 6px; }}")
         pnw.addWidget(news_scroll)
-        tabs.addTab(page_news, "AI 快报")
+        self._add_page(page_news, "📰  AI 快报")
 
         # ================= 关于 =================
         page_about = QWidget()
@@ -1265,26 +1319,144 @@ class SettingsDialog(QDialog):
         pab.setSpacing(8)
         pab.setContentsMargins(6, 10, 6, 6)
 
-        box_about = QGroupBox("关于 AgentFloat")
+        about_content = QWidget()
+        about_content.setStyleSheet("background: transparent;")
+        acv = QVBoxLayout(about_content)
+        acv.setSpacing(8)
+        acv.setContentsMargins(14, 14, 14, 14)
+
+        # ── 应用信息 ──
+        box_about = QGroupBox("AgentFloat — AI Agent 浮窗助手")
         box_about.setFont(self._font(13, bold=True))
         box_about.setStyleSheet(s["group"])
         va = QVBoxLayout(box_about)
-        va.setSpacing(8)
-        va.setContentsMargins(14, 14, 14, 10)
-        va.addWidget(self._label("AgentFloat — AI Agent 浮窗助手", size=12, color=s["tx"], bold=True))
+        va.setSpacing(6)
+        va.setContentsMargins(16, 14, 16, 12)
+        va.addWidget(self._label(f"当前版本 v{VERSION}", size=11, color=s["tx"], bold=True))
         va.addWidget(self._label(
-            "点击浮窗启动主 Agent；悬停/长按唤出环绕菜单；\n"
-            "辅助窗管理 skills、查看 API 用量。", size=10))
-        va.addSpacing(6)
+            "点击浮窗启动主 Agent；悬停 / 长按唤出环绕菜单；\n"
+            "辅助窗管理 skills、查看 API 用量、阅读 AI 快报。", size=10))
+        acv.addWidget(box_about)
+
+        # ── 软件更新（多源检查 + 下载 + 静默重装重启）──
+        box_update = QGroupBox("软件更新")
+        box_update.setFont(self._font(13, bold=True))
+        box_update.setStyleSheet(s["group"])
+        vu = QVBoxLayout(box_update)
+        vu.setSpacing(8)
+        vu.setContentsMargins(16, 14, 16, 12)
+        ver_row = QHBoxLayout()
+        ver_row.addWidget(self._label("当前版本", size=10, color=s["text_secondary"]))
+        self.lbl_update_ver = self._label(f"v{VERSION}", size=11, bold=True)
+        ver_row.addWidget(self.lbl_update_ver)
+        ver_row.addStretch()
+        self.btn_check_update = QPushButton("检查更新")
+        self.btn_check_update.setStyleSheet(s["btn"])
+        self.btn_check_update.clicked.connect(self._update_check_clicked)
+        ver_row.addWidget(self.btn_check_update)
+        vu.addLayout(ver_row)
+
+        self.lbl_update_status = self._label("尚未检查", size=10, color=s["hi"])
+        self.lbl_update_status.setWordWrap(True)
+        vu.addWidget(self.lbl_update_status)
+
+        dl_row = QHBoxLayout()
+        self.btn_download_update = QPushButton("下载更新")
+        self.btn_download_update.setStyleSheet(s["btn"])
+        self.btn_download_update.setEnabled(False)
+        self.btn_download_update.clicked.connect(self._update_download_clicked)
+        dl_row.addWidget(self.btn_download_update)
+        self.btn_update_restart = QPushButton("更新并重启")
+        self.btn_update_restart.setStyleSheet(s["save_btn"])
+        self.btn_update_restart.setEnabled(False)
+        self.btn_update_restart.clicked.connect(self._update_restart_clicked)
+        dl_row.addWidget(self.btn_update_restart)
+        dl_row.addStretch()
+        vu.addLayout(dl_row)
+
+        self.update_progress = QProgressBar()
+        self.update_progress.setRange(0, 100)
+        self.update_progress.setValue(0)
+        self.update_progress.setVisible(False)
+        self.update_progress.setStyleSheet(
+            "QProgressBar { border: 1px solid %s; border-radius: 5px; background: transparent;"
+            " height: 10px; text-align: center; font-size: 8px; color: %s; }"
+            "QProgressBar::chunk { background: %s; border-radius: 4px; }"
+            % (s["ibd"], s["tx"], s["ac"]))
+        vu.addWidget(self.update_progress)
+        acv.addWidget(box_update)
+
+        # ── 使用教程 ──
+        box_tutorial = QGroupBox("使用教程")
+        box_tutorial.setFont(self._font(13, bold=True))
+        box_tutorial.setStyleSheet(s["group"])
+        vt = QVBoxLayout(box_tutorial)
+        vt.setSpacing(8)
+        vt.setContentsMargins(16, 14, 16, 12)
+        self.tutorial_browser = QTextBrowser()
+        self.tutorial_browser.setOpenExternalLinks(True)
+        self.tutorial_browser.setMaximumHeight(240)
+        self.tutorial_browser.setStyleSheet(
+            "QTextBrowser { background: transparent; color: %s; border: none; font-size: 11px; }"
+            % s["tx"])
+        self.tutorial_browser.setHtml(self._build_tutorial_html())
+        vt.addWidget(self.tutorial_browser)
+        acv.addWidget(box_tutorial)
+
+        # ── 下载与支持 ──
+        box_downloads = QGroupBox("下载与支持")
+        box_downloads.setFont(self._font(13, bold=True))
+        box_downloads.setStyleSheet(s["group"])
+        vd = QVBoxLayout(box_downloads)
+        vd.setSpacing(8)
+        vd.setContentsMargins(16, 14, 16, 12)
+        link_row = QHBoxLayout()
+        btn_releases = QPushButton("⬇  GitHub Releases")
+        btn_releases.setStyleSheet(s["btn"])
+        btn_releases.clicked.connect(updater.open_release_page)
+        link_row.addWidget(btn_releases)
+        btn_repo = QPushButton("项目主页")
+        btn_repo.setStyleSheet(s["btn"])
+        btn_repo.clicked.connect(lambda: _open_url("https://github.com/GinyvaXu/AgentFloat"))
+        link_row.addWidget(btn_repo)
+        btn_site = QPushButton("🌐  个人网站")
+        btn_site.setStyleSheet(s["btn"])
+        btn_site.clicked.connect(lambda: _open_url("https://ginyvaxu.github.io/personal-website/"))
+        link_row.addWidget(btn_site)
+        link_row.addStretch()
+        vd.addLayout(link_row)
+        vd.addWidget(self._label(
+            "网络受限时可自建镜像：在 %APPDATA%\\AgentFloat\\mirror.json 填写 "
+            "{\"manifest\": \"...\", \"installer\": \"...\"}（例如 Gitee 仓库）。",
+            size=9, color=s["hi"]))
+        acv.addWidget(box_downloads)
+
+        # ── 数据路径 ──
+        box_paths = QGroupBox("数据路径")
+        box_paths.setFont(self._font(13, bold=True))
+        box_paths.setStyleSheet(s["group"])
+        vp = QVBoxLayout(box_paths)
+        vp.setSpacing(6)
+        vp.setContentsMargins(16, 14, 16, 12)
         log_hint = self._label(
-            "日志文件: %APPDATA%\\AgentFloat\\logs\\AgentFloat.log", size=9, color=s["hi"])
+            "日志报告: %APPDATA%\\AgentFloat\\logs\\reports", size=9, color=s["hi"])
         cfg_hint = self._label(
             "配置文件: %APPDATA%\\AgentFloat\\config.json", size=9, color=s["hi"])
-        va.addWidget(log_hint)
-        va.addWidget(cfg_hint)
-        pab.addWidget(box_about)
-        pab.addStretch()
-        tabs.addTab(page_about, "关于")
+        vp.addWidget(log_hint)
+        vp.addWidget(cfg_hint)
+        acv.addWidget(box_paths)
+
+        about_scroll = QScrollArea()
+        about_scroll.setWidgetResizable(True)
+        about_scroll.setFrameShape(QScrollArea.NoFrame)
+        about_scroll.setWidget(about_content)
+        about_scroll.setStyleSheet(
+            f"QScrollArea {{ background: transparent; border: 1px solid {s['bd']}; border-radius: 10px; }}"
+            f"QScrollArea > QWidget > QWidget {{ background: transparent; }}"
+            f"QScrollBar:vertical {{ width: 6px; }}")
+        pab.addWidget(about_scroll)
+        self._add_page(page_about, "ℹ️  关于")
+
 
         # ── 底部按钮行 ──
         bl = QHBoxLayout()
@@ -1310,12 +1482,16 @@ class SettingsDialog(QDialog):
         # ── 存储控件引用，用于即时换肤 ──
         self._tw = {
             'container': container,
-            'groups': [box, box_theme, box2, box3, box_snap, box4, box_cleanup, box_radial, box_skills, box_news, box_about],
+            'groups': [box, box_theme, box2, box3, box_snap, box4, box_cleanup, box_radial, box_skills,
+                       box_news, box_news_int, box_about, box_update, box_tutorial,
+                       box_downloads, box_paths],
             'radios': [self.rb_normal, self.rb_skip, self.rb_light, self.rb_dark],
             'checkboxes': [self.cb_snap_enabled, self.cb_snap_hidden, self.cb_cleanup, self.cb_auto_translate,
                         self.cb_news_enabled, self.cb_news_ai, self.cb_news_notify, self.cb_news_auto_show],
             'buttons': [preview_btn, cancel_btn, browse_btn, reset_btn, self.btn_manage_agent,
-                        self.btn_skills_set, self.btn_skills_open, self.btn_ai_service],
+                        self.btn_skills_set, self.btn_skills_open, self.btn_ai_service,
+                        self.btn_check_update, self.btn_download_update, self.btn_update_restart,
+                        btn_releases, btn_repo, btn_site],
             'save_btn': save_btn,
             'close_btn': close_btn,
             'api_scroll': api_scroll,
@@ -1334,8 +1510,8 @@ class SettingsDialog(QDialog):
         outer.activate()
         content_w = outer.sizeHint().width() + 24
         content_h = outer.sizeHint().height() + 40
-        content_h = max(content_h, 560)
-        self.resize(max(content_w, 880), content_h)
+        content_h = max(content_h, 600)
+        self.resize(max(content_w, 960), content_h)
         _log().debug("[设置] 布局计算: %dx%d (sizeHint=%dx%d)", content_w, content_h,
                      outer.sizeHint().width(), outer.sizeHint().height())
 
@@ -1428,8 +1604,9 @@ class SettingsDialog(QDialog):
         # API 滚动区边框主题同步
         if hasattr(self, '_api_scroll'):
             self._api_scroll.setStyleSheet(
-                f"QScrollArea {{ border: 1px solid {s['bd']}; border-radius: 10px;"
-                f" background: {s['card_bg']}; }}"
+                f"QScrollArea {{ background: transparent; border: 1px solid {s['bd']};"
+                f" border-radius: 10px; }}"
+                f"QScrollArea > QWidget > QWidget {{ background: transparent; }}"
                 f"QScrollBar:vertical {{ width: 6px; }}"
             )
 
@@ -1437,9 +1614,11 @@ class SettingsDialog(QDialog):
         if hasattr(self, '_api_monitor_tab'):
             self._api_monitor_tab.set_theme(self.theme)
 
-        # 新增模块控件主题同步
-        if hasattr(self, '_tabs'):
-            self._tabs.setStyleSheet(s['tabs'])
+        # 左侧导航 + 内容区主题同步
+        if hasattr(self, 'nav_list'):
+            self.nav_list.setStyleSheet(s['nav'])
+        if hasattr(self, 'stack'):
+            self.stack.setStyleSheet(s['stack'])
         if hasattr(self, 'cmb_primary_agent'):
             self.cmb_primary_agent.setStyleSheet(s['combo'])
             self.cmb_trigger.setStyleSheet(s['combo'])
@@ -1448,11 +1627,62 @@ class SettingsDialog(QDialog):
             self.slider_radius.setStyleSheet(s['slider'])
             self.skills_root_list.setStyleSheet(s['list'])
 
+        # 扇区配置（数量 + 各槽位下拉）
+        if hasattr(self, 'cmb_slot_count'):
+            self.cmb_slot_count.setStyleSheet(s['combo'])
+        for cb in getattr(self, 'slot_combos', []):
+            cb.setStyleSheet(s['combo'])
+
+        # AI 快报页控件（组合框 / 条数 / 时间 / 主题行）
+        if hasattr(self, 'cmb_news_lang'):
+            for w in (self.cmb_news_lang, self.cmb_news_schedule, self.cmb_news_agent,
+                      self.spin_news_max, self.time_news):
+                w.setStyleSheet(s['combo'])
+        if hasattr(self, 'btn_add_interest'):
+            self.btn_add_interest.setStyleSheet(s['btn'])
+            self.btn_preset_interest.setStyleSheet(s['btn'])
+        for r in getattr(self, '_interest_rows', []):
+            r['label'].setStyleSheet(s['lineedit'])
+            r['weight'].setStyleSheet(s['combo'])
+            r['del'].setStyleSheet(s['btn'])
+
+        # 关于页更新控件 + 教程浏览器
+        if hasattr(self, 'btn_check_update'):
+            self.btn_check_update.setStyleSheet(s['btn'])
+            self.btn_download_update.setStyleSheet(s['btn'])
+            self.btn_update_restart.setStyleSheet(s['save_btn'])
+            self.update_progress.setStyleSheet(
+                "QProgressBar { border: 1px solid %s; border-radius: 5px;"
+                " background: transparent; height: 10px; text-align: center;"
+                " font-size: 8px; color: %s; }"
+                "QProgressBar::chunk { background: %s; border-radius: 4px; }"
+                % (s['ibd'], s['tx'], s['ac']))
+            self.tutorial_browser.setStyleSheet(
+                "QTextBrowser { background: transparent; color: %s;"
+                " border: none; font-size: 11px; }" % s['tx'])
+            self.tutorial_browser.setHtml(self._build_tutorial_html())
+
     def reject(self):
-        """取消时回退到最近一次「应用/保存」的主题（未应用过则还原原始主题）"""
-        if self.theme != self._persisted_theme:
-            self._live_switch_theme(self._persisted_theme)
+        """取消：还原本次会话所有未保存改动（配置 + 主题，而非仅主题）"""
+        if getattr(self, "_applied_something", False):
+            p = self.parent()
+            if p is not None and hasattr(p, "apply_settings"):
+                try:
+                    p.apply_settings(copy.deepcopy(self._original_config), preview_only=False)
+                except Exception:
+                    import traceback
+                    _log().warning("还原设置失败:\n%s", traceback.format_exc())
+        else:
+            # 未应用过任何改动：仅还原主题预览
+            if self.theme != self._persisted_theme:
+                self._live_switch_theme(self._persisted_theme)
         super().reject()
+
+    def _add_page(self, page, label):
+        """把设置页加入右侧内容区，并在左侧导航添加对应条目"""
+        self.stack.addWidget(page)
+        it = QListWidgetItem(label)
+        self.nav_list.addItem(it)
 
     def _slot_choices(self):
         """可用的扇区动作列表（Agent + 固定功能 + 预留）"""
@@ -1494,12 +1724,12 @@ class SettingsDialog(QDialog):
 
     def _refresh_slot_rows(self):
         n = int(self.cmb_slot_count.currentData() or 6)
-        for i, row in enumerate(self.slot_rows):
-            for k in range(row.count()):
-                it = row.itemAt(k)
+        for i, cell in enumerate(self.slot_rows):
+            for k in range(cell.count()):
+                it = cell.itemAt(k)
                 if it and it.widget():
                     it.widget().setVisible(i < n)
-            row.setEnabled(i < n)
+                    it.widget().setEnabled(i < n)
 
     # ── 关注主题行管理 ─────────────────────────────
     def _add_interest_row(self, label, weight, color):
@@ -1508,7 +1738,7 @@ class SettingsDialog(QDialog):
         row.setStyleSheet("QFrame { background: transparent; border: none; }")
         lay = QHBoxLayout(row)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
+        lay.setSpacing(8)
 
         btn_color = QPushButton("●")
         btn_color.setFixedSize(26, 24)
@@ -1549,7 +1779,7 @@ class SettingsDialog(QDialog):
         del_btn.clicked.connect(lambda: self._remove_interest_row(row))
 
         self._interests_lay.addWidget(row)
-        self._interest_rows.append({"frame": row, "label": ed, "weight": wt, "color": btn_color})
+        self._interest_rows.append({"frame": row, "label": ed, "weight": wt, "color": btn_color, "del": del_btn})
 
     def _remove_interest_row(self, frame):
         for i, r in enumerate(self._interest_rows):
@@ -1784,6 +2014,7 @@ class SettingsDialog(QDialog):
         if p is not None and hasattr(p, "apply_settings"):
             p.apply_settings(cfg, preview_only=False)
         self._persisted_theme = cfg.get("theme", self.theme)
+        self._applied_something = True
 
     def _preview(self):
         """应用：立即生效并保存，窗口保持打开，便于继续调整"""
@@ -1800,6 +2031,165 @@ class SettingsDialog(QDialog):
         cfg = self._collect()
         self._apply_to_parent(cfg)
         self.result_config = cfg
+
+    # ── 软件更新（多源检查 + 下载 + 静默重装重启）──────────
+    def _update_state_init(self):
+        """初始化更新状态（构造时调用）"""
+        self._update_info = None
+        self._update_installer = ""
+        self._update_ready_version = ""
+        try:
+            rp = os.path.join(updater.download_dir(), "ready.txt")
+            if os.path.exists(rp):
+                with io.open(rp, "r", encoding="utf-8") as f:
+                    lines = [ln.strip() for ln in f if ln.strip()]
+                if len(lines) >= 2 and os.path.exists(lines[1]):
+                    self._update_installer = lines[1]
+                    self._update_ready_version = lines[0]
+        except Exception:
+            pass
+
+    def _build_tutorial_html(self):
+        """构建「使用教程」富文本内容（跟随主题配色）"""
+        s = self._s
+        ac = s["ac"]
+        tx = s["tx"]
+        h = lambda t: '<h3 style="color:%s; margin:12px 0 4px;">%s</h3>' % (ac, t)
+        p = lambda t: '<p style="margin:2px 0 6px; line-height:1.5;">%s</p>' % t
+        return (
+            '<div style="color:%s; font-family:Microsoft YaHei;">' % tx
+            + h("🚀 快速上手")
+            + p("单击浮窗 = 启动主 Agent；右键浮窗 = 系统托盘菜单。"
+                 "在「通用」页可添加 Claude / Codex / 自定义程序作为主 Agent。")
+            + h("🎯 环绕菜单")
+            + p("鼠标<b>悬停</b>或<b>长按</b>浮窗唤出环绕菜单（触发方式与延迟可在「交互」页调整）。"
+                 "菜单扇区可自定义为：启动指定 Agent、Skills 辅助窗、API 余额、"
+                 "AI 快报、剪贴板历史、命令面板、设置、退出。")
+            + h("🧩 Skills 辅助窗")
+            + p("右键托盘 →「Skills 辅助窗」，分类浏览已安装 skills，支持中英对照与"
+                 "触发指令一键复制；新安装的 skill 会自动触发翻译。")
+            + h("📊 API 余额 / 用量")
+            + p("在「API 用量」页配置平台端点（URL 支持 {{today}} / {{env:VAR}} 等模板变量），"
+                 "浮窗边缘实时显示剩余额度，低余额自动变色提醒。")
+            + h("📰 AI 快报")
+            + p("多源聚合（Hacker News / GitHub 趋势 / 少数派 / 量子位 / arXiv），"
+                 "可选本地 AI 生成摘要，支持定时 / 启动补生成与关注主题权重。")
+            + h("📋 剪贴板历史 & 命令面板")
+            + p("右键托盘可打开剪贴板历史与自定义命令面板；"
+                 "快捷键 Ctrl+Alt+C 快速启动主 Agent。")
+            + h("🛠 设置与数据")
+            + p("设置中「应用」= 生效不关闭，「保存」= 生效并关闭，"
+                 "「取消」= 还原本会话全部改动。配置与日志保存在 %APPDATA%\\AgentFloat 下。")
+            + '</div>'
+        )
+
+    def _update_check_clicked(self):
+        if getattr(self, "_update_worker", None) and self._update_worker.isRunning():
+            return
+        self.btn_check_update.setEnabled(False)
+        self.lbl_update_status.setText("正在检查更新…")
+        self._update_worker = UpdateWorker(VERSION)
+        self._update_worker.result_ready.connect(self._on_update_checked)
+        self._update_worker.check_failed.connect(self._on_update_check_failed)
+        self._update_worker.start()
+
+    def _on_update_checked(self, info):
+        self.btn_check_update.setEnabled(True)
+        if info is None:
+            self.lbl_update_status.setText("检查更新失败（未知原因），请稍后重试。")
+            return
+        if info.get("available"):
+            self._update_info = info
+            self.btn_download_update.setEnabled(True)
+            ver = info.get("version", "")
+            if self._update_installer and self._update_ready_version == ver:
+                self.btn_update_restart.setEnabled(True)
+                self.lbl_update_status.setText(
+                    f"发现新版本 {ver}，安装包已就绪，可直接「更新并重启」。")
+            else:
+                self.lbl_update_status.setText(f"发现新版本 {ver}，点击「下载更新」。")
+        elif info.get("error"):
+            code = info["error"]
+            hint = {
+                "timeout": "网络超时，请稍后重试或检查网络。",
+                "network": "网络连接失败，可稍后重试，或配置 mirror.json 自建镜像。",
+                "unknown": "检查失败，可前往 GitHub Releases 手动下载。",
+            }.get(code, "")
+            self.lbl_update_status.setText(f"检查更新失败（{code}）。{hint}")
+        else:
+            self.lbl_update_status.setText(f"当前已是最新版本 v{VERSION}。")
+
+    def _on_update_check_failed(self, msg):
+        self.btn_check_update.setEnabled(True)
+        self.lbl_update_status.setText(f"检查更新失败：{msg}")
+
+    def _update_download_clicked(self):
+        info = getattr(self, "_update_info", None)
+        if not info or not info.get("url"):
+            return
+        self.btn_download_update.setEnabled(False)
+        self.update_progress.setVisible(True)
+        self.update_progress.setValue(0)
+        self.lbl_update_status.setText("正在下载更新…")
+        self._update_worker = DownloadWorker(info["url"])
+        self._update_worker.progress.connect(self._on_update_progress)
+        self._update_worker.done.connect(self._on_update_downloaded)
+        self._update_worker.failed.connect(self._on_update_download_failed)
+        self._update_worker.start()
+
+    def _on_update_progress(self, got, total):
+        if total > 0:
+            self.update_progress.setValue(int(got * 100 / total))
+
+    def _on_update_downloaded(self, path):
+        self.update_progress.setVisible(False)
+        self._update_installer = path
+        self.btn_update_restart.setEnabled(True)
+        ver = (self._update_info or {}).get("version", "")
+        self.lbl_update_status.setText(
+            f"下载完成（v{ver}），点击「更新并重启」即可静默安装并自动重启。")
+        try:
+            d = updater.download_dir()
+            with io.open(os.path.join(d, "ready.txt"), "w", encoding="utf-8") as f:
+                f.write("%s\n%s\n" % (ver, path))
+            self._update_ready_version = ver
+        except Exception:
+            pass
+
+    def _on_update_download_failed(self, msg):
+        self.update_progress.setVisible(False)
+        self.btn_download_update.setEnabled(True)
+        self.lbl_update_status.setText(
+            f"下载更新失败：{msg}\\n可前往 GitHub Releases 手动下载。")
+
+    def _update_restart_clicked(self):
+        path = getattr(self, "_update_installer", "")
+        if not path or not os.path.exists(path):
+            return
+        ret = QMessageBox.question(
+            self, "更新并重启",
+            "即将退出 AgentFloat，静默安装新版本，安装完成后自动重启。\\n\\n是否继续？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if ret != QMessageBox.Yes:
+            return
+        if updater.apply_update(path):
+            QMessageBox.information(
+                self, "更新已开始",
+                "更新已开始：程序将退出，安装完成后会自动重启。")
+            self._update_installer = ""
+            try:
+                os.remove(os.path.join(updater.download_dir(), "ready.txt"))
+            except OSError:
+                pass
+            self.accept()
+            QTimer.singleShot(500, QApplication.instance().quit)
+        else:
+            # 开发模式（未打包）：直接打开安装包由用户手动安装
+            try:
+                os.startfile(path)
+            except Exception as e:
+                QMessageBox.warning(self, "启动失败", f"无法启动安装程序：\\n{e}")
+
         self.accept()
 
 # ── 浮窗主体 ──────────────────────────────────────────
@@ -3326,7 +3716,7 @@ class FloatingWidget(QWidget):
         ns = new_cfg.get("widget_size", self.base_size)
         if ns != self.base_size:
             self.base_size = ns
-            self.set_widget_size_prop(ns)
+            self.widget_size_prop = ns
             changed = True
 
         self.config["opacity"] = new_cfg.get("opacity", 0.88)
@@ -3611,65 +4001,82 @@ def _main():
     def do_launch():
         launch_agent(get_primary_agent(widget.config.get("agents", default_agents())), widget.config)
 
-    # ── 自动更新 ──
+    # ── 自动更新（多源检查 + 下载 + 静默重装重启）──
     update_worker_ref = {}
     download_worker_ref = {}
 
-    def _download_latest(info):
-        """后台下载最新安装包，完成后询问是否运行"""
-        asset = pick_setup_asset(info.get("assets") or [])
-        if asset is None:
+    def _friendly_update_error(info):
+        code = info.get("error", "") if info else ""
+        hint = {
+            "timeout": "网络超时，请稍后重试。",
+            "network": "网络连接失败，可稍后重试，或配置 mirror.json 自建镜像。",
+            "unknown": "未知错误。",
+        }.get(code, "")
+        return "检查更新失败（%s）。%s" % (code, hint)
+
+    def _tray_download_latest(info):
+        """后台下载最新安装包，完成后直接安排静默重装重启（打包版）"""
+        url = info.get("url") or ""
+        if not url:
             QMessageBox.information(
                 None, "更新",
                 "最新版本没有可下载的安装包，\n请前往 GitHub Releases 页面手动下载。")
+            updater.open_release_page()
             return
-        dest_dir = os.path.join(_get_config_dir(), "updates")
 
         def _on_done(path):
             download_worker_ref.pop("worker", None)
             _log().info("更新包下载完成: %s", path)
-            ret = QMessageBox.question(
-                None, "下载完成",
-                f"新版本 {info['version']} 安装包已下载：\n{path}\n\n"
-                "是否立即运行安装程序？",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-            if ret == QMessageBox.Yes:
-                try:
-                    os.startfile(path)
-                except Exception as e:
-                    QMessageBox.warning(None, "启动失败", f"无法启动安装程序:\n{e}")
+            if updater.apply_update(path):
+                QMessageBox.information(
+                    None, "更新已开始",
+                    "更新已开始：程序将退出，安装完成后会自动重启。")
+                QTimer.singleShot(800, app.quit)
+            else:
+                ret = QMessageBox.question(
+                    None, "下载完成",
+                    f"新版本 {info.get('version')} 安装包已下载：\n{path}\n\n"
+                    "是否立即运行安装程序？",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                if ret == QMessageBox.Yes:
+                    try:
+                        os.startfile(path)
+                    except Exception as e:
+                        QMessageBox.warning(None, "启动失败", f"无法启动安装程序:\n{e}")
 
         def _on_failed(msg):
             download_worker_ref.pop("worker", None)
             QMessageBox.warning(None, "下载失败", f"下载更新失败:\n{msg}")
 
-        worker = DownloadWorker(asset, dest_dir)
+        worker = DownloadWorker(url)
         worker.done.connect(_on_done)
         worker.failed.connect(_on_failed)
         download_worker_ref["worker"] = worker
         worker.start()
-        _log().info("开始下载更新: %s (%s bytes)", asset.get("name", "?"), asset.get("size", "?"))
+        _log().info("开始下载更新: %s", url)
 
     def _on_update_result(info, manual):
         update_worker_ref.pop("worker", None)
-        if info is None:
+        if info is None or not info.get("available"):
             if manual:
-                QMessageBox.information(None, "检查更新", f"当前已是最新版本 v{VERSION}。")
+                if info is not None and info.get("error"):
+                    QMessageBox.warning(None, "检查更新失败", _friendly_update_error(info))
+                else:
+                    QMessageBox.information(None, "检查更新", f"当前已是最新版本 v{VERSION}。")
             return
-        body = (info.get("body") or "").strip()
-        detail = body[:400] if body else "前往 GitHub Releases 查看更新说明。"
+        detail = (info.get("notes_zh") or info.get("notes") or "前往 GitHub Releases 查看更新说明。")[:400]
         ret = QMessageBox.question(
             None, "发现新版本",
             f"发现新版本 {info['version']}（当前 v{VERSION}）。\n\n更新内容:\n{detail}\n\n"
-            "是否立即下载安装包？",
+            "是否立即下载并更新？",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
         if ret == QMessageBox.Yes:
-            _download_latest(info)
+            _tray_download_latest(info)
 
     def _on_check_failed(msg, manual):
         update_worker_ref.pop("worker", None)
         if manual:
-            QMessageBox.warning(None, "检查更新失败", f"无法连接 GitHub：\n{msg}")
+            QMessageBox.warning(None, "检查更新失败", f"无法连接更新服务器：\n{msg}")
 
     def _check_update(manual=False):
         if update_worker_ref.get("worker"):
@@ -3769,6 +4176,8 @@ def _main():
     # 主题切换时同步更新托盘菜单样式
     widget.theme_changed.connect(lambda t: tray_menu.setStyleSheet(_build_menu_stylesheet(t)))
     widget.show()
+    # GUI 就绪后写 boot 标记，供更新批处理确认重装后的启动是否成功
+    updater.mark_boot_ok()
 
     if config.get("auto_start") and not is_auto_start_enabled():
         toggle_auto_start(True)

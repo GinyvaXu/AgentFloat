@@ -369,12 +369,14 @@ class ApiMonitorSettingsTab(QWidget):
             hi = "#98989F"
             card = "#333336"
             bd = "#48484A"
+            inp_bd = "#5A5A5F"
             ac = "#0A84FF"
         else:
             tx = "#1C1C1E"
             hi = "#8E8E93"
             card = "#FFFFFF"
             bd = "#E5E5EA"
+            inp_bd = "#C7C7CC"
             ac = "#007AFF"
         self.setStyleSheet(
             f"QGroupBox {{ color: {tx}; background: {card}; border: 1px solid {bd};"
@@ -386,7 +388,7 @@ class ApiMonitorSettingsTab(QWidget):
             f" border-radius: 6px; padding: 4px 10px; }}"
             f"QPushButton:hover {{ background: {bd}; }}"
             f"QSpinBox, QDoubleSpinBox, QLineEdit, QTextEdit, QComboBox {{ color: {tx};"
-            f" background: {card}; border: 1px solid {bd}; border-radius: 4px; padding: 2px 6px; }}"
+            f" background: {card}; border: 1px solid {inp_bd}; border-radius: 4px; padding: 2px 6px; }}"
         )
         if self._hint is not None:
             self._hint.setStyleSheet(self._label_css("hint"))
