@@ -127,6 +127,39 @@ def find_agent(agents, aid):
     return None
 
 
+def _is_windows_apps_path(path):
+    """WindowsApps 包目录受系统保护，其中的 exe 常无法被第三方进程直接启动"""
+    try:
+        p = str(path).replace("/", "\\").lower()
+    except Exception:
+        return False
+    return p.startswith("c:\\program files\\windowsapps\\")
+
+
+def _find_windows_apps_mirror(cmd):
+    """为 WindowsApps 内置 CLI 在 %LOCALAPPDATA% 下查找可运行的镜像副本。
+
+    Codex 桌面版会把可运行的 codex.exe 放到
+    %LOCALAPPDATA%\\OpenAI\\Codex\\bin\\<hash>\\codex.exe，
+    该路径不在受保护目录内，可被正常启动（直接运行 WindowsApps 包内 exe 会报拒绝访问）。
+    """
+    name = (cmd or "").strip().lower()
+    if name not in ("codex", "codex.exe"):
+        return None
+    base = os.path.join(os.environ.get("LOCALAPPDATA", ""), "OpenAI", "Codex", "bin")
+    if not os.path.isdir(base):
+        return None
+    try:
+        hashes = sorted(os.listdir(base), reverse=True)  # 新版本哈希目录优先
+    except OSError:
+        return None
+    for h in hashes:
+        p = os.path.join(base, h, "codex.exe")
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 def resolve_command(agent):
     """解析可执行命令路径。
 
@@ -142,6 +175,10 @@ def resolve_command(agent):
         return None, "命令路径不存在: %s" % cmd
     found = shutil.which(cmd)
     if found:
+        if _is_windows_apps_path(found):
+            mirror = _find_windows_apps_mirror(cmd)
+            if mirror:
+                return os.path.abspath(mirror), None
         return found, None
     return None, "未在 PATH 中检测到「%s」，请安装后重试或在设置中填写完整路径" % cmd
 
