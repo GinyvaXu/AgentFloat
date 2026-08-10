@@ -1384,7 +1384,7 @@ class SettingsDialog(QDialog):
         water_content = QWidget()
         water_content.setStyleSheet("background: transparent;")
         wcv = QVBoxLayout(water_content)
-        wcv.setSpacing(8)
+        wcv.setSpacing(10)
         wcv.setContentsMargins(14, 14, 14, 14)
 
         w_cfg = self._water_cfg
@@ -1402,8 +1402,6 @@ class SettingsDialog(QDialog):
         self.cb_water_enabled.setStyleSheet(s["checkbox"])
         vm.addWidget(self.cb_water_enabled)
 
-        row_mode = QHBoxLayout()
-        row_mode.addWidget(self._label("提醒形态", size=10))
         self.cmb_water_mode = QComboBox()
         for lb, dt in (("全屏遮罩（醒目，需手动确认）", "fullscreen"),
                        ("屏幕居中大弹窗", "popup"),
@@ -1412,11 +1410,7 @@ class SettingsDialog(QDialog):
         mi = self.cmb_water_mode.findData(w_cfg.get("reminder_mode", "fullscreen"))
         self.cmb_water_mode.setCurrentIndex(max(0, mi))
         self.cmb_water_mode.setStyleSheet(s["combo"])
-        row_mode.addWidget(self.cmb_water_mode, 1)
-        vm.addLayout(row_mode)
 
-        row_screen = QHBoxLayout()
-        row_screen.addWidget(self._label("显示屏幕", size=10))
         self.cmb_water_screen = QComboBox()
         self.cmb_water_screen.addItem("跟随浮窗所在屏幕", -1)
         for i, sc in enumerate(QApplication.screens()):
@@ -1426,24 +1420,30 @@ class SettingsDialog(QDialog):
         si = self.cmb_water_screen.findData(int(w_cfg.get("screen_index") or -1))
         self.cmb_water_screen.setCurrentIndex(max(0, si))
         self.cmb_water_screen.setStyleSheet(s["combo"])
-        row_screen.addWidget(self.cmb_water_screen, 1)
-        vm.addLayout(row_screen)
 
-        row_sound = QHBoxLayout()
-        row_sound.setSpacing(10)
-        self.cb_water_sound = QCheckBox("提醒声音")
-        self.cb_water_sound.setChecked(bool(w_cfg.get("sound", True)))
-        self.cb_water_sound.setStyleSheet(s["checkbox"])
-        row_sound.addWidget(self.cb_water_sound)
-        row_sound.addSpacing(16)
-        row_sound.addWidget(self._label("稍后提醒间隔（分钟）", size=10))
         self.spin_water_snooze = QSpinBox()
         self.spin_water_snooze.setRange(1, 60)
         self.spin_water_snooze.setValue(int(w_cfg.get("snooze_minutes") or 5))
         self.spin_water_snooze.setStyleSheet(s["combo"])
-        row_sound.addWidget(self.spin_water_snooze)
-        row_sound.addStretch()
-        vm.addLayout(row_sound)
+
+        form_main = QFormLayout()
+        form_main.setSpacing(8)
+        form_main.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        form_main.addRow(self._label("提醒形态", size=10), self.cmb_water_mode)
+        form_main.addRow(self._label("显示屏幕", size=10), self.cmb_water_screen)
+
+        snooze_row = QHBoxLayout()
+        snooze_row.setSpacing(6)
+        snooze_row.addWidget(self.spin_water_snooze)
+        snooze_row.addWidget(self._label("分钟", size=10, color=s["hi"]))
+        snooze_row.addStretch()
+        form_main.addRow(self._label("稍后提醒", size=10), snooze_row)
+        vm.addLayout(form_main)
+
+        self.cb_water_sound = QCheckBox("提醒时播放系统提示音")
+        self.cb_water_sound.setChecked(bool(w_cfg.get("sound", True)))
+        self.cb_water_sound.setStyleSheet(s["checkbox"])
+        vm.addWidget(self.cb_water_sound)
         wcv.addWidget(box_water_main)
 
         # —— 每日目标 ——
@@ -1452,11 +1452,11 @@ class SettingsDialog(QDialog):
         box_water_goal.setStyleSheet(s["group"])
         vg = QHBoxLayout(box_water_goal)
         vg.setContentsMargins(16, 14, 16, 12)
-        vg.addWidget(self._label("每日目标杯数", size=10))
         self.spin_water_cups = QSpinBox()
         self.spin_water_cups.setRange(2, 30)
         self.spin_water_cups.setValue(int(w_cfg.get("target_cups") or 8))
         self.spin_water_cups.setStyleSheet(s["combo"])
+        vg.addWidget(self._label("每日目标杯数", size=10))
         vg.addWidget(self.spin_water_cups)
         vg.addWidget(self._label("杯", size=10))
         vg.addStretch()
@@ -1467,7 +1467,7 @@ class SettingsDialog(QDialog):
         box_water_timers.setFont(self._font(13, bold=True))
         box_water_timers.setStyleSheet(s["group"])
         vt = QVBoxLayout(box_water_timers)
-        vt.setSpacing(6)
+        vt.setSpacing(8)
         vt.setContentsMargins(16, 14, 16, 12)
         self._water_timer_cbs = {}
         self._water_timer_spins = {}
@@ -1476,18 +1476,27 @@ class SettingsDialog(QDialog):
             if not tid:
                 continue
             tr = QHBoxLayout()
-            tr.setSpacing(8)
-            cb = QCheckBox(spec.get("name") or tid)
-            cb.setChecked(bool(spec.get("enabled")))
-            cb.setStyleSheet(s["checkbox"])
-            tr.addWidget(cb)
+            tr.setSpacing(10)
+            tdot = QLabel(spec.get("char") or "水")
+            tdot.setAlignment(Qt.AlignCenter)
+            tdot.setFixedSize(24, 24)
+            tdot.setStyleSheet(
+                "QLabel { color: #FFF; font-size: 11px; font-weight: bold;"
+                " background: %s; border-radius: 12px; }"
+                % (spec.get("color") or "#00A6A6"))
+            tr.addWidget(tdot)
+            tr.addWidget(self._label(spec.get("name") or tid, size=10))
             tr.addStretch()
-            tr.addWidget(self._label("间隔（分钟）", size=10))
             sp = QSpinBox()
             sp.setRange(5, 600)
             sp.setValue(int(spec.get("interval_min") or 60))
             sp.setStyleSheet(s["combo"])
             tr.addWidget(sp)
+            tr.addWidget(self._label("分钟", size=10, color=s["hi"]))
+            cb = QCheckBox("启用")
+            cb.setChecked(bool(spec.get("enabled")))
+            cb.setStyleSheet(s["checkbox"])
+            tr.addWidget(cb)
             vt.addLayout(tr)
             self._water_timer_cbs[tid] = cb
             self._water_timer_spins[tid] = sp
@@ -1515,13 +1524,13 @@ class SettingsDialog(QDialog):
         ve.addWidget(self.edt_water_exempt)
 
         row_exempt = QHBoxLayout()
-        row_exempt.addWidget(self._label("豁免时行为", size=10))
         self.cmb_water_exempt = QComboBox()
         for lb, dt in (("托盘气泡提示", "tray"), ("完全静默", "silent")):
             self.cmb_water_exempt.addItem(lb, dt)
         ei = self.cmb_water_exempt.findData(w_cfg.get("exempt_behavior", "tray"))
         self.cmb_water_exempt.setCurrentIndex(max(0, ei))
         self.cmb_water_exempt.setStyleSheet(s["combo"])
+        row_exempt.addWidget(self._label("豁免时行为", size=10))
         row_exempt.addWidget(self.cmb_water_exempt, 1)
         ve.addLayout(row_exempt)
         wcv.addWidget(box_water_exempt)
@@ -1538,6 +1547,7 @@ class SettingsDialog(QDialog):
             "QScrollBar:vertical { width: 6px; }")
         pwt.addWidget(water_scroll)
         self._add_page(page_water, "💧  喝水助手")
+
 
 
 
@@ -1885,6 +1895,23 @@ class SettingsDialog(QDialog):
             r['del'].setStyleSheet(s['btn'])
 
         # 关于页更新控件 + 教程浏览器
+        # 喝水助手页控件主题同步
+        if hasattr(self, 'cb_water_enabled'):
+            for w in (self.cb_water_enabled, self.cb_water_sound):
+                w.setStyleSheet(s['checkbox'])
+            for cb in getattr(self, '_water_timer_cbs', {}).values():
+                cb.setStyleSheet(s['checkbox'])
+            for w in (self.cmb_water_mode, self.cmb_water_screen, self.cmb_water_exempt):
+                w.setStyleSheet(s['combo'])
+            for w in (self.spin_water_cups, self.spin_water_snooze):
+                w.setStyleSheet(s['combo'])
+            for sp in getattr(self, '_water_timer_spins', {}).values():
+                sp.setStyleSheet(s['combo'])
+            self.edt_water_exempt.setStyleSheet(
+                'QPlainTextEdit { background: %s; color: %s; border: 1px solid %s;'
+                ' border-radius: 6px; padding: 6px 8px; font-size: 11px; }'
+                % (s['card_bg'], s['tx'], s['ibd']))
+
         if hasattr(self, 'btn_check_update'):
             self.btn_check_update.setStyleSheet(s['btn'])
             self.btn_download_update.setStyleSheet(s['btn'])
@@ -2504,21 +2531,20 @@ class SettingsDialog(QDialog):
         self.update_progress.setVisible(False)
         self.btn_download_update.setEnabled(True)
         self.lbl_update_status.setText(
-            f"下载更新失败：{msg}\\n可前往 GitHub Releases 手动下载。")
+            f"下载更新失败：{msg}\n可前往 GitHub Releases 手动下载。")
 
     def _update_restart_clicked(self):
         path = getattr(self, "_update_installer", "")
         if not path or not os.path.exists(path):
             return
-        ret = QMessageBox.question(
-            self, "更新并重启",
-            "即将退出 AgentFloat，静默安装新版本，安装完成后自动重启。\\n\\n是否继续？",
+        ret = _update_box(
+            self, QMessageBox.Question, "更新并重启",
+            "即将退出 AgentFloat，静默安装新版本，安装完成后自动重启。\n\n是否继续？",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
         if ret != QMessageBox.Yes:
             return
         if updater.apply_update(path):
-            QMessageBox.information(
-                self, "更新已开始",
+            _update_box(self, QMessageBox.Information, "更新已开始",
                 "更新已开始：程序将退出，安装完成后会自动重启。")
             self._update_installer = ""
             try:
@@ -2532,7 +2558,7 @@ class SettingsDialog(QDialog):
             try:
                 os.startfile(path)
             except Exception as e:
-                QMessageBox.warning(self, "启动失败", f"无法启动安装程序：\\n{e}")
+                _update_box(self, QMessageBox.Warning, "启动失败", f"无法启动安装程序：\n{e}")
 
         self.accept()
 
@@ -4301,6 +4327,15 @@ class FloatingWidget(QWidget):
 
 
 # ── 全局错误收集（会话内收集，关闭程序时统一导出）────────────────
+def _update_box(parent=None, icon=QMessageBox.Information, title="", text="",
+                buttons=QMessageBox.Ok, default=QMessageBox.Ok):
+    """自动更新相关消息框（置顶，避免被其他窗口遮挡）"""
+    box = QMessageBox(icon, title, text, buttons, parent)
+    box.setWindowFlags(box.windowFlags() | Qt.WindowStaysOnTopHint)
+    box.setDefaultButton(default)
+    return box.exec_()
+
+
 def _install_error_handlers():
     """安装全局错误收集：
     - 未捕获 Python 异常（含 Qt 槽函数内）与 Qt 关键消息 → 先收集在内存
@@ -4531,8 +4566,7 @@ def _main():
         """后台下载最新安装包，完成后直接安排静默重装重启（打包版）"""
         url = info.get("url") or ""
         if not url:
-            QMessageBox.information(
-                None, "更新",
+            _update_box(None, QMessageBox.Information, "更新",
                 "最新版本没有可下载的安装包，\n请前往 GitHub Releases 页面手动下载。")
             updater.open_release_page()
             return
@@ -4541,13 +4575,11 @@ def _main():
             download_worker_ref.pop("worker", None)
             _log().info("更新包下载完成: %s", path)
             if updater.apply_update(path):
-                QMessageBox.information(
-                    None, "更新已开始",
+                _update_box(None, QMessageBox.Information, "更新已开始",
                     "更新已开始：程序将退出，安装完成后会自动重启。")
                 QTimer.singleShot(800, app.quit)
             else:
-                ret = QMessageBox.question(
-                    None, "下载完成",
+                ret = _update_box(None, QMessageBox.Question, "下载完成",
                     f"新版本 {info.get('version')} 安装包已下载：\n{path}\n\n"
                     "是否立即运行安装程序？",
                     QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
@@ -4555,11 +4587,20 @@ def _main():
                     try:
                         os.startfile(path)
                     except Exception as e:
-                        QMessageBox.warning(None, "启动失败", f"无法启动安装程序:\n{e}")
+                        _update_box(None, QMessageBox.Warning, "启动失败", f"无法启动安装程序:\n{e}")
 
         def _on_failed(msg):
             download_worker_ref.pop("worker", None)
-            QMessageBox.warning(None, "下载失败", f"下载更新失败:\n{msg}")
+            _log().warning("更新下载失败: %s", msg)
+            box = QMessageBox(QMessageBox.Warning, "下载失败",
+                              "下载更新失败：\n%s\n\n"
+                              "可前往 GitHub Releases 页面手动下载最新版本。" % msg,
+                              QMessageBox.Ok, None)
+            box.setWindowFlags(box.windowFlags() | Qt.WindowStaysOnTopHint)
+            open_btn = box.addButton("打开 Releases 页面", QMessageBox.AcceptRole)
+            box.exec_()
+            if box.clickedButton() is open_btn:
+                updater.open_release_page()
 
         worker = DownloadWorker(url)
         worker.done.connect(_on_done)
@@ -4573,13 +4614,13 @@ def _main():
         if info is None or not info.get("available"):
             if manual:
                 if info is not None and info.get("error"):
-                    QMessageBox.warning(None, "检查更新失败", _friendly_update_error(info))
+                    _update_box(None, QMessageBox.Warning, "检查更新失败", _friendly_update_error(info))
                 else:
-                    QMessageBox.information(None, "检查更新", f"当前已是最新版本 v{VERSION}。")
+                    _update_box(None, QMessageBox.Information, "检查更新", f"当前已是最新版本 v{VERSION}。")
             return
         detail = (info.get("notes_zh") or info.get("notes") or "前往 GitHub Releases 查看更新说明。")[:400]
-        ret = QMessageBox.question(
-            None, "发现新版本",
+        ret = _update_box(
+            None, QMessageBox.Question, "发现新版本",
             f"发现新版本 {info['version']}（当前 v{VERSION}）。\n\n更新内容:\n{detail}\n\n"
             "是否立即下载并更新？",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
@@ -4589,7 +4630,7 @@ def _main():
     def _on_check_failed(msg, manual):
         update_worker_ref.pop("worker", None)
         if manual:
-            QMessageBox.warning(None, "检查更新失败", f"无法连接更新服务器：\n{msg}")
+            _update_box(None, QMessageBox.Warning, "检查更新失败", f"无法连接更新服务器：\n{msg}")
 
     def _check_update(manual=False):
         if update_worker_ref.get("worker"):

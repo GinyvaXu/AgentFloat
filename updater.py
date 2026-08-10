@@ -141,6 +141,13 @@ def _from_release_api(data):
             break
     if not url:
         raise ValueError("no installer asset")
+    # 优先安装包（Setup），避免静默重装拿到独立 exe
+    for a in (data.get("assets") or []):
+        u = str(a.get("browser_download_url", "") or "")
+        name = str(a.get("name", "") or "")
+        if u.lower().endswith(".exe") and "setup" in name.lower():
+            url = u
+            break
     notes = str(data.get("body", "") or "")[:400].replace("\r", "")
     return tag, url, notes
 
@@ -155,6 +162,16 @@ def mirror_urls(url):
 
 
 _MIRROR_FILE = "mirror.json"
+
+
+def resolve_latest_asset_url(timeout=_DEFAULT_TIMEOUT):
+    """从 GitHub Releases API 获取最新正式版的安装包直链（用于 manifest 悬空/固定 URL 回退）"""
+    try:
+        data = _fetch("https://api.github.com/repos/%s/releases/latest" % REPO, timeout)
+        _tag, url, _notes = _from_release_api(json.loads(data.decode("utf-8")))
+        return url or ""
+    except Exception:
+        return ""
 
 
 def custom_mirror():
@@ -287,6 +304,15 @@ def download_installer(url, dest_dir=None, progress=None, timeout=_DOWNLOAD_TIME
                         os.remove(path)
                 except OSError:
                     pass
+    # manifest 悬空 / 固定 URL 已不存在（如 404）时，
+    # 回退到 GitHub 最新正式版实际资产（过滤已试过的 URL）
+    fallback = resolve_latest_asset_url(timeout)
+    if fallback and fallback not in candidates and fallback not in [c.split("?")[0] for c in candidates]:
+        try:
+            _download_once(fallback, path, timeout, progress)
+            return path
+        except Exception as e:
+            last_err = e
     raise last_err
 
 
@@ -512,6 +538,15 @@ class UpdateWorker(QThread):
             self.check_failed.emit(str(e))
 
 
+def _friendly_error(e):
+    """把下载异常转为含 HTTP 状态码的友好信息"""
+    if isinstance(e, urllib.error.HTTPError):
+        return "HTTP %d %s" % (e.code, getattr(e, "reason", "") or "")
+    if isinstance(e, urllib.error.URLError):
+        return "网络错误：%s" % getattr(e, "reason", e)
+    return str(e)
+
+
 class DownloadWorker(QThread):
     """后台下载安装包（带进度）"""
 
@@ -529,7 +564,7 @@ class DownloadWorker(QThread):
             self.done.emit(path)
         except Exception as e:
             _logger.warning("更新下载失败: %s", e)
-            self.failed.emit(str(e))
+            self.failed.emit(_friendly_error(e))
 
     def _on_progress(self, got, total):
         self.progress.emit(got, total)

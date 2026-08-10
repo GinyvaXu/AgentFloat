@@ -6,15 +6,14 @@
 - WaterReminderPopup：提醒弹窗。支持两种形态：
     fullscreen = 指定屏幕的全屏遮罩（默认，醒目；可通过进程豁免名单静默）
     popup      = 屏幕居中的大卡片弹窗
-  弹窗内提供「已喝水 / 知道了」与「稍后提醒」。
+  弹窗为可聚焦置顶窗口（避免首次点击只激活窗口导致“无法关闭”），
+  带淡入淡出动画，需手动确认后才关闭。
 """
-import random
-
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt5.QtGui import QColor, QFont, QPainter
 from PyQt5.QtWidgets import (
-    QApplication, QDialog, QFrame, QHBoxLayout, QLabel, QProgressBar,
-    QPushButton, QVBoxLayout, QWidget,
+    QApplication, QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLayout,
+    QLabel, QProgressBar, QPushButton, QVBoxLayout,
 )
 
 from af_theme import get_colors
@@ -50,7 +49,7 @@ class WaterPanel(QDialog):
         self.setWindowTitle("AgentFloat — 喝水助手")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(380, 500)
+        self.setFixedSize(380, 468)
         self.setStyleSheet(self._stylesheet())
         self._setup_ui()
         manager.timers_changed.connect(self._refresh)
@@ -75,7 +74,6 @@ class WaterPanel(QDialog):
             + "QFrame#waterCard { background: %s; border: 1px solid %s; border-radius: 10px; }" % (card, bd)
             + "QFrame#timerRow { background: %s; border: 1px solid %s; border-radius: 10px; }" % (card, bd)
             + "QLabel { color: %s; border: none; background: transparent; }" % tx
-            + "QLabel#hint { color: %s; font-size: 10px; }" % hi
             + "QProgressBar { background: %s; border: none; border-radius: 4px;"
               " height: 8px; text-align: center; font-size: 0px; }" % (hover if not is_dark else "rgba(255,255,255,0.10)")
             + "QProgressBar::chunk { background: %s; border-radius: 4px; }" % ac
@@ -142,17 +140,6 @@ class WaterPanel(QDialog):
             body.addWidget(self._build_timer_row(t))
 
         body.addStretch(1)
-
-        bottom = QHBoxLayout()
-        hint = QLabel("计时结束自动提醒；可在设置中调整屏幕 / 进程豁免")
-        hint.setObjectName("hint")
-        bottom.addWidget(hint, 1)
-        self.btn_settings = QPushButton("打开设置…")
-        self.btn_settings.setCursor(Qt.PointingHandCursor)
-        self.btn_settings.clicked.connect(self.open_settings_requested.emit)
-        bottom.addWidget(self.btn_settings)
-        body.addLayout(bottom)
-
         root.addLayout(body, 1)
 
     def _build_timer_row(self, t):
@@ -232,7 +219,7 @@ class WaterPanel(QDialog):
 
 
 class WaterReminderPopup(QDialog):
-    """提醒弹窗：全屏遮罩或居中卡片，需手动确认"""
+    """提醒弹窗：全屏遮罩或居中卡片，需手动确认，带淡入淡出动画"""
 
     confirmed = pyqtSignal(str)   # timer id：已喝水 / 知道了
     snoozed = pyqtSignal(str)     # timer id：稍后提醒
@@ -245,13 +232,33 @@ class WaterReminderPopup(QDialog):
         self._theme = theme
         self._fullscreen = fullscreen
         self._sound = sound
+        self._closing = False
         self._c = get_colors(theme)
         self._screen = None
         self.setWindowTitle("喝水助手提醒")
+        # 使用 Qt.Window（而非 Qt.Tool）：Tool 窗口不抢焦点，
+        # 会导致真实场景下首次点击只激活窗口、按钮“点不动”。
         self.setWindowFlags(
-            Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+            Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Window)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self._build_animation()
         self._build_ui()
+
+    def _build_animation(self):
+        self._op_effect = QGraphicsOpacityEffect(self)
+        self._op_effect.setOpacity(0.0)
+        self.setGraphicsEffect(self._op_effect)
+        self._anim_in = QPropertyAnimation(self._op_effect, b"opacity", self)
+        self._anim_in.setDuration(220)
+        self._anim_in.setStartValue(0.0)
+        self._anim_in.setEndValue(1.0)
+        self._anim_in.setEasingCurve(QEasingCurve.OutCubic)
+        self._anim_out = QPropertyAnimation(self._op_effect, b"opacity", self)
+        self._anim_out.setDuration(180)
+        self._anim_out.setStartValue(1.0)
+        self._anim_out.setEndValue(0.0)
+        self._anim_out.setEasingCurve(QEasingCurve.InCubic)
+        self._anim_out.finished.connect(self._real_close)
 
     def _build_ui(self):
         c = self._c
@@ -282,7 +289,6 @@ class WaterReminderPopup(QDialog):
         dot.setStyleSheet(
             "QLabel { color: #FFF; font-size: 32px; font-weight: bold;"
             " background: %s; border-radius: 36px; }" % color)
-        dot.setAlignment(Qt.AlignCenter)
         cv.addWidget(dot, 0, Qt.AlignCenter)
 
         name = QLabel("（%s 计时提醒）" % (self._timer.get("name") or "喝水"))
@@ -324,10 +330,19 @@ class WaterReminderPopup(QDialog):
 
     def _on_confirm(self):
         self.confirmed.emit(self._timer.get("id") or "")
-        self.close()
+        self._animate_close()
 
     def _on_snooze(self):
         self.snoozed.emit(self._timer.get("id") or "")
+        self._animate_close()
+
+    def _animate_close(self):
+        if self._closing:
+            return
+        self._closing = True
+        self._anim_out.start()
+
+    def _real_close(self):
         self.close()
 
     def show_on_screen(self, screen=None):
@@ -344,6 +359,10 @@ class WaterReminderPopup(QDialog):
             else:
                 self.move(g.center().x() - self.width() // 2,
                           g.center().y() - self.height() // 2)
+        # 确保窗口激活，避免首次点击只激活窗口
+        self.raise_()
+        self.activateWindow()
+        self._anim_in.start()
         if self._sound:
             self._play_sound()
 

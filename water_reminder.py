@@ -158,16 +158,19 @@ class WaterTimerManager(QObject):
         if dt <= 0 or dt > 5:
             dt = 1.0
         fired = False
+        alive = False
         for t in self._timers.values():
             if not t["enabled"]:
                 continue
             if t["state"] in ("running", "snoozed"):
+                alive = True
                 t["remaining"] = max(0, t["remaining"] - dt)
                 if t["remaining"] <= 0:
                     t["state"] = "ringing"
                     fired = True
                     self.timer_finished.emit(t["id"])
-        if fired:
+        # 每秒实时刷新（面板倒计时显示依赖此信号）
+        if alive or fired:
             self.timers_changed.emit()
 
     # ── 只读 ──
