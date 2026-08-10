@@ -3702,9 +3702,21 @@ class FloatingWidget(QWidget):
     # —— 喝水助手 ————————————————————————
     def _open_water_panel(self):
         """打开喝水助手面板（环绕菜单 / 托盘入口）"""
+        panel = getattr(self, "_water_panel", None)
+        if panel is not None and panel.isVisible():
+            panel.raise_()
+            panel.activateWindow()
+            return
         panel = WaterPanel(self._water_mgr, theme=self.theme, parent=self)
         panel.open_settings_requested.connect(self.settings_requested.emit)
-        panel.exec_()
+        panel.finished.connect(lambda _r: self._clear_water_panel_ref(panel))
+        self._water_panel = panel
+        panel.show()
+
+    def _clear_water_panel_ref(self, panel):
+        """喝水助手面板关闭后清除引用，允许再次打开"""
+        if getattr(self, "_water_panel", None) is panel:
+            self._water_panel = None
 
     def _on_water_timer_finished(self, tid):
         """计时结束：按配置选择提醒形态，并支持前台进程豁免"""
