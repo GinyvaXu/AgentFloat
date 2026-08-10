@@ -45,6 +45,7 @@ HIDDEN_IMPORTS = [
     "skills_scanner", "skills_panel", "agent_manager",
     "local_ai_service", "news_fetcher", "news_worker", "news_panel",
     "clipboard_panel", "command_panel",
+    "water_reminder", "water_panel",
 ]
 
 args = [

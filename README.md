@@ -12,7 +12,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 </p>
 
 <p align="center">
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-v1.2.2-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-v1.5.0-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%2010%2F11-8E44AD?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"></a>
@@ -35,6 +35,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 | 🤖 **本地 AI 自检服务** | 校验 API 余额端点、查找并翻译缺失的 skills；自动部署翻译 skill，检测到新 skill 自动触发补译（可在设置中关闭） |
 | 📋 **剪贴板历史** | 自动记录复制内容（上限 60 条、相邻去重），面板点击即复制回剪贴板，支持单条删除与一键清空 |
 | ⌘ **自定义命令面板** | 自由管理常用命令（名称/命令/参数/工作目录/启动方式），一键运行或新建独立窗口 / Windows Terminal / 后台静默，内置常用示例 |
+| 💧 **喝水助手** | 喝水 / 久坐 / 护眼 三个独立循环计时器，全屏遮罩 / 居中弹窗 / 托盘三种提醒形态，多屏自选 + 游戏进程豁免，每日目标杯数轻量统计 |
 | 🔔 **系统托盘 / 开机自启** | 最小化至托盘、双击显示浮窗、可注册 Windows 自启动，全局热键 `Ctrl+Alt+C` 随时唤起 |
 | 🎬 **动态退出动画** | 退出时播放全新收拢动画，配合窗口淡出，告别生硬关闭 |
 | 📝 **Debug 日志体系** | 调试版每次运行生成 `版本+时间戳+崩溃类型` 命名的日志与崩溃报告 txt，关闭程序时统一导出，便于回溯问题 |

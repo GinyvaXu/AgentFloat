@@ -23,6 +23,8 @@ a = Analysis(
         'news_fetcher',
         'news_worker',
         'news_panel',
+        'water_reminder',
+        'water_panel',
     ],
     hookspath=[],
     hooksconfig={},

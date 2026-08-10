@@ -35,7 +35,7 @@ from PyQt5.QtWidgets import (
     QSpinBox, QGroupBox, QRadioButton, QCheckBox, QLineEdit, QFileDialog, QMessageBox,
     QScrollArea, QComboBox, QListWidget, QListWidgetItem, QTimeEdit,
     QFrame, QColorDialog, QStackedWidget, QGridLayout, QFormLayout,
-    QTextBrowser, QProgressBar
+    QTextBrowser, QProgressBar, QPlainTextEdit
 )
 from PyQt5.QtCore import (
     Qt, QPoint, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QCoreApplication,
@@ -74,6 +74,8 @@ from news_worker import NewsWorker, today_news_exists
 from news_panel import NewsPanel
 from clipboard_panel import ClipboardHistory, ClipboardPanel
 from command_panel import CommandPanel
+from water_reminder import DEFAULT_WATER, WaterTimerManager, is_exempt_process
+from water_panel import WaterPanel, WaterReminderPopup
 
 # ── 路径（兼容 PyInstaller 打包）──────────────────────
 import sys as _sys
@@ -304,6 +306,7 @@ def load_config():
         "api_monitor": _default_api_monitor(),
         "services": {"ai_first_run_done": False, "last_run": ""},
         "news": copy.deepcopy(_NEWS_DEFAULTS),
+        "water": copy.deepcopy(DEFAULT_WATER),
     }
     loaded = {}
 
@@ -547,6 +550,7 @@ class SettingsDialog(QDialog):
         self._radial_cfg = copy.deepcopy(self.config.get("radial_menu") or DEFAULT_RADIAL_MENU)
         self._skills_cfg = copy.deepcopy(self.config.get("skills") or DEFAULT_SKILLS)
         self._news_cfg = copy.deepcopy(self.config.get("news") or _NEWS_DEFAULTS)
+        self._water_cfg = copy.deepcopy(self.config.get("water") or DEFAULT_WATER)
         # 拖拽状态 (v1.4.1)
         self._dragging = False
         self._drag_start = QPoint()
@@ -1371,6 +1375,171 @@ class SettingsDialog(QDialog):
             "QScrollBar:vertical { width: 6px; }")
         pnw.addWidget(news_scroll)
         self._add_page(page_news, "📰  AI 快报")
+        # ================= 喝水助手 =================
+        page_water = QWidget()
+        pwt = QVBoxLayout(page_water)
+        pwt.setSpacing(8)
+        pwt.setContentsMargins(6, 10, 6, 6)
+
+        water_content = QWidget()
+        water_content.setStyleSheet("background: transparent;")
+        wcv = QVBoxLayout(water_content)
+        wcv.setSpacing(8)
+        wcv.setContentsMargins(14, 14, 14, 14)
+
+        w_cfg = self._water_cfg
+
+        # —— 提醒方式 ——
+        box_water_main = QGroupBox("提醒方式")
+        box_water_main.setFont(self._font(13, bold=True))
+        box_water_main.setStyleSheet(s["group"])
+        vm = QVBoxLayout(box_water_main)
+        vm.setSpacing(8)
+        vm.setContentsMargins(16, 14, 16, 12)
+
+        self.cb_water_enabled = QCheckBox("启用喝水助手循环提醒")
+        self.cb_water_enabled.setChecked(bool(w_cfg.get("enabled", True)))
+        self.cb_water_enabled.setStyleSheet(s["checkbox"])
+        vm.addWidget(self.cb_water_enabled)
+
+        row_mode = QHBoxLayout()
+        row_mode.addWidget(self._label("提醒形态", size=10))
+        self.cmb_water_mode = QComboBox()
+        for lb, dt in (("全屏遮罩（醒目，需手动确认）", "fullscreen"),
+                       ("屏幕居中大弹窗", "popup"),
+                       ("仅托盘气泡", "tray")):
+            self.cmb_water_mode.addItem(lb, dt)
+        mi = self.cmb_water_mode.findData(w_cfg.get("reminder_mode", "fullscreen"))
+        self.cmb_water_mode.setCurrentIndex(max(0, mi))
+        self.cmb_water_mode.setStyleSheet(s["combo"])
+        row_mode.addWidget(self.cmb_water_mode, 1)
+        vm.addLayout(row_mode)
+
+        row_screen = QHBoxLayout()
+        row_screen.addWidget(self._label("显示屏幕", size=10))
+        self.cmb_water_screen = QComboBox()
+        self.cmb_water_screen.addItem("跟随浮窗所在屏幕", -1)
+        for i, sc in enumerate(QApplication.screens()):
+            g = sc.geometry()
+            self.cmb_water_screen.addItem(
+                "屏幕 %d：%d×%d" % (i + 1, g.width(), g.height()), i)
+        si = self.cmb_water_screen.findData(int(w_cfg.get("screen_index") or -1))
+        self.cmb_water_screen.setCurrentIndex(max(0, si))
+        self.cmb_water_screen.setStyleSheet(s["combo"])
+        row_screen.addWidget(self.cmb_water_screen, 1)
+        vm.addLayout(row_screen)
+
+        row_sound = QHBoxLayout()
+        row_sound.setSpacing(10)
+        self.cb_water_sound = QCheckBox("提醒声音")
+        self.cb_water_sound.setChecked(bool(w_cfg.get("sound", True)))
+        self.cb_water_sound.setStyleSheet(s["checkbox"])
+        row_sound.addWidget(self.cb_water_sound)
+        row_sound.addSpacing(16)
+        row_sound.addWidget(self._label("稍后提醒间隔（分钟）", size=10))
+        self.spin_water_snooze = QSpinBox()
+        self.spin_water_snooze.setRange(1, 60)
+        self.spin_water_snooze.setValue(int(w_cfg.get("snooze_minutes") or 5))
+        self.spin_water_snooze.setStyleSheet(s["combo"])
+        row_sound.addWidget(self.spin_water_snooze)
+        row_sound.addStretch()
+        vm.addLayout(row_sound)
+        wcv.addWidget(box_water_main)
+
+        # —— 每日目标 ——
+        box_water_goal = QGroupBox("每日目标")
+        box_water_goal.setFont(self._font(13, bold=True))
+        box_water_goal.setStyleSheet(s["group"])
+        vg = QHBoxLayout(box_water_goal)
+        vg.setContentsMargins(16, 14, 16, 12)
+        vg.addWidget(self._label("每日目标杯数", size=10))
+        self.spin_water_cups = QSpinBox()
+        self.spin_water_cups.setRange(2, 30)
+        self.spin_water_cups.setValue(int(w_cfg.get("target_cups") or 8))
+        self.spin_water_cups.setStyleSheet(s["combo"])
+        vg.addWidget(self.spin_water_cups)
+        vg.addWidget(self._label("杯", size=10))
+        vg.addStretch()
+        wcv.addWidget(box_water_goal)
+
+        # —— 循环计时器 ——
+        box_water_timers = QGroupBox("循环计时器（各自独立循环）")
+        box_water_timers.setFont(self._font(13, bold=True))
+        box_water_timers.setStyleSheet(s["group"])
+        vt = QVBoxLayout(box_water_timers)
+        vt.setSpacing(6)
+        vt.setContentsMargins(16, 14, 16, 12)
+        self._water_timer_cbs = {}
+        self._water_timer_spins = {}
+        for spec in (w_cfg.get("timers") or []):
+            tid = spec.get("id") or ""
+            if not tid:
+                continue
+            tr = QHBoxLayout()
+            tr.setSpacing(8)
+            cb = QCheckBox(spec.get("name") or tid)
+            cb.setChecked(bool(spec.get("enabled")))
+            cb.setStyleSheet(s["checkbox"])
+            tr.addWidget(cb)
+            tr.addStretch()
+            tr.addWidget(self._label("间隔（分钟）", size=10))
+            sp = QSpinBox()
+            sp.setRange(5, 600)
+            sp.setValue(int(spec.get("interval_min") or 60))
+            sp.setStyleSheet(s["combo"])
+            tr.addWidget(sp)
+            vt.addLayout(tr)
+            self._water_timer_cbs[tid] = cb
+            self._water_timer_spins[tid] = sp
+        wcv.addWidget(box_water_timers)
+
+        # —— 进程豁免 ——
+        box_water_exempt = QGroupBox("进程豁免（游戏 / 全屏应用进行中不打扰）")
+        box_water_exempt.setFont(self._font(13, bold=True))
+        box_water_exempt.setStyleSheet(s["group"])
+        ve = QVBoxLayout(box_water_exempt)
+        ve.setSpacing(6)
+        ve.setContentsMargins(16, 14, 16, 12)
+        ve.addWidget(self._label(
+            "一行一个进程名，例如：notepad.exe；"
+            "前台为该进程时提醒将静默顺延。",
+            size=10))
+        self.edt_water_exempt = QPlainTextEdit()
+        self.edt_water_exempt.setPlainText("\n".join(w_cfg.get("exempt_processes") or []))
+        self.edt_water_exempt.setFixedHeight(64)
+        self.edt_water_exempt.setStyleSheet(
+            "QPlainTextEdit { background: %s; color: %s; border: 1px solid %s;"
+            " border-radius: 6px; padding: 6px 8px; font-size: 11px; }"
+            % (s["card_bg"], s["tx"], s["ibd"]))
+        self.edt_water_exempt.textChanged.connect(self._mark_dirty)
+        ve.addWidget(self.edt_water_exempt)
+
+        row_exempt = QHBoxLayout()
+        row_exempt.addWidget(self._label("豁免时行为", size=10))
+        self.cmb_water_exempt = QComboBox()
+        for lb, dt in (("托盘气泡提示", "tray"), ("完全静默", "silent")):
+            self.cmb_water_exempt.addItem(lb, dt)
+        ei = self.cmb_water_exempt.findData(w_cfg.get("exempt_behavior", "tray"))
+        self.cmb_water_exempt.setCurrentIndex(max(0, ei))
+        self.cmb_water_exempt.setStyleSheet(s["combo"])
+        row_exempt.addWidget(self.cmb_water_exempt, 1)
+        ve.addLayout(row_exempt)
+        wcv.addWidget(box_water_exempt)
+
+        wcv.addStretch()
+
+        water_scroll = QScrollArea()
+        water_scroll.setWidgetResizable(True)
+        water_scroll.setFrameShape(QScrollArea.NoFrame)
+        water_scroll.setWidget(water_content)
+        water_scroll.setStyleSheet(
+            "QScrollArea { background: transparent; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
+            "QScrollBar:vertical { width: 6px; }")
+        pwt.addWidget(water_scroll)
+        self._add_page(page_water, "💧  喝水助手")
+
+
 
         # ================= 关于 =================
         page_about = QWidget()
@@ -1765,6 +1934,7 @@ class SettingsDialog(QDialog):
             ("news", "AI 快报"),
             ("clip", "剪贴板历史"),
             ("cmd", "命令面板"),
+            ("water", "喝水助手"),
             ("quit", "退出"),
             ("", "（空）"),
         ]
@@ -1951,7 +2121,30 @@ class SettingsDialog(QDialog):
                 "auto_show_panel": self.cb_news_auto_show.isChecked(),
                 "unread_count": self._news_cfg.get("unread_count", 0),
                 "last_generated": self._news_cfg.get("last_generated", ""),
+
                 "interests": self._collect_interests(),
+            },
+            "water": {
+                "enabled": self.cb_water_enabled.isChecked(),
+                "reminder_mode": self.cmb_water_mode.currentData() or "fullscreen",
+                "screen_index": int(self.cmb_water_screen.currentData() or -1),
+                "sound": self.cb_water_sound.isChecked(),
+                "target_cups": self.spin_water_cups.value(),
+                "snooze_minutes": self.spin_water_snooze.value(),
+                "exempt_processes": [ln.strip() for ln in
+                                     self.edt_water_exempt.toPlainText().splitlines() if ln.strip()],
+                "exempt_behavior": self.cmb_water_exempt.currentData() or "tray",
+                "timers": [
+                    {
+                        "id": t.get("id"), "name": t.get("name"),
+                        "char": t.get("char"), "color": t.get("color"),
+                        "enabled": self._water_timer_cbs[t.get("id")].isChecked(),
+                        "interval_min": self._water_timer_spins[t.get("id")].value(),
+                        "messages": list(t.get("messages") or []),
+                    }
+                    for t in (self._water_cfg.get("timers") or [])
+                    if t.get("id") in self._water_timer_cbs
+                ],
             },
         }
     def _on_api_config_changed(self, config):
@@ -2129,6 +2322,7 @@ class SettingsDialog(QDialog):
         "cleanup_on_quit": "退出清理",
         "api_monitor": "API 用量监控",
         "news": "AI 快报",
+        "water": "喝水助手",
     }
 
     def _wire_dirty_signals(self):
@@ -2164,7 +2358,7 @@ class SettingsDialog(QDialog):
         """对比两版配置，返回发生变化的模块名列表（按用户可读顺序）"""
         order = ["launch_mode", "primary_agent_id", "agents", "radial_menu", "skills",
                  "widget_size", "opacity", "working_directory", "snap_enabled", "snap_hidden",
-                 "theme", "cleanup_on_quit", "api_monitor", "news"]
+                 "theme", "cleanup_on_quit", "api_monitor", "news", "water"]
         keys = set(list(old.keys()) + list(new.keys()))
         return [self._CHANGE_LABELS.get(k, k) for k in order
                 if k in keys and old.get(k) != new.get(k)]
@@ -2225,6 +2419,8 @@ class SettingsDialog(QDialog):
             + h("📋 剪贴板历史 & 命令面板")
             + p("右键托盘可打开剪贴板历史与自定义命令面板；"
                  "快捷键 Ctrl+Alt+C 快速启动主 Agent。")
+            + h("💧 喝水助手")
+            + p("环绕菜单 / 托盘可打开喝水助手，内置喝水、久坐、护眼三个独立循环计时器；支持全屏遮罩 / 居中弹窗提醒、多屏自选与游戏进程豁免，并记录每日杯数。")
             + h("🛠 设置与数据")
             + p("设置中「应用」= 生效不关闭，「保存」= 生效并关闭，"
                  "「取消」= 还原本会话全部改动。配置与日志保存在 %APPDATA%\\AgentFloat 下。")
@@ -2352,6 +2548,7 @@ class FloatingWidget(QWidget):
     auto_translate_failed = pyqtSignal(str)
     news_done   = pyqtSignal(str)
     news_failed = pyqtSignal(str)
+    water_reminded = pyqtSignal(str)
 
     CLICK_THRESHOLD = 4
 
@@ -2439,6 +2636,11 @@ class FloatingWidget(QWidget):
 
         # ── AI 快报 ──
         self._news_cfg = copy.deepcopy(self.config.get("news") or _NEWS_DEFAULTS)
+        # —— 喝水助手 ——
+        self._water_cfg = copy.deepcopy(self.config.get("water") or DEFAULT_WATER)
+        self._water_mgr = WaterTimerManager(self._water_cfg, parent=self)
+        self._water_mgr.timer_finished.connect(self._on_water_timer_finished)
+        self._water_popups = {}
         self._news_worker = None
         self._news_panel = None
         self._news_generating = False
@@ -3395,6 +3597,7 @@ class FloatingWidget(QWidget):
             "news": ("AI 快报", "每日资讯", "#2E86C1", "N"),
             "clip": ("剪贴板", "历史记录", "#E67E22", "C"),
             "cmd": ("命令", "命令面板", "#27AE60", "⌘"),
+            "water": ("喝水", "喝水助手", "#00A6A6", "水"),
             "quit": ("退出", "AgentFloat", "#E74C3C", "✕"),
         }
         if action in labels:
@@ -3424,6 +3627,8 @@ class FloatingWidget(QWidget):
             self._open_clipboard_panel()
         elif action_id == "cmd":
             self._open_command_panel()
+        elif action_id == "water":
+            self._open_water_panel()
         elif action_id == "quit":
             self._animate_quit()
 
@@ -3468,6 +3673,64 @@ class FloatingWidget(QWidget):
         save_config(self.config)
 
     # ── AI 快报 ────────────────────────────────────
+    # —— 喝水助手 ————————————————————————
+    def _open_water_panel(self):
+        """打开喝水助手面板（环绕菜单 / 托盘入口）"""
+        panel = WaterPanel(self._water_mgr, theme=self.theme, parent=self)
+        panel.open_settings_requested.connect(self.settings_requested.emit)
+        panel.exec_()
+
+    def _on_water_timer_finished(self, tid):
+        """计时结束：按配置选择提醒形态，并支持前台进程豁免"""
+        try:
+            cfg = self._water_cfg or {}
+            if not cfg.get("enabled", True):
+                return
+            t = self._water_mgr.timer_info(tid)
+            if not t:
+                return
+            message = self._water_mgr.pick_message(tid)
+            # 进程豁免：游戏 / 全屏应用进行中不打断
+            if is_exempt_process(cfg.get("exempt_processes")):
+                behavior = cfg.get("exempt_behavior", "tray")
+                self._water_mgr.confirm_timer(tid)
+                if behavior != "silent":
+                    self.water_reminded.emit("检测到豁免进程，已静默顺延：%s" % t["name"])
+                return
+            mode = cfg.get("reminder_mode", "fullscreen")
+            if mode == "tray":
+                self._water_mgr.confirm_timer(tid)
+                self.water_reminded.emit("%s时间到：%s" % (t["name"], message))
+                return
+            popup = WaterReminderPopup(
+                t, message, theme=self.theme,
+                fullscreen=(mode == "fullscreen"),
+                sound=bool(cfg.get("sound", True)), parent=self)
+            popup.confirmed.connect(lambda _tid=tid: self._water_mgr.confirm_timer(_tid))
+            popup.snoozed.connect(lambda _tid=tid: self._water_mgr.snooze_timer(_tid))
+            popup.finished.connect(lambda _p=popup: self._water_popups.pop(id(_p), None))
+            self._water_popups[id(popup)] = popup
+            popup.show_on_screen(self._screen_for_reminder(cfg))
+            _log().info("喝水助手提醒: %s (mode=%s)", tid, mode)
+        except Exception:
+            _log().warning("喝水助手提醒失败", exc_info=True)
+
+    def _screen_for_reminder(self, cfg):
+        """确定提醒弹窗所在屏幕：-1 跟随浮窗，0..n 指定屏幕"""
+        try:
+            idx = int(cfg.get("screen_index") or -1)
+            screens = QApplication.screens()
+            if not screens:
+                return None
+            if idx >= 0 and idx < len(screens):
+                return screens[idx]
+            for sc in screens:
+                if sc.geometry().contains(self.geometry().center()):
+                    return sc
+            return screens[0]
+        except Exception:
+            return None
+
     def _open_news_panel(self):
         """打开 AI 快报面板（清除未读红点）"""
         self._mark_news_read()
@@ -3984,6 +4247,14 @@ class FloatingWidget(QWidget):
             self._setup_news_scheduler()
             self.update()
 
+        if new_cfg.get("water") is not None:
+            old_water = self.config.get("water") or DEFAULT_WATER
+            new_water = copy.deepcopy(new_cfg["water"])
+            self._water_cfg = new_water
+            self.config["water"] = new_water
+            if not preview_only and new_water != old_water:
+                self._water_mgr.apply_config(new_water)
+
         # 主题切换
         new_theme = new_cfg.get("theme", "light")
         if new_theme != self.theme:
@@ -4364,6 +4635,7 @@ def _main():
             tray_sub.addAction(a.get("name"), lambda a=a: launch_agent(a, widget.config))
     tray_menu.addAction("Skills 辅助窗", widget._open_skills_panel)
     tray_menu.addAction("AI 快报", widget._open_news_panel)
+    tray_menu.addAction("喝水助手", widget._open_water_panel)
     tray_menu.addSeparator()
     tray_menu.addAction("设置...", open_settings)
     tray_menu.addSeparator()
@@ -4413,6 +4685,8 @@ def _main():
         "AgentFloat — 自动翻译失败", str(err), QSystemTrayIcon.Warning, 7000))
     widget.news_done.connect(lambda msg: tray_icon.showMessage(
         "AgentFloat — AI 快报", msg, QSystemTrayIcon.Information, 5000))
+    widget.water_reminded.connect(lambda msg: tray_icon.showMessage(
+        "AgentFloat — 喝水助手", msg, QSystemTrayIcon.Information, 5000))
     widget.news_failed.connect(lambda err: tray_icon.showMessage(
         "AgentFloat — AI 快报失败", str(err), QSystemTrayIcon.Warning, 7000))
     # 主题切换时同步更新托盘菜单样式
