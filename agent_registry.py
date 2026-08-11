@@ -42,6 +42,21 @@ BUILTIN_PRESETS = [
         "builtin": True,
         "description": "OpenAI Codex CLI — 终端里的 Codex 编程智能体",
     },
+    {
+        "id": "pi",
+        "name": "Pi Coding Agent",
+        "command": "pi",
+        "args": [],
+        "skip_permissions_arg": "",
+        "working_directory": "",
+        "launch_mode": "normal",
+        "icon_color": "#7C3AED",
+        "icon_char": "P",
+        "check": "pi",
+        "primary": False,
+        "builtin": True,
+        "description": "pi.dev 的 Pi Coding Agent — 多模型终端编码智能体（Anthropic/OpenAI/Gemini/DeepSeek），无跳过权限参数，始终使用内置交互确认",
+    },
 ]
 
 DEFAULT_RADIAL_MENU = {

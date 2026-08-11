@@ -328,6 +328,23 @@ def load_config():
 
     defaults.update(loaded)
 
+    # ── 内置 Agent 迁移：新版本新增的内置预设自动追加（不覆盖用户已有自定义）──
+    _def_agents = default_agents()
+    _agents_cfg = defaults.get("agents")
+    _migrated = False
+    if isinstance(_agents_cfg, list):
+        _have_ids = {str(a.get("id")) for a in _agents_cfg if isinstance(a, dict)}
+        for _a in _def_agents:
+            if _a.get("builtin") and _a.get("id") not in _have_ids:
+                _agents_cfg.append(_a)
+                _migrated = True
+    else:
+        defaults["agents"] = _def_agents
+        _migrated = True
+    if _migrated:
+        save_config(defaults)
+        _log().info("内置 Agent 迁移完成：新增 %d 个预设", len(defaults["agents"]))
+
     # ── 值校验：防止损坏的配置导致不可恢复状态 ──
     defaults["widget_size"] = max(30, min(200, int(defaults.get("widget_size", DEFAULT_SIZE))))
     defaults["opacity"] = max(0.1, min(1.0, float(defaults.get("opacity", 0.88))))
