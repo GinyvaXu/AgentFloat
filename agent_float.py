@@ -2274,7 +2274,12 @@ class SettingsDialog(QDialog):
 
     def _open_skills_panel(self):
         dlg = SkillsPanel(self._skills_cfg, theme=self.theme, parent=self)
-        dlg.exec_()
+        self._skills_dlg = dlg
+        dlg.finished.connect(self._skills_dlg_closed)
+        dlg.show()
+
+    def _skills_dlg_closed(self, _r=0):
+        self._skills_dlg = None
 
     def _browse_folder(self):
         folder = QFileDialog.getExistingDirectory(
@@ -3659,8 +3664,20 @@ class FloatingWidget(QWidget):
             self._animate_quit()
 
     def _open_skills_panel(self):
-        dlg = SkillsPanel(self._skills_cfg, theme=self.theme, parent=self)
-        dlg.exec_()
+        """Open Skills panel non-modally so the floating widget stays interactive"""
+        panel = getattr(self, "_skills_panel", None)
+        if panel is not None and panel.isVisible():
+            panel.raise_()
+            panel.activateWindow()
+            return
+        panel = SkillsPanel(self._skills_cfg, theme=self.theme, parent=self)
+        panel.finished.connect(lambda _r: self._clear_skills_panel_ref(panel))
+        self._skills_panel = panel
+        panel.show()
+
+    def _clear_skills_panel_ref(self, panel):
+        if getattr(self, "_skills_panel", None) is panel:
+            self._skills_panel = None
 
     # ── 剪贴板历史 ──────────────────────────────────
     def _clipboard_tick(self):
@@ -3684,14 +3701,26 @@ class FloatingWidget(QWidget):
             save_config(self.config)
 
         dlg.copied.connect(_on_copy)
-        dlg.exec_()
+        dlg.finished.connect(lambda _r: self._clear_clip_panel_ref(dlg))
+        self._clip_panel = dlg
+        dlg.show()
+
+    def _clear_clip_panel_ref(self, panel):
+        if getattr(self, "_clip_panel", None) is panel:
+            self._clip_panel = None
 
     # ── 自定义命令面板 ──────────────────────────────
     def _open_command_panel(self):
         """打开自定义命令面板（新建/编辑/删除/运行）"""
         dlg = CommandPanel(self._commands, theme=self.theme, parent=self)
         dlg.commands_changed.connect(self._on_commands_changed)
-        dlg.exec_()
+        dlg.finished.connect(lambda _r: self._clear_cmd_panel_ref(dlg))
+        self._cmd_panel = dlg
+        dlg.show()
+
+    def _clear_cmd_panel_ref(self, panel):
+        if getattr(self, "_cmd_panel", None) is panel:
+            self._cmd_panel = None
 
     def _on_commands_changed(self, cmds):
         self._commands = [dict(c) for c in cmds]
@@ -3777,7 +3806,7 @@ class FloatingWidget(QWidget):
         self._news_panel = panel
         panel.finished.connect(lambda _r: self._clear_news_panel_ref(panel))
         self._place_news_panel(panel)
-        panel.exec_()
+        panel.show()
 
     def _place_news_panel(self, panel):
         """把快报面板放到浮窗附近，且完整落在屏幕内"""

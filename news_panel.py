@@ -317,8 +317,9 @@ class NewsPanel(QDialog):
         err = (data.get("source_errors") or [])
         foot = ""
         if err:
+            _hint = get_colors(self._theme)["HINT"]
             foot = ('<p style="color:#%02X%02X%02X; font-size:%dpx; margin-top:12px;">'
                     '部分数据源不可用：%s</p>' % (
-                        get_colors(self._theme)["HINT"], max(10, self._font_size - 2),
+                        _hint[0], _hint[1], _hint[2], max(10, self._font_size - 2),
                         "；".join(err[:3])))
         self.viewer.setHtml(body + foot)
