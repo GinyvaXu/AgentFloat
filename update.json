@@ -1,6 +1,6 @@
 {
-  "version": "1.5.1",
-  "url": "https://github.com/GinyvaXu/AgentFloat/releases/download/v1.5.1/AgentFloat_Setup.exe",
-  "notes": "# v1.5.1 - Water Helper Fixes, Auto-Update 404 Fallback & Always-on-Top Dialogs\n\n## English\n- Water reminder popup: now a focusable topmost window with fade-in/out animations, fixable close button; live countdown tick; panel hint text and settings button removed; settings page uses form layout and follows light/dark theme.\n- Water panel opens non-modally, the floating widget stays clickable/draggable while it is open.\n- Auto-update: when the manifest download URL returns 404, the updater now falls back to the real latest GitHub Release asset automatically; update dialogs are always-on-top; failure dialog offers a direct link to the Releases page.",
-  "notes_zh": "# v1.5.1 - 喝水助手修复 + 自动更新 404 回退 + 弹窗置顶\n\n## 中文\n- 提醒弹窗改为可聚焦置顶窗口，带淡入淡出动画，可正常关闭；时间实时递减；面板底部提示文字与设置按钮已移除；设置页表单化并完整适配深浅主题。\n- 喝水助手面板改为非模态打开，打开期间浮窗仍可单击与拖动。\n- 自动更新：清单下载地址 404 时自动回退到 GitHub 最新正式版实际资产；更新弹窗全部置顶；下载失败弹窗提供一键打开 Releases 页面。"
+  "version": "1.6.0",
+  "url": "https://github.com/GinyvaXu/AgentFloat/releases/download/v1.6.0/AgentFloat_Setup.exe",
+  "notes": "# v1.6.0 - Pi Coding Agent Launch Support & Built-in Agent Auto-Migration\n\n## English\n- Added Pi Coding Agent launch support (pi.dev multi-model terminal coding agent, purple badge \"P\").\n- Built-in Agent auto-migration: new built-in presets (e.g. Pi) are appended automatically on upgrade, without overwriting user customizations.\n",
+  "notes_zh": "# v1.6.0 - 新增 Pi 启动兼容与内置 Agent 自动迁移\n\n## 中文\n- 新增 Pi Coding Agent 启动兼容（pi.dev 多模型终端编码智能体，紫色 P 徽标）。\n- 内置 Agent 自动迁移：升级后自动追加新内置预设（如 Pi），不覆盖用户自定义配置。\n"
 }
