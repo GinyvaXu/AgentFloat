@@ -1,6 +1,6 @@
 {
-  "version": "1.6.0",
-  "url": "https://github.com/GinyvaXu/AgentFloat/releases/download/v1.6.0/AgentFloat_Setup.exe",
-  "notes": "# v1.6.0 - Pi Coding Agent Launch Support & Built-in Agent Auto-Migration\n\n## English\n- Added Pi Coding Agent launch support (pi.dev multi-model terminal coding agent, purple badge \"P\").\n- Built-in Agent auto-migration: new built-in presets (e.g. Pi) are appended automatically on upgrade, without overwriting user customizations.\n",
-  "notes_zh": "# v1.6.0 - 新增 Pi 启动兼容与内置 Agent 自动迁移\n\n## 中文\n- 新增 Pi Coding Agent 启动兼容（pi.dev 多模型终端编码智能体，紫色 P 徽标）。\n- 内置 Agent 自动迁移：升级后自动追加新内置预设（如 Pi），不覆盖用户自定义配置。\n"
+  "version": "2.1.0",
+  "url": "https://github.com/GinyvaXu/AgentFloat/releases/download/v2.1.0/AgentFloat_Setup.exe",
+  "notes": "# v2.1.0 - Web Shell & DeepSeek Harness Support\n\n## English\n- Settings / API usage / AI Daily Brief migrated to a Web UI shell (FastAPI + pywebview + native frontend, Apple-style).\n- Added DeepSeek Harness (dsh) launch support via Web UI mode (auto open browser).\n- Unified Agent launcher now covers Claude Code / Codex / Pi / DeepSeek Harness.\n",
+  "notes_zh": "# v2.1.0 - Web 套壳与 DeepSeek Harness 启动兼容\n\n## 中文\n- 设置 / API 用量 / AI 快报 迁移为 Web 套壳（FastAPI + pywebview + 原生前端，Apple 风格）。\n- 新增 DeepSeek Harness（dsh）Web UI 启动兼容（自动打开浏览器）。\n- 统一 Agent 启动器现覆盖 Claude Code / Codex / Pi / DeepSeek Harness。\n"
 }

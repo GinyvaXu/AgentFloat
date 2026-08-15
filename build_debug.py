@@ -22,9 +22,11 @@ archive_old_builds(CURRENT_VERSION)
 script = os.path.join(SCRIPT_DIR, "agent_float.py")
 icon   = os.path.join(SCRIPT_DIR, "assets", "agent_float_icon.ico")
 res    = os.path.join(SCRIPT_DIR, "assets")
+web_dir = os.path.join(SCRIPT_DIR, "web")
 add_data = [
     f"{res}{os.pathsep}assets",
     f"{os.path.join(SCRIPT_DIR, 'VERSION')}{os.pathsep}.",
+    f"{web_dir}{os.pathsep}web",
 ]
 
 EXCLUDES = [
@@ -36,6 +38,8 @@ EXCLUDES = [
     "QtPrintSupport", "QtQuick", "QtQml", "QtQuickWidgets",
     "QtSvg", "QtSvgWidgets", "QtBluetooth", "QtNfc",
     "QtTextToSpeech", "QtSpeech", "QtLocation",
+    "matplotlib", "numpy", "pandas", "scipy", "streamlit",
+    "sklearn", "PIL", "IPython", "jupyter", "notebook",
 ]
 
 HIDDEN_IMPORTS = [
@@ -46,6 +50,9 @@ HIDDEN_IMPORTS = [
     "local_ai_service", "news_fetcher", "news_worker", "news_panel",
     "clipboard_panel", "command_panel",
     "water_reminder", "water_panel",
+    "web_bridge", "web_server", "web_ui", "dsh_launcher",
+    "loading_indicator",
+    "fastapi", "uvicorn", "pydantic", "webview", "clr",
 ]
 
 args = [
@@ -60,6 +67,8 @@ args = [
     "--specpath", os.path.join(SCRIPT_DIR, "build"),
     "--noconfirm",
     *[f"--hidden-import={m}" for m in HIDDEN_IMPORTS],
+    "--collect-all", "uvicorn",
+    "--collect-all", "fastapi",
     *[f"--exclude-module={m}" for m in EXCLUDES],
 ]
 

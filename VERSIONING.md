@@ -14,6 +14,7 @@ PATCH — Bug 修复、安全补丁
 
 | 版本 | 说明 |
 |------|------|
+| v2.1.0 | 设置 / API 用量 / AI 快报 迁移为 Web 套壳（FastAPI + pywebview + 原生前端，参考 ProjectDock）；新增 DeepSeek Harness（dsh）Web UI 启动兼容（统一 Agent 框架含 claude/codex/pi/dsh，launcher 字段区分终端/Web 启动）；dsh 自动迁移进内置预设；构建脚本纳入 web 资源与 fastapi/uvicorn/pywebview 依赖 |
 | v1.6.0 | 新增 Pi Coding Agent 启动兼容（pi.dev 多模型终端编码智能体）；内置 Agent 迁移机制：升级后自动追加新内置预设，不覆盖用户自定义 |
 | v1.4.0 | 环绕菜单吸附对齐修复（展开时浮窗居中于圆环，关闭后恢复原位）；AI 快报面板尺寸/字号可配置（设置新增窗口宽高与正文字号），启动与每日定时自动生成后自动弹出快报窗口（可关闭）；设置页 API 用量与 AI 快报统一风格（去外边框、关注主题全平铺显示并修复黑框黑底）；「应用」改为生效并关闭；「保存」仅在有改动时可点，保存后弹出修改摘要 toast |
 | v1.3.0 | 安装/卸载/自动更新链路重构（参考诺丁汉警长桌游项目）：Inno Setup 按用户级安装、支持静默自动更新；多源检查更新（update.json 清单 + jsDelivr CDN + 国内 GitHub 代理 + Releases API）友好错误码；静默重装并重启 + boot 验证；mirror.json 自建镜像。设置「关于」页新增检查更新/下载更新/更新并重启。修复深色模式 API 用量与 AI 快报页白框、浅色模式输入框边框不可见；关于页重建（使用教程/下载链接/个人网站）；修复 AI 快报生成超时崩溃（返回部分结果） |
@@ -39,7 +40,12 @@ PATCH — Bug 修复、安全补丁
 ```
 AgentFloat/
 ├── agent_float.py              # 主程序（浮窗 + 设置 + 托盘）
-├── agent_registry.py           # 多 Agent 注册表与启动模型
+├── agent_registry.py           # 多 Agent 注册表与启动模型（含 dsh Web 启动器）
+├── dsh_launcher.py              # DeepSeek Harness Web UI 启动器
+├── web_bridge.py                # Web 壳通信桥（Qt ↔ FastAPI 线程）
+├── web_server.py                # FastAPI 后端（配置/API用量/快报 API + SSE）
+├── web_ui.py                    # pywebview Web 壳窗口管理
+├── web/                         # Web 控制台前端（HTML/CSS/JS）
 ├── radial_menu.py              # 悬停/长按环绕菜单（QPainter 自绘）
 ├── skills_scanner.py           # Skills 扫描器（SKILL.md 解析）
 ├── skills_panel.py             # Skills 辅助窗（无边框 + 中英对照 + 触发指令复制）

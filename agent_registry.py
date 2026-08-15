@@ -5,7 +5,11 @@
 每个 Agent 字段：
   id / name / command / args / skip_permissions_arg /
   working_directory / launch_mode / icon_color / icon_char /
-  check / primary / builtin / description
+  check / primary / builtin / launcher / description
+
+launcher:
+  terminal — 在 Windows Terminal（wt）中启动命令行 Agent（默认）
+  web      — 以后台服务方式启动并自动打开浏览器（如 DeepSeek Harness `dsh web`）
 """
 import copy
 import os
@@ -25,6 +29,7 @@ BUILTIN_PRESETS = [
         "check": "claude",
         "primary": True,
         "builtin": True,
+        "launcher": "terminal",
         "description": "Anthropic Claude Code — 终端里的 Claude 编程智能体",
     },
     {
@@ -40,6 +45,7 @@ BUILTIN_PRESETS = [
         "check": "codex",
         "primary": False,
         "builtin": True,
+        "launcher": "terminal",
         "description": "OpenAI Codex CLI — 终端里的 Codex 编程智能体",
     },
     {
@@ -55,7 +61,24 @@ BUILTIN_PRESETS = [
         "check": "pi",
         "primary": False,
         "builtin": True,
+        "launcher": "terminal",
         "description": "pi.dev 的 Pi Coding Agent — 多模型终端编码智能体（Anthropic/OpenAI/Gemini/DeepSeek），无跳过权限参数，始终使用内置交互确认",
+    },
+    {
+        "id": "dsh",
+        "name": "DeepSeek Harness",
+        "command": "dsh",
+        "args": [],
+        "skip_permissions_arg": "",
+        "working_directory": "",
+        "launch_mode": "normal",
+        "icon_color": "#4D6BFE",
+        "icon_char": "D",
+        "check": "dsh",
+        "primary": False,
+        "builtin": True,
+        "launcher": "web",
+        "description": "DeepSeek Harness（dsh）— DeepSeek 官方开源的全栈 AI 智能体（Web UI 模式：后台启动 dsh web 并自动打开浏览器）",
     },
 ]
 
@@ -105,6 +128,9 @@ def normalize_agents(raw):
         mode = a.get("launch_mode")
         if mode not in ("normal", "skip_permissions"):
             mode = "normal"
+        launcher = a.get("launcher")
+        if launcher not in ("terminal", "web"):
+            launcher = "terminal"
         item = {
             "id": aid,
             "name": name,
@@ -118,6 +144,7 @@ def normalize_agents(raw):
             "check": str(a.get("check") or command).strip(),
             "primary": bool(a.get("primary")),
             "builtin": bool(a.get("builtin", False)),
+            "launcher": launcher,
             "description": str(a.get("description") or ""),
         }
         out.append(item)

@@ -77,6 +77,13 @@ from command_panel import CommandPanel
 from water_reminder import DEFAULT_WATER, WaterTimerManager, is_exempt_process
 from water_panel import WaterPanel, WaterReminderPopup
 
+# ── Web 套壳与 DeepSeek Harness 模块 ─────────────────
+from web_bridge import WebBridge
+from web_server import start_server_thread
+import web_ui
+from dsh_launcher import launch_dsh_web, stop as stop_dsh, is_running as dsh_running, status as dsh_status
+from loading_indicator import LoadingIndicator
+
 # ── 路径（兼容 PyInstaller 打包）──────────────────────
 import sys as _sys
 _IS_FROZEN = getattr(_sys, 'frozen', False)
@@ -338,6 +345,11 @@ def load_config():
             if _a.get("builtin") and _a.get("id") not in _have_ids:
                 _agents_cfg.append(_a)
                 _migrated = True
+        # 旧配置补全 launcher 字段（terminal/web）
+        for _a in _agents_cfg:
+            if isinstance(_a, dict) and not _a.get("launcher"):
+                _a["launcher"] = "terminal"
+                _migrated = True
     else:
         defaults["agents"] = _def_agents
         _migrated = True
@@ -364,6 +376,15 @@ def load_config():
                 _log().info("检测到 Windows 深色主题，自动设置为暗色模式")
         except Exception:
             pass
+
+        # 若文件存在但解析失败，先备份损坏文件，避免覆盖导致数据丢失
+        if os.path.exists(CONFIG_PATH):
+            try:
+                _bak = CONFIG_PATH + ".corrupt_%s.bak" % time.strftime("%Y%m%d_%H%M%S")
+                shutil.copy2(CONFIG_PATH, _bak)
+                _log().warning("检测到损坏配置，已备份到 %s", _bak)
+            except (IOError, OSError):
+                pass
 
         # 首次启动：自动生成默认配置文件（含示例端点），新用户开箱即用
         try:
@@ -456,6 +477,13 @@ def launch_agent(agent, config=None):
         return
 
     name = agent.get("name") or "Agent"
+
+    # Web 启动器（如 DeepSeek Harness dsh）：后台启动服务并自动打开浏览器
+    if (agent.get("launcher") or "terminal") == "web":
+        _log().info("以 Web UI 模式启动 Agent: %s", name)
+        launch_dsh_web(agent, config)
+        return
+
     cmd_path, err = resolve_command(agent)
     if cmd_path is None:
         _log().warning("Agent 不可用: %s (%s)", name, err)
@@ -2956,6 +2984,10 @@ class FloatingWidget(QWidget):
     def _on_api_data_ready(self, results):
         """轮询数据就绪，更新余额角标（只显示剩余额度）"""
         self._api_last_results = results or []
+        _bridge = getattr(self, "_web_bridge", None)
+        if _bridge is not None:
+            _bridge.set_snapshot("api_results", _serialize_api_results(results))
+            _bridge.publish("api_updated", {"count": len(results or [])})
         if not results or not self._api_badge:
             return
         # 监控启用时保持角标常显（数据就绪即补显，避免时有时无）
@@ -3666,7 +3698,7 @@ class FloatingWidget(QWidget):
         elif action_id == "skills":
             self._open_skills_panel()
         elif action_id == "api":
-            self._open_api_platform()
+            web_ui.open_window("#/api")
         elif action_id == "settings":
             self.settings_requested.emit()
         elif action_id == "news":
@@ -3816,14 +3848,9 @@ class FloatingWidget(QWidget):
             return None
 
     def _open_news_panel(self):
-        """打开 AI 快报面板（清除未读红点）"""
+        """打开 AI 快报（Web 壳页面，清除未读红点）"""
         self._mark_news_read()
-        panel = NewsPanel(theme=self.theme, config=self._news_cfg, parent=self)
-        panel.generate_requested.connect(lambda: self._generate_news(auto=False))
-        self._news_panel = panel
-        panel.finished.connect(lambda _r: self._clear_news_panel_ref(panel))
-        self._place_news_panel(panel)
-        panel.show()
+        web_ui.open_window("#/news")
 
     def _place_news_panel(self, panel):
         """把快报面板放到浮窗附近，且完整落在屏幕内"""
@@ -3874,6 +3901,11 @@ class FloatingWidget(QWidget):
                                         "可在设置中关闭「使用本地 AI 生成摘要」改用标题列表。")
                 return
         self._news_generating = True
+        _bridge = getattr(self, "_web_bridge", None)
+        if _bridge is not None:
+            _bridge.set_snapshot("news_generating", True)
+            _bridge.set_snapshot("news_phase", "抓取数据源…")
+            _bridge.publish("news_started", {})
         if self._news_panel is not None and self._news_panel.isVisible():
             self._news_panel.set_generating(True)
         worker = NewsWorker(cfg, self._agents, parent=self)
@@ -3899,6 +3931,11 @@ class FloatingWidget(QWidget):
         self.config["news"] = cfg
         save_config(self.config)
         self.update()
+        _bridge = getattr(self, "_web_bridge", None)
+        if _bridge is not None:
+            _bridge.set_snapshot("news_report", payload)
+            _bridge.set_snapshot("news_generating", False)
+            _bridge.publish("news_done", {"date": date, "count": count, "used_ai": used_ai})
         if self._news_panel is not None and self._news_panel.isVisible():
             self._news_panel.on_generated(payload)
             self._news_panel.set_generating(False)
@@ -3915,6 +3952,10 @@ class FloatingWidget(QWidget):
         self._news_worker = None
         self._news_generating = False
         _log().warning("AI 快报生成失败: %s", err)
+        _bridge = getattr(self, "_web_bridge", None)
+        if _bridge is not None:
+            _bridge.set_snapshot("news_generating", False)
+            _bridge.publish("news_failed", {"error": str(err)})
         if self._news_panel is not None and self._news_panel.isVisible():
             self._news_panel.set_generating(False)
         self.news_failed.emit(str(err))
@@ -4385,6 +4426,69 @@ class FloatingWidget(QWidget):
 
 
 # ── 全局错误收集（会话内收集，关闭程序时统一导出）────────────────
+def _serialize_api_results(results):
+    """把 ApiMonitorWorker 的 FetchResult 列表转成 Web 友好的 dict。"""
+    out = []
+    for i, r in enumerate(results or []):
+        is_err = bool(r.fields and r.fields[0].get("label") == "错误")
+        out.append({
+            "index": i,
+            "name": r.endpoint_name,
+            "ok": not is_err,
+            "error": r.fields[0].get("value") if is_err else "",
+            "fields": r.fields,
+            "progress": r.progress,
+            "raw_response": (r.raw_response or "")[:400],
+            "ts": time.strftime("%H:%M:%S"),
+        })
+    return out
+
+
+class WebAppHandlers(object):
+    """Web 壳后端与主程序之间的适配层（只读状态 + 命令投递，不直接触碰 Qt）。"""
+
+    def __init__(self, widget, bridge):
+        self.widget = widget
+        self.bridge = bridge
+        self.version = VERSION
+
+    def get_config(self):
+        return load_config()
+
+    def save_config(self, cfg):
+        save_config(cfg)
+
+    def get_app_state(self):
+        return {
+            "version": VERSION,
+            "theme": getattr(self.widget, "theme", "light"),
+            "dsh_running": dsh_running(),
+            "news_generating": bool(getattr(self.widget, "_news_generating", False)),
+            "auto_start": is_auto_start_enabled(),
+            "api_enabled": bool((self.widget.config.get("api_monitor") or {}).get("enabled")),
+        }
+
+    def get_api_state(self):
+        cfg = self.widget.config.get("api_monitor") or API_MONITOR_DEFAULTS
+        return {
+            "version": VERSION,
+            "config": cfg,
+            "results": self.bridge.get_snapshot("api_results"),
+        }
+
+    def get_news_state(self, date=None):
+        from web_server import _news_payload
+        base = _news_payload(None, date)
+        cfg = getattr(self.widget, "_news_cfg", None) or self.widget.config.get("news") or _NEWS_DEFAULTS
+        base["cfg"] = cfg
+        base["generating"] = bool(getattr(self.widget, "_news_generating", False))
+        base["phase"] = self.bridge.get_snapshot("news_phase") or ""
+        return base
+
+    def open_url(self, url):
+        _open_url(url)
+
+
 def _update_box(parent=None, icon=QMessageBox.Information, title="", text="",
                 buttons=QMessageBox.Ok, default=QMessageBox.Ok):
     """自动更新相关消息框（置顶，避免被其他窗口遮挡）"""
@@ -4597,12 +4701,68 @@ def _main():
 
     widget = FloatingWidget()
 
-    # ── 设置对话框 ──
+    # ── 动画加载指示器（dsh 启动 / Web 壳打开）──
+    loading = LoadingIndicator(anchor=widget)
+    _prev_dsh_phase = ["idle"]
+    _prev_web_pending = [False]
+    _web_loading_shown = [False]
+
+    def _poll_loading():
+        # 1) dsh 启动状态（优先级最高）
+        st = dsh_status()
+        ph = st.get("phase") or "idle"
+        if ph != _prev_dsh_phase[0]:
+            _prev_dsh_phase[0] = ph
+            if ph == "starting":
+                loading.show_loading(st.get("message") or "正在启动 DeepSeek Harness", st.get("detail") or "")
+            elif ph == "ready":
+                loading.show_success(st.get("message") or "DeepSeek Harness 已就绪", st.get("detail") or "")
+                loading.hide_after(2600)
+            elif ph in ("timeout", "exited", "error"):
+                loading.show_error(st.get("message") or "启动失败", st.get("detail") or "")
+                loading.hide_after(7000)
+        elif ph == "starting":
+            el = int(st.get("elapsed") or 0)
+            base = (st.get("detail") or "").split("（已等待")[0]
+            loading.set_detail("%s（已等待 %d 秒）" % (base, el))
+        # 2) Web 壳打开等待（dsh 空闲时才接管指示器）
+        if ph in ("idle", "ready") or ph.startswith("t") or ph == "exited" or ph == "error":
+            wp = web_ui.has_pending()
+            if wp != _prev_web_pending[0]:
+                _prev_web_pending[0] = wp
+                if wp:
+                    _web_loading_shown[0] = True
+                    loading.show_loading("正在打开 Web 界面…", "正在启动浏览器内核…")
+                elif _web_loading_shown[0] and web_ui.is_ready():
+                    _web_loading_shown[0] = False
+                    loading.show_success("Web 界面已就绪")
+                    loading.hide_after(1800)
+                elif _web_loading_shown[0]:
+                    _web_loading_shown[0] = False
+                    loading.hide_now()
+
+    _loading_poll = QTimer()
+    _loading_poll.setInterval(300)
+    _loading_poll.timeout.connect(_poll_loading)
+    _loading_poll.start()
+
+    # ── Web 壳：FastAPI 后端 + 事件桥（设置 / API 用量 / AI 快报）──
+    bridge = WebBridge()
+    bridge.set_snapshot("version", VERSION)
+    widget._web_bridge = bridge
+    _web_handlers = WebAppHandlers(widget, bridge)
+    _web_thread, _web_port = start_server_thread(bridge, _web_handlers)
+    web_ui.set_base_url("http://127.0.0.1:%d" % _web_port)
+    _log().info("Web 壳后端已启动: http://127.0.0.1:%d", _web_port)
+
+    # ── 设置（Web 壳）──
     def open_settings():
-        _log().debug("打开设置对话框")
-        dlg = SettingsDialog(widget.config, parent=widget)
-        # 「应用/保存」由对话框直接生效并关闭；保存额外弹出修改摘要 toast（v1.4.0）
-        dlg.exec_()
+        _log().debug("打开 Web 设置窗口")
+        web_ui.open_window("#/settings")
+
+    if "--open-web" in sys.argv:
+        _log().info("调试参数 --open-web：启动后自动打开 Web 设置窗口")
+        QTimer.singleShot(2000, open_settings)
 
     def do_launch():
         launch_agent(get_primary_agent(widget.config.get("agents", default_agents())), widget.config)
@@ -4700,6 +4860,46 @@ def _main():
         worker.start()
         _log().info("检查更新 (手动=%s, 当前 v%s)", manual, VERSION)
 
+    # ── Web 命令分发（uvicorn 线程 → Qt 主线程）──
+    def _handle_web_command(kind, payload):
+        if kind == "apply":
+            widget.apply_settings(payload.get("config") or widget.config, preview_only=False)
+            bridge.publish("config_applied", {"changed_keys": payload.get("changed_keys") or []})
+        elif kind == "preview":
+            widget.apply_settings(payload.get("config") or widget.config, preview_only=True)
+        elif kind == "generate_news":
+            widget._generate_news(auto=False)
+        elif kind == "news_read":
+            widget._mark_news_read()
+        elif kind == "check_update":
+            _check_update(manual=True)
+        elif kind == "open_url":
+            url = payload.get("url") or ""
+            if url:
+                _open_url(url)
+        elif kind == "launch_agent":
+            agent = find_agent(widget.config.get("agents", default_agents()), payload.get("id") or "")
+            if agent:
+                launch_agent(agent, widget.config)
+        elif kind == "run_ai_services":
+            widget._run_local_ai_services(auto=bool(payload.get("auto", False)))
+        elif kind == "stop_dsh":
+            stop_dsh()
+        elif kind == "restart_api_monitor":
+            widget._restart_api_monitor()
+
+    def _dispatch_web_commands():
+        for kind, payload in bridge.drain_commands():
+            try:
+                _handle_web_command(kind, payload)
+            except Exception:
+                _log().error("Web 命令处理失败 [%s]", kind, exc_info=True)
+
+    _cmd_timer = QTimer()
+    _cmd_timer.setInterval(150)
+    _cmd_timer.timeout.connect(_dispatch_web_commands)
+    _cmd_timer.start()
+
     # ── 系统托盘 ──
     def _build_menu_stylesheet(theme):
         tc = get_colors(theme)
@@ -4735,6 +4935,7 @@ def _main():
     tray_menu.addAction("Skills 辅助窗", widget._open_skills_panel)
     tray_menu.addAction("AI 快报", widget._open_news_panel)
     tray_menu.addAction("喝水助手", widget._open_water_panel)
+    tray_menu.addAction("停止 DSH Web 服务", lambda: stop_dsh())
     tray_menu.addSeparator()
     tray_menu.addAction("设置...", open_settings)
     tray_menu.addSeparator()
@@ -4788,8 +4989,9 @@ def _main():
         "AgentFloat — 喝水助手", msg, QSystemTrayIcon.Information, 5000))
     widget.news_failed.connect(lambda err: tray_icon.showMessage(
         "AgentFloat — AI 快报失败", str(err), QSystemTrayIcon.Warning, 7000))
-    # 主题切换时同步更新托盘菜单样式
+    # 主题切换时同步更新托盘菜单样式与 Web 壳
     widget.theme_changed.connect(lambda t: tray_menu.setStyleSheet(_build_menu_stylesheet(t)))
+    widget.theme_changed.connect(lambda t: bridge.publish("theme_changed", {"theme": t}))
     widget.show()
     # GUI 就绪后写 boot 标记，供更新批处理确认重装后的启动是否成功
     updater.mark_boot_ok()
@@ -4804,4 +5006,7 @@ def _main():
     sys.exit(app.exec_())
 
 if __name__ == "__main__":
+    # PyInstaller 冻结环境下 multiprocessing 子进程（Web 壳窗口）必须先行 freeze_support
+    import multiprocessing as _mp
+    _mp.freeze_support()
     main()
