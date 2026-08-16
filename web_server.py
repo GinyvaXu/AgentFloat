@@ -255,16 +255,46 @@ def create_app(bridge, handlers):
 
 
 def _run_server(bridge, handlers, port, debug):
-    import uvicorn
-    app = create_app(bridge, handlers)
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="debug" if debug else "warning")
+    """后台线程：启动 uvicorn；任何异常写入 AgentFloat 日志（不再静默吞掉）。"""
+    import logging
+    logger = logging.getLogger("AgentFloat.WebServer")
+    try:
+        import uvicorn
+        app = create_app(bridge, handlers)
+        # log_config=None：禁用 uvicorn 的 logging.config.dictConfig。
+        # uvicorn 0.52 在 PyInstaller 冻结环境下配置自身 formatter 会抛
+        # "ValueError: Unable to configure formatter 'default'" 导致后端启动失败，
+        # 设置页因此报 127.0.0.1 拒绝访问；禁用后日志走 AgentFloat 自身 logger。
+        uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning", log_config=None)
+    except Exception as e:  # noqa: BLE001
+        import traceback
+        logger.error("Web 后端启动失败 (port=%s): %s", port, e)
+        for line in traceback.format_exc().splitlines():
+            logger.error("  | %s", line)
 
 
-def start_server_thread(bridge, handlers, port=WEB_PORT, debug=False):
-    """启动 FastAPI 后端守护线程，返回 (thread, port)。"""
+def start_server_thread(bridge, handlers, port=WEB_PORT, debug=False, wait_ready=True):
+    """启动 FastAPI 后端守护线程。
+
+    返回 (thread, port, ok)：
+    - wait_ready=True 时等待端口真正就绪（最多 6 秒），ok 表示是否成功监听；
+    - wait_ready=False 时立即返回（ok 恒为 False，调用方自行轮询）。
+    """
     port = _find_free_port(port)
     thread = threading.Thread(
         target=_run_server, args=(bridge, handlers, port, debug), daemon=True, name="web-server"
     )
     thread.start()
-    return thread, port
+    ok = False
+    if wait_ready:
+        deadline = time.time() + 6.0
+        while time.time() < deadline and thread.is_alive():
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(0.3)
+                    s.connect(("127.0.0.1", port))
+                    ok = True
+                    break
+            except OSError:
+                time.sleep(0.2)
+    return thread, port, ok

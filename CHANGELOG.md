@@ -1,5 +1,11 @@
 # 更新日志
 
+## [2.1.1] - 2026-08-16
+### Fixed
+- 修复 Web 套壳设置页 / API 用量 / AI 快报打不开（浏览器报 127.0.0.1 拒绝访问）：根因是 uvicorn 0.52 在 PyInstaller 冻结环境下启动时执行 `logging.config.dictConfig` 配置自身 formatter 抛 `ValueError: Unable to configure formatter 'default'`，Web 后端线程启动即崩溃且异常被 windowed 模式静默吞掉。修复：`web_server._run_server` 改为 `uvicorn.run(..., log_config=None)` 禁用 uvicorn 日志自配置，并给 uvicorn 启动包 try/except，异常完整写入 AgentFloat 日志；`start_server_thread` 增加 6 秒端口就绪探测，返回 (thread, port, ok)，主程序据此真实记录启动成功/失败，不再误报「已启动」
+- 修复冻结 exe 启动时 PyInstaller `pyi_rth__tkinter` 钩子崩溃（`Tk data directory "_tk_data" not found`）：构建脚本（build_exe.py / build_debug.py）EXCLUDES 追加 `tkinter` / `_tkinter` / `Tkinter` / `tcl` / `tk`，AgentFloat 仅用 Qt，不依赖 tkinter
+- 修复 Web 设置页 JS 报错 `TypeError: $(...).forEach is not a function`（app.js 用单元素 `$` 调 forEach，应为 `$$`），避免启动模式/主题 radio 冗余绑定报错
+
 ## [2.1.0] - 2026-08-15
 ### Added
 - 新增 DeepSeek Harness（dsh）启动兼容：统一 Agent 框架支持 Claude Code / Codex CLI / Pi / DeepSeek Harness；dsh 以 Web UI 模式启动（后台 `dsh web` / `npx @deepseek-ai/dsh web`，就绪后自动打开浏览器，端口占用自动复用，日志落盘 `logs/dsh_*.log`）

@@ -40,6 +40,9 @@ EXCLUDES = [
     "QtTextToSpeech", "QtSpeech", "QtLocation",
     "matplotlib", "numpy", "pandas", "scipy", "streamlit",
     "sklearn", "PIL", "IPython", "jupyter", "notebook",
+    # tkinter：AgentFloat 使用 Qt，不依赖 tkinter；排除可避免 PyInstaller
+    # 的 pyi_rth__tkinter 运行时钩子因 Tk 数据目录不完整而在启动时崩溃
+    "tkinter", "_tkinter", "Tkinter", "tcl", "tk",
 ]
 
 HIDDEN_IMPORTS = [

@@ -194,11 +194,11 @@
         row("启动时检查更新", "", switchCtl("check_updates", cfg.check_updates)));
       el.innerHTML = inner;
       bindAll(el);
-      $("#settingsContent [name='launch_mode']").forEach((r) => r.addEventListener("change", () => {
+      $$("#settingsContent [name='launch_mode']").forEach((r) => r.addEventListener("change", () => {
         cfg.launch_mode = $("input[name='launch_mode']:checked").value;
         refreshDirty();
       }));
-      $("#settingsContent [data-bind='theme']").forEach((r) => r.addEventListener("change", () => { bindRead(r); refreshDirty(); }));
+      $$("#settingsContent [data-bind='theme']").forEach((r) => r.addEventListener("change", () => { bindRead(r); refreshDirty(); }));
       const sel = $("#settingsContent [data-bind='__primary']");
       if (sel) sel.addEventListener("change", () => {
         agents.forEach((a) => { a.primary = (a.id === sel.value); });

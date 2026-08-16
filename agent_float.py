@@ -4751,9 +4751,12 @@ def _main():
     bridge.set_snapshot("version", VERSION)
     widget._web_bridge = bridge
     _web_handlers = WebAppHandlers(widget, bridge)
-    _web_thread, _web_port = start_server_thread(bridge, _web_handlers)
+    _web_thread, _web_port, _web_ok = start_server_thread(bridge, _web_handlers)
     web_ui.set_base_url("http://127.0.0.1:%d" % _web_port)
-    _log().info("Web 壳后端已启动: http://127.0.0.1:%d", _web_port)
+    if _web_ok:
+        _log().info("Web 壳后端已启动: http://127.0.0.1:%d", _web_port)
+    else:
+        _log().error("Web 壳后端启动失败（端口 %d 未就绪），设置 / API 用量 / AI 快报 将不可用", _web_port)
 
     # ── 设置（Web 壳）──
     def open_settings():
