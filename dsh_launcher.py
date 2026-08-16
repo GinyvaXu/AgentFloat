@@ -124,6 +124,112 @@ def _tail(path, limit=600):
         return ""
 
 
+# ── web profile 插件链接缺失的自动修复 ──────────────
+_PLUGIN_MISSING_MARKERS = (
+    "ERR_MODULE_NOT_FOUND",
+    "plugin tree failed to load",
+    "failed to import loader entry",
+    "Cannot find package",
+)
+
+
+def _is_plugin_missing_error(tail):
+    """判断 dsh 日志是否为 web profile 插件链接缺失错误。"""
+    return any(m in (tail or "") for m in _PLUGIN_MISSING_MARKERS)
+
+
+def _dsh_install_anchor():
+    """定位 dsh 安装的 package.json（全局 npm 安装路径）。"""
+    for candidate in (
+        os.path.join(os.environ.get("APPDATA", ""), "npm", "node_modules", "@deepseek-ai", "dsh", "package.json"),
+        os.path.join(os.environ.get("APPDATA", ""), "npm", "node_modules", "dsh", "package.json"),
+    ):
+        if os.path.isfile(candidate):
+            return candidate
+    # 兜底：从 dsh 命令解析
+    p = shutil.which("dsh") if shutil else None
+    if p:
+        base = os.path.dirname(os.path.dirname(p)) if p.lower().endswith((".ps1", ".cmd")) else os.path.dirname(p)
+        for cand in (
+            os.path.join(base, "node_modules", "@deepseek-ai", "dsh", "package.json"),
+            os.path.join(base, "@deepseek-ai", "dsh", "package.json"),
+        ):
+            if os.path.isfile(cand):
+                return cand
+    return None
+
+
+def _repair_web_profile_links(anchor):
+    """调用 dsh 的 healProfilesModuleFallback 重建 $DSH_HOME/profiles/node_modules 链接。
+
+    返回 (ok, message)。healProfiles 是 dsh-app-boot 的导出函数，BFS 遍历 dsh 安装
+    的依赖闭包，为每个包在 profiles/node_modules 下建 junction 链接，使 profile
+    无需 pnpm 即可解析所有 in-box 插件。幂等：已有链接保留。
+    """
+    try:
+        import subprocess
+        # dsh-app-boot 是 ESM 模块，用 Node 执行 healProfilesModuleFallback 最可靠
+        boot_index = os.path.join(
+            os.path.dirname(anchor), "node_modules", "@deepseek-ai", "dsh-app-boot", "lib", "index.js"
+        )
+        if not os.path.isfile(boot_index):
+            return False, "未找到 dsh-app-boot: %s" % boot_index
+        node = shutil.which("node") if shutil else None
+        if not node:
+            return False, "未检测到 Node.js"
+        script = (
+            "import { healProfilesModuleFallback } from %r;"
+            "healProfilesModuleFallback(%r);"
+            % ("file:///" + boot_index.replace("\\", "/"), anchor.replace("\\", "/"))
+        )
+        r = subprocess.run(
+            [node, "--input-type=module", "-e", script],
+            capture_output=True, text=True, timeout=60,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if r.returncode != 0:
+            logger.error("healProfiles 执行失败: %s", (r.stderr or "")[-300:])
+            return False, "执行失败: %s" % ((r.stderr or "")[-200:])
+        return True, "已重建插件链接"
+    except Exception as e:  # noqa: BLE001
+        logger.error("重建 dsh profile 插件链接失败: %s", e)
+        return False, "重建失败: %s" % e
+
+
+def _repair_and_retry(agent, config, config_dir, logf_path):
+    """重建插件链接后重启 dsh；仍失败则弹窗。"""
+    _set_status("starting", "正在修复 DeepSeek Harness", "检测到插件缺失，正在重建链接…")
+    logger.info("dsh 插件缺失，尝试自动修复（重建 profiles/node_modules 链接）")
+    anchor = _dsh_install_anchor()
+    ok, msg = _repair_web_profile_links(anchor) if anchor else (False, "未定位 dsh 安装")
+    if not ok:
+        _set_status("error", "修复失败", msg, keep_start=True)
+        _warn_box("DeepSeek Harness 插件修复失败：\n%s\n\n请尝试重新安装 DSH。" % msg)
+        return
+    logger.info("dsh 插件链接已重建，重新启动")
+    if _port_open(DSH_WEB_PORT):
+        _set_status("ready", "DeepSeek Harness 已就绪", "正在打开浏览器…", keep_start=True)
+        _open_url(dsh_web_url())
+        return
+    # 启动新进程（复用命令构造逻辑：dsh / npx）
+    dsh_path = shutil.which("dsh") if shutil else None
+    if dsh_path:
+        cmd = [dsh_path, "web", "--port", str(DSH_WEB_PORT)]
+        note = "dsh"
+    else:
+        npx_path = shutil.which("npx") if shutil else None
+        if not npx_path:
+            _set_status("error", "缺少运行环境", "未检测到 dsh / Node.js（npx）", keep_start=True)
+            return
+        cmd = [npx_path, "--yes", "@deepseek-ai/dsh", "web", "--port", str(DSH_WEB_PORT)]
+        note = "npx @deepseek-ai/dsh"
+    working_dir = (agent or {}).get("working_directory") or (config or {}).get("working_directory") or ""
+    if not working_dir or not os.path.isdir(working_dir):
+        working_dir = os.environ.get("USERPROFILE", config_dir)
+    _start_dsh_process(cmd, note, working_dir, config_dir, repair_retry=True,
+                       repair_ctx=(agent, config))
+
+
 def launch_dsh_web(agent, config=None, config_dir=None):
     """以 Web UI 模式启动 DeepSeek Harness（异步，不阻塞调用线程）。
 
@@ -175,6 +281,14 @@ def launch_dsh_web(agent, config=None, config_dir=None):
         cmd = [npx_path, "--yes", "@deepseek-ai/dsh", "web", "--port", str(DSH_WEB_PORT)]
         launch_note = "npx @deepseek-ai/dsh"
 
+    return _start_dsh_process(cmd, launch_note, working_dir, config_dir)
+
+
+def _start_dsh_process(cmd, launch_note, working_dir, config_dir, repair_retry=False, repair_ctx=None):
+    """启动 dsh 进程并开启就绪轮询线程。repair_retry=True 表示自动修复后的重试；
+    repair_ctx 为自动修复所需的 (agent, config) 上下文。"""
+    global _proc
+    agent, config = (repair_ctx if repair_ctx else (None, None))
     logf_path = _log_path(config_dir)
     try:
         logf = open(logf_path, "w", encoding="utf-8")
@@ -203,7 +317,10 @@ def launch_dsh_web(agent, config=None, config_dir=None):
     with _proc_lock:
         _proc = proc
     logger.info("dsh web 启动中 pid=%s 方式=%s 日志=%s", proc.pid, launch_note, logf_path)
-    _set_status("starting", "正在启动 DeepSeek Harness", "正在拉取并启动 dsh…（首次使用需下载依赖，可能需要几分钟）")
+    if repair_retry:
+        _set_status("starting", "正在重新启动 DeepSeek Harness", "插件链接已重建，正在启动…")
+    else:
+        _set_status("starting", "正在启动 DeepSeek Harness", "正在拉取并启动 dsh…（首次使用需下载依赖，可能需要几分钟）")
 
     def _close_log():
         nonlocal logf
@@ -215,7 +332,7 @@ def launch_dsh_web(agent, config=None, config_dir=None):
             logf = None
 
     def _wait_ready():
-        """后台线程：轮询端口就绪 → 打开浏览器；超时/退出 → 弹窗提示日志路径。"""
+        """后台线程：轮询端口就绪 → 打开浏览器；超时/退出 → 自动修复并重试，再失败弹窗提示日志路径。"""
         deadline = time.time() + DSH_START_TIMEOUT
         while time.time() < deadline:
             if _port_open(DSH_WEB_PORT):
@@ -233,6 +350,12 @@ def launch_dsh_web(agent, config=None, config_dir=None):
             _open_url(dsh_web_url())
             return
         if proc.poll() is not None:
+            # 自动修复：日志含 ERR_MODULE_NOT_FOUND / plugin tree failed to load
+            # （web profile 插件链接缺失，dsh 0.1.0-rc 在 Windows 首次运行常见），
+            # 重建 $DSH_HOME/profiles/node_modules 链接后重试一次。
+            if _is_plugin_missing_error(tail):
+                _repair_and_retry(agent, config, config_dir, logf_path)
+                return
             _set_status("exited", "启动进程已退出", (tail or "（无输出，请检查日志）")[:160], keep_start=True)
         else:
             _set_status("timeout", "DeepSeek Harness 启动超时", (tail or "（无输出，请检查网络与 Node 环境）")[:160], keep_start=True)

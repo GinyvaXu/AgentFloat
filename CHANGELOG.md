@@ -1,5 +1,9 @@
 # 更新日志
 
+## [2.2.2] - 2026-08-16
+### Fixed
+- 修复新电脑首次启动 DeepSeek Harness 报「启动超时或已退出」（日志 `ERR_MODULE_NOT_FOUND` / `plugin tree failed to load`）：dsh 0.1.0-rc 在 Windows 首次运行需要为 `~/.dsh/profiles` 建立插件链接（healProfilesModuleFallback），部分环境（npm 全局安装 + 首次初始化）链接未生成导致 100+ 插件解析失败。AgentFloat 现在自动检测该错误 → 调用 dsh 的 healProfiles 重建 `$DSH_HOME/profiles/node_modules` 链接 → 自动重启 dsh；仍失败才弹窗并给出日志路径
+
 ## [2.2.1] - 2026-08-16
 ### Fixed
 - 修复 Web 壳打开时加载指示器「一直转」：`web_ui.open_window` 中 `_ready_evt` 未声明为全局变量（局部变量遮蔽模块级），导致 `is_ready()` 恒 False、`has_pending()` 在窗口子进程存活期间恒 True，加载条（旋转环 + 线性条）永不退出。修复后 Web 壳就绪即切换为成功提示，约 1 秒自动关闭
