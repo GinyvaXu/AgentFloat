@@ -1,6 +1,6 @@
 {
-  "version": "2.1.0",
-  "url": "https://github.com/GinyvaXu/AgentFloat/releases/download/v2.1.0/AgentFloat_Setup.exe",
-  "notes": "# v2.1.0 - Web Shell & DeepSeek Harness Support\n\n## English\n- Settings / API usage / AI Daily Brief migrated to a Web UI shell (FastAPI + pywebview + native frontend, Apple-style).\n- Added DeepSeek Harness (dsh) launch support via Web UI mode (auto open browser).\n- Unified Agent launcher now covers Claude Code / Codex / Pi / DeepSeek Harness.\n",
-  "notes_zh": "# v2.1.0 - Web 套壳与 DeepSeek Harness 启动兼容\n\n## 中文\n- 设置 / API 用量 / AI 快报 迁移为 Web 套壳（FastAPI + pywebview + 原生前端，Apple 风格）。\n- 新增 DeepSeek Harness（dsh）Web UI 启动兼容（自动打开浏览器）。\n- 统一 Agent 启动器现覆盖 Claude Code / Codex / Pi / DeepSeek Harness。\n"
+  "version": "2.2.0",
+  "url": "https://github.com/GinyvaXu/AgentFloat/releases/download/v2.2.0/AgentFloat_Setup.exe",
+  "notes": "# v2.2.0 - Agent Installer & Stability Fixes\n\n## English\n- New **Agent Install** module in Web settings: one-click install / upgrade / uninstall for Claude Code, Codex CLI, Pi Coding Agent and DeepSeek Harness (npm global install, CN mirror first with auto fallback).\n- Fixed Web shell backend startup crash (uvicorn formatter in frozen env).\n- Fixed loading indicator animation logic; success toast now closes in ~1s.\n",
+  "notes_zh": "# v2.2.0 - Agent 安装服务与稳定性修复\n\n## 中文\n- Web 设置新增「Agent 安装」模块：Claude Code / Codex CLI / Pi / DeepSeek Harness 一键安装、升级、卸载（npm 全局安装，国内镜像优先自动回退）。\n- 修复 Web 套壳后端启动崩溃（冻结环境 uvicorn formatter 问题）。\n- 修复加载指示器动画逻辑；启动成功提示约 1 秒自动关闭。\n"
 }
