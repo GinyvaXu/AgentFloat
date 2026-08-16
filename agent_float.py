@@ -4708,25 +4708,30 @@ def _main():
     _web_loading_shown = [False]
 
     def _poll_loading():
-        # 1) dsh 启动状态（优先级最高）
+        # 1) dsh 启动状态（dsh 启动期间独占指示器，避免与 Web 壳互相覆盖）
         st = dsh_status()
         ph = st.get("phase") or "idle"
-        if ph != _prev_dsh_phase[0]:
-            _prev_dsh_phase[0] = ph
-            if ph == "starting":
+        if ph == "starting":
+            if _prev_dsh_phase[0] != "starting":
+                _prev_dsh_phase[0] = ph
                 loading.show_loading(st.get("message") or "正在启动 DeepSeek Harness", st.get("detail") or "")
-            elif ph == "ready":
-                loading.show_success(st.get("message") or "DeepSeek Harness 已就绪", st.get("detail") or "")
-                loading.hide_after(2600)
-            elif ph in ("timeout", "exited", "error"):
-                loading.show_error(st.get("message") or "启动失败", st.get("detail") or "")
-                loading.hide_after(7000)
-        elif ph == "starting":
-            el = int(st.get("elapsed") or 0)
-            base = (st.get("detail") or "").split("（已等待")[0]
-            loading.set_detail("%s（已等待 %d 秒）" % (base, el))
-        # 2) Web 壳打开等待（dsh 空闲时才接管指示器）
-        if ph in ("idle", "ready") or ph.startswith("t") or ph == "exited" or ph == "error":
+            else:
+                el = int(st.get("elapsed") or 0)
+                base = (st.get("detail") or "").split("（已等待")[0]
+                loading.set_detail("%s（已等待 %d 秒）" % (base, el))
+        elif ph in ("ready", "timeout", "exited", "error"):
+            if _prev_dsh_phase[0] != ph:
+                _prev_dsh_phase[0] = ph
+                if ph == "ready":
+                    loading.show_success(st.get("message") or "DeepSeek Harness 已就绪", st.get("detail") or "")
+                    loading.hide_after(1000)  # 成功：显示约 1 秒后自动关闭
+                else:
+                    loading.show_error(st.get("message") or "启动失败", st.get("detail") or "")
+                    loading.hide_after(7000)
+        else:
+            _prev_dsh_phase[0] = "idle"
+        # 2) Web 壳打开等待（dsh 启动中不接管，避免覆盖 dsh 的加载/成功提示）
+        if ph != "starting":
             wp = web_ui.has_pending()
             if wp != _prev_web_pending[0]:
                 _prev_web_pending[0] = wp
@@ -4736,7 +4741,7 @@ def _main():
                 elif _web_loading_shown[0] and web_ui.is_ready():
                     _web_loading_shown[0] = False
                     loading.show_success("Web 界面已就绪")
-                    loading.hide_after(1800)
+                    loading.hide_after(1000)  # 成功：显示约 1 秒后自动关闭
                 elif _web_loading_shown[0]:
                     _web_loading_shown[0] = False
                     loading.hide_now()

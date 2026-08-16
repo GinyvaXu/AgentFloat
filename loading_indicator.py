@@ -46,6 +46,7 @@ class LoadingIndicator(QWidget):
 
     # ── 对外 API ────────────────────────────────────
     def show_loading(self, title, detail=""):
+        self._hide_timer.stop()  # 新状态接管，作废旧隐藏计划
         self._phase = "loading"
         self._title = title
         self._detail = detail
@@ -58,6 +59,7 @@ class LoadingIndicator(QWidget):
             self.update()
 
     def show_success(self, text, detail=""):
+        self._hide_timer.stop()  # 新状态接管，作废旧隐藏计划
         self._phase = "success"
         self._title = text
         self._detail = detail
@@ -66,6 +68,7 @@ class LoadingIndicator(QWidget):
         self._present()
 
     def show_error(self, text, detail=""):
+        self._hide_timer.stop()  # 新状态接管，作废旧隐藏计划
         self._phase = "error"
         self._title = text
         self._detail = detail

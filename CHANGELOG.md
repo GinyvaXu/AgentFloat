@@ -5,6 +5,7 @@
 - 修复 Web 套壳设置页 / API 用量 / AI 快报打不开（浏览器报 127.0.0.1 拒绝访问）：根因是 uvicorn 0.52 在 PyInstaller 冻结环境下启动时执行 `logging.config.dictConfig` 配置自身 formatter 抛 `ValueError: Unable to configure formatter 'default'`，Web 后端线程启动即崩溃且异常被 windowed 模式静默吞掉。修复：`web_server._run_server` 改为 `uvicorn.run(..., log_config=None)` 禁用 uvicorn 日志自配置，并给 uvicorn 启动包 try/except，异常完整写入 AgentFloat 日志；`start_server_thread` 增加 6 秒端口就绪探测，返回 (thread, port, ok)，主程序据此真实记录启动成功/失败，不再误报「已启动」
 - 修复冻结 exe 启动时 PyInstaller `pyi_rth__tkinter` 钩子崩溃（`Tk data directory "_tk_data" not found`）：构建脚本（build_exe.py / build_debug.py）EXCLUDES 追加 `tkinter` / `_tkinter` / `Tkinter` / `tcl` / `tk`，AgentFloat 仅用 Qt，不依赖 tkinter
 - 修复 Web 设置页 JS 报错 `TypeError: $(...).forEach is not a function`（app.js 用单元素 `$` 调 forEach，应为 `$$`），避免启动模式/主题 radio 冗余绑定报错
+- 修复加载提示动画逻辑混乱：`LoadingIndicator` 状态切换时未取消旧的隐藏计时器，可能导致加载中卡片被上一个任务的隐藏计划突然关闭；`_poll_loading` 中 dsh 与 Web 壳两个状态机互相覆盖（dsh 启动中 Web 壳会抢占指示器）。修复后：状态切换统一作废旧隐藏计划；dsh 启动期间 Web 壳不接管；启动成功显示绿色对勾，约 1 秒后自动关闭（原 2600/1800ms），失败保持 7 秒
 
 ## [2.1.0] - 2026-08-15
 ### Added
