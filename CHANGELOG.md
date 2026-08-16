@@ -1,5 +1,9 @@
 # 更新日志
 
+## [2.2.0] - 2026-08-16
+### Added
+- 新增「Agent 安装」模块（Web 设置侧边栏独立页面）：Claude Code / Codex CLI / Pi Coding Agent / DeepSeek Harness 一键安装、升级、卸载。基于 npm 全局安装（`@anthropic-ai/claude-code` / `@openai/codex` / `@earendil-works/pi-coding-agent` / `@deepseek-ai/dsh`），国内镜像（registry.npmmirror.com）优先、失败自动回退官方源；页面实时显示安装状态（已装/未装/处理中）、版本号与完整日志，支持展开查看
+
 ## [2.1.1] - 2026-08-16
 ### Fixed
 - 修复 Web 套壳设置页 / API 用量 / AI 快报打不开（浏览器报 127.0.0.1 拒绝访问）：根因是 uvicorn 0.52 在 PyInstaller 冻结环境下启动时执行 `logging.config.dictConfig` 配置自身 formatter 抛 `ValueError: Unable to configure formatter 'default'`，Web 后端线程启动即崩溃且异常被 windowed 模式静默吞掉。修复：`web_server._run_server` 改为 `uvicorn.run(..., log_config=None)` 禁用 uvicorn 日志自配置，并给 uvicorn 启动包 try/except，异常完整写入 AgentFloat 日志；`start_server_thread` 增加 6 秒端口就绪探测，返回 (thread, port, ok)，主程序据此真实记录启动成功/失败，不再误报「已启动」

@@ -213,6 +213,15 @@ input[type="color"] { width: 40px; height: 26px; border: 1px solid var(--input-b
 .agent-cmd { font-size: 11px; color: var(--hint); margin-top: 3px; word-break: break-all; }
 .agent-actions { display: flex; gap: 6px; align-items: center; }
 
+/* Agent 安装页日志 */
+.install-log {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 9px; padding: 10px 12px; margin: 0 0 8px;
+  font-family: "Cascadia Code", Consolas, monospace; font-size: 11px;
+  color: var(--text2); white-space: pre-wrap; word-break: break-all;
+  max-height: 220px; overflow: auto; line-height: 1.55;
+}
+
 /* API 端点卡片 */
 .ep-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; }
 .ep-head { display: flex; align-items: center; gap: 10px; }

@@ -219,6 +219,37 @@ def create_app(bridge, handlers):
         bridge.command("stop_dsh")
         return {"ok": True}
 
+    # ── Agent 安装服务（设置页「Agent 安装」模块）──
+    @api.get("/agent_install/status")
+    def agent_install_status():
+        from agent_installer import detect_all
+        return {"agents": detect_all()}
+
+    @api.post("/agent_install/install")
+    def agent_install_install(body: dict):
+        from agent_installer import install_agent
+        aid = str(body.get("id") or "").strip()
+        action = str(body.get("action") or "install").strip()
+        if action not in ("install", "upgrade"):
+            action = "install"
+        ok, msg = install_agent(aid, action)
+        return {"ok": ok, "message": msg}
+
+    @api.post("/agent_install/uninstall")
+    def agent_install_uninstall(body: dict):
+        from agent_installer import uninstall_agent
+        aid = str(body.get("id") or "").strip()
+        ok, msg = uninstall_agent(aid)
+        return {"ok": ok, "message": msg}
+
+    @api.get("/agent_install/status/{aid}")
+    def agent_install_status_one(aid: str):
+        from agent_installer import status_of
+        st = status_of(aid)
+        if st is None:
+            return JSONResponse({"error": "未知 Agent"}, status_code=404)
+        return st
+
     @api.get("/events")
     def events():
         def gen():

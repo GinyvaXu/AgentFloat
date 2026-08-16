@@ -54,7 +54,7 @@ HIDDEN_IMPORTS = [
     "clipboard_panel", "command_panel",
     "water_reminder", "water_panel",
     "web_bridge", "web_server", "web_ui", "dsh_launcher",
-    "loading_indicator",
+    "loading_indicator", "agent_installer",
     "fastapi", "uvicorn", "pydantic", "webview", "clr",
 ]
 
