@@ -4673,6 +4673,12 @@ def _main():
     app.setApplicationName("AgentFloat")
     app.setFont(QFont(FONT_FAMILY, 9))
 
+    # ── 启动窗口动画：展示启动状态，主窗口就绪后切换「已就绪」并自动关闭 ──
+    from startup_splash import StartupSplash
+    splash = StartupSplash()
+    splash.start("正在启动 AgentFloat…")
+    QTimer.singleShot(60, lambda: splash.set_detail("正在加载配置…"))
+
     config = load_config()
 
     # 退出时清理孤儿 Claude 进程（可配置，默认不清理）
@@ -5003,6 +5009,8 @@ def _main():
     widget.show()
     # GUI 就绪后写 boot 标记，供更新批处理确认重装后的启动是否成功
     updater.mark_boot_ok()
+    # 主窗口就绪：启动动画切换为「已就绪」并约 1 秒后自动关闭
+    QTimer.singleShot(120, lambda: splash.done("启动完成，已就绪"))
 
     if config.get("auto_start") and not is_auto_start_enabled():
         toggle_auto_start(True)

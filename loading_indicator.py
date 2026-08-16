@@ -101,7 +101,12 @@ class LoadingIndicator(QWidget):
         self._fade.stop()
         self._fade.setStartValue(self.windowOpacity())
         self._fade.setEndValue(0.0)
-        self._fade.finished.connect(self.hide, Qt.UniqueConnection)
+        # 避免 UniqueConnection 重复连接 finished 抛 "connect() failed between finished() and hide()"
+        try:
+            self._fade.finished.disconnect()
+        except TypeError:
+            pass
+        self._fade.finished.connect(self.hide)
         self._fade.start()
 
     def _on_tick(self):
@@ -181,7 +186,9 @@ class LoadingIndicator(QWidget):
             p.setBrush(QColor(255, 255, 255, 24))
             p.drawRoundedRect(bar, 2, 2)
             seg = 64.0
-            x0 = bar.left() + (self._progress_off - seg)
+            # 块在条内循环滚动：偏移 0..(bar.width()-seg)，保证整块始终在条内
+            span = max(1.0, bar.width() - seg)
+            x0 = bar.left() + (self._progress_off % 100.0) / 100.0 * span
             p.setBrush(_ACCENT)
             p.drawRoundedRect(QRectF(x0, bar.top(), seg, bar.height()), 2, 2)
         p.end()

@@ -53,7 +53,7 @@ HIDDEN_IMPORTS = [
     "local_ai_service", "news_fetcher", "news_worker", "news_panel",
     "clipboard_panel", "command_panel",
     "web_bridge", "web_server", "web_ui", "dsh_launcher",
-    "loading_indicator", "agent_installer",
+    "loading_indicator", "agent_installer", "startup_splash",
     "fastapi", "uvicorn", "pydantic", "webview", "clr",
 ]
 

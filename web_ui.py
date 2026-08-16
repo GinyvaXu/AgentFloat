@@ -125,7 +125,7 @@ def open_window(route="#/settings", title="AgentFloat", width=1120, height=780):
     if not route.startswith("#"):
         route = "#" + route
     url = "%s/%s" % (_base_url, route)
-    global _worker, _cmd_q, _closed_evt
+    global _worker, _cmd_q, _closed_evt, _ready_evt
     with _lock:
         alive = (
             _worker is not None

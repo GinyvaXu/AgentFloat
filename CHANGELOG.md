@@ -1,5 +1,13 @@
 # 更新日志
 
+## [2.2.1] - 2026-08-16
+### Fixed
+- 修复 Web 壳打开时加载指示器「一直转」：`web_ui.open_window` 中 `_ready_evt` 未声明为全局变量（局部变量遮蔽模块级），导致 `is_ready()` 恒 False、`has_pending()` 在窗口子进程存活期间恒 True，加载条（旋转环 + 线性条）永不退出。修复后 Web 壳就绪即切换为成功提示，约 1 秒自动关闭
+- 修复加载指示器线性进度条蓝色块超出条外：块位置计算 `x0 = bar.left() + (offset - seg)` 在 offset 小于块宽时块左缘越过条左界。改为在条内循环滚动（`offset % 100 / 100 * (bar.width() - seg)`），整块始终位于条内
+
+### Added
+- 新增启动窗口动画（StartupSplash）：程序每次启动时屏幕居中显示毛玻璃启动卡片（品牌蓝旋转环 + 「AgentFloat」+ 启动状态文案 + 底部进度条），主窗口就绪后切换为绿色对勾「启动完成，已就绪」，约 1 秒后淡出关闭，向用户明确告知程序已启动
+
 ## [2.2.0] - 2026-08-16
 ### Added
 - 新增「Agent 安装」模块（Web 设置侧边栏独立页面）：Claude Code / Codex CLI / Pi Coding Agent / DeepSeek Harness 一键安装、升级、卸载。基于 npm 全局安装（`@anthropic-ai/claude-code` / `@openai/codex` / `@earendil-works/pi-coding-agent` / `@deepseek-ai/dsh`），国内镜像（registry.npmmirror.com）优先、失败自动回退官方源；页面实时显示安装状态（已装/未装/处理中）、版本号与完整日志，支持展开查看
