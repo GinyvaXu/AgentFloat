@@ -8,7 +8,7 @@
 """
 import os
 
-from PyQt5.QtCore import Qt, QTimer, QPoint, QPointF, QVariantAnimation, QEasingCurve
+from PyQt5.QtCore import Qt, QTimer, QPointF, QVariantAnimation, QEasingCurve
 from PyQt5.QtGui import QFont, QBrush, QColor, QPainter, QPainterPath, QPen
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
@@ -16,9 +16,9 @@ from PyQt5.QtWidgets import (
     QApplication, QSplitter, QStyle, QProxyStyle,
 )
 
-from af_theme import get_colors
-from skills_scanner import scan_skills, default_skill_roots, categorize_skills
-from skills_translations import get_zh
+from agentfloat.core.theme import get_colors
+from agentfloat.services.skills.scanner import scan_skills, default_skill_roots, categorize_skills
+from agentfloat.services.skills.translations import get_zh
 
 
 class _CloseButton(QPushButton):

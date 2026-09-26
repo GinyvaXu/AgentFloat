@@ -4,7 +4,7 @@ API 用量监控 — QThread 轮询工作线程
 import logging
 from PyQt5.QtCore import QThread, pyqtSignal
 
-from api_fetcher import fetch_endpoint, FetchError
+from agentfloat.services.api_monitor.fetcher import fetch_endpoint, FetchError
 
 _logger = logging.getLogger("AgentFloat")
 
@@ -47,7 +47,7 @@ class ApiMonitorWorker(QThread):
                                   ep.get("name", "?"), len(result.fields))
                 except FetchError as e:
                     # 将错误信息作为伪字段
-                    from api_fetcher import FetchResult
+                    from agentfloat.services.api_monitor.fetcher import FetchResult
                     err_result = FetchResult(
                         endpoint_name=ep.get("name", "?"),
                         fields=[{"label": "错误", "value": str(e)[:100], "unit": "", "display": "text"}],

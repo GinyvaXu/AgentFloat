@@ -17,10 +17,10 @@ env/
 .env
 
 # PyInstaller
-build/
-build_debug/
-build_setup/
-dist/
+/build/
+/build_debug/
+/build_setup/
+/dist/
 *.spec
 *.spec.bak
 !AgentFloat.spec
@@ -35,7 +35,7 @@ warn-*.txt
 
 # Logs
 *.log
-logs/
+/logs/
 
 # IDE
 .vscode/
@@ -61,7 +61,7 @@ GitHub发布*.md
 UI设计审查报告*
 
 # ── 版本归档（本地保留，不上传）──
-versions/
+/versions/
 
 # ── 临时脚本 & 本地文档 ──
 _gen_report.py
@@ -73,7 +73,7 @@ skill_state.json
 skills_translations_ai.json
 
 # AI 快报数据（开发模式存脚本目录，打包后存 %APPDATA% ）
-news/
+/news/
 
 # 安装包构建产物（本地保留，通过 GitHub Releases 发布）
 installer/*.exe

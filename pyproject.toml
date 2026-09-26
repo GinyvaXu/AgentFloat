@@ -1,0 +1,8 @@
+# AgentFloat — 工具链配置
+# 注意：版本号唯一来源为根目录 VERSION 文件，本文件不重复声明版本。
+# 项目采用 src 布局：源码在 src/agentfloat/，根目录 agent_float.py 为兼容入口。
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"

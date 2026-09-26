@@ -5,11 +5,12 @@
 |------|------|
 | 语言/运行时 | Python 3.10+（Windows 10/11） |
 | 主要框架 | PyQt5（浮窗本体/自绘面板）+ ctypes（系统集成） |
+| 代码结构 | `src/agentfloat` 包分层（core / ui / services / webshell / app），根 `agent_float.py` 为兼容入口 |
 | Web 套壳 | FastAPI + uvicorn + pywebview（WebView2）+ 原生 HTML/CSS/JS |
 | 数据存储 | JSON 配置（%APPDATA%/AgentFloat/config.json）+ 剪贴板历史 JSON |
 | 前端 | 设置 / API 用量 / AI 快报 为 Web 页面；浮窗/环绕菜单/Skills/喝水助手仍为 Qt 自绘 |
 | 构建与打包 | PyInstaller（便携/Debug）+ Inno Setup（安装包） |
-| 测试 | 冒烟测试 + 手动回归（含 Debug 日志体系） |
+| 测试 | pytest（P3 完善）+ pyflakes 静态检查 + 构建冒烟（含 Debug 日志体系） |
 
 ## 核心功能实现
 

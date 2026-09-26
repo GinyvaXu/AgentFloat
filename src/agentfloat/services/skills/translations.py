@@ -1,4 +1,4 @@
-﻿# -*- mode: python ; coding: utf-8 -*-
+# -*- mode: python ; coding: utf-8 -*-
 """AgentFloat — Skills 中英对照翻译表
 
 内置常见 skills 的中文名称与简介；未收录项由 Skills 辅助窗回退显示原文。
@@ -6,7 +6,7 @@
 """
 import json
 import os
-import sys
+from agentfloat.core.paths import config_dir as _app_config_dir
 
 SKILL_ZH = {
     "agent-browser": ("浏览器自动化", "AI 代理专用的浏览器自动化命令行工具：导航网页、填写表单、点击按钮、截图、提取数据、测试 Web 应用。"),
@@ -71,11 +71,7 @@ _ALIAS = {
 
 def _custom_path():
     """AI 自检服务生成的补充翻译文件（用户目录）"""
-    if getattr(sys, "frozen", False):
-        d = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "AgentFloat")
-    else:
-        d = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(d, "skills_translations_ai.json")
+    return os.path.join(_app_config_dir(), "skills_translations_ai.json")
 
 
 def _load_custom():

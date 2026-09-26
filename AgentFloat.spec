@@ -1,30 +1,25 @@
 # -*- mode: python ; coding: utf-8 -*-
-
+# AgentFloat — PyInstaller 参考配置（手动调试用）
+# 注意：正式构建走 build_debug.py / build_exe.py（自动归档 + 版本写入）；
+#       本 spec 与两者保持同构，便于 `pyinstaller AgentFloat.spec` 手动排查。
 
 a = Analysis(
     ['agent_float.py'],
-    pathex=[],
+    pathex=['src'],
     binaries=[],
-    datas=[('assets', 'assets')],
+    datas=[('assets', 'assets'), ('VERSION', '.'), ('web', 'web')],
     hiddenimports=[
-        'api_monitor_config',
-        'api_fetcher',
-        'api_monitor_worker',
-        'api_balance_badge',
-        'api_monitor_settings',
-        'updater',
-        'af_theme',
-        'agent_registry',
-        'radial_menu',
-        'skills_scanner',
-        'skills_panel',
-        'agent_manager',
-        'local_ai_service',
-        'news_fetcher',
-        'news_worker',
-        'news_panel',
-        'water_reminder',
-        'water_panel',
+        # AgentFloat 包内（src 布局）动态/延迟导入兜底
+        'agentfloat.app',
+        'agentfloat.ui.floatball',
+        'agentfloat.webshell.window',
+        'agentfloat.webshell.server',
+        'agentfloat.services.dsh',
+        'agentfloat.services.installer',
+        'agentfloat.services.update.updater',
+        'agentfloat.services.skills.ai_service',
+        # 第三方动态导入
+        'fastapi', 'uvicorn', 'pydantic', 'webview', 'clr',
     ],
     hookspath=[],
     hooksconfig={},
@@ -39,6 +34,7 @@ a = Analysis(
         'QtPrintSupport', 'QtQuick', 'QtQml', 'QtQmlModels', 'QtQuickWidgets',
         'QtSvg', 'QtSvgWidgets', 'QtBluetooth', 'QtNfc',
         'QtTextToSpeech', 'QtSpeech', 'QtLocation',
+        'tkinter', '_tkinter', 'Tkinter', 'tcl', 'tk',
     ],
     noarchive=False,
     optimize=0,

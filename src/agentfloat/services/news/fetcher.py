@@ -14,11 +14,11 @@
 import json
 import os
 import re
-import sys
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from agentfloat.core.paths import config_dir as _app_config_dir
 
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0 Safari/537.36 AgentFloat/1.2")
@@ -46,11 +46,7 @@ DEFAULT_NEWS = {
 
 def news_storage_dir():
     """快报数据目录：打包后存 %APPDATA%/AgentFloat/news/，开发时存脚本目录/news/"""
-    if getattr(sys, "frozen", False):
-        base = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "AgentFloat")
-    else:
-        base = os.path.dirname(os.path.abspath(__file__))
-    d = os.path.join(base, "news")
+    d = os.path.join(_app_config_dir(), "news")
     os.makedirs(d, exist_ok=True)
     return d
 

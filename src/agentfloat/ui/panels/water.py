@@ -16,9 +16,9 @@ from PyQt5.QtWidgets import (
     QLabel, QProgressBar, QPushButton, QVBoxLayout,
 )
 
-from af_theme import get_colors
-from skills_panel import _TitleBar
-from water_reminder import STATE_CN
+from agentfloat.core.theme import get_colors
+from agentfloat.ui.panels.skills import _TitleBar
+from agentfloat.services.water.reminder import STATE_CN
 
 
 def _fmt_sec(sec):

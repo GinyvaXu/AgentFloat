@@ -12,7 +12,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 </p>
 
 <p align="center">
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-v1.5.1-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-v2.3.0-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%2010%2F11-8E44AD?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"></a>
@@ -113,25 +113,21 @@ python build_setup_exe.py
 
 ```
 AgentFloat/
-├── agent_float.py              # 主程序（浮窗 + 设置 + 托盘）
-├── agent_registry.py           # 多 Agent 注册表与启动模型
-├── radial_menu.py              # 悬停/长按环绕菜单（模块化扇区）
-├── skills_scanner.py           # Skills 扫描器（SKILL.md 解析 + 分类）
-├── skills_panel.py             # Skills 辅助窗（分类树 + 中英对照）
-├── local_ai_service.py         # 本地 AI 自检服务（API 配置 / Skills 翻译）
-├── agent_manager.py            # Agent 管理 / Skills 设置对话框
-├── af_theme.py                 # 共享主题配色
-├── api_fetcher.py              # API HTTP 请求 + 模板变量
-├── api_monitor_config.py       # 配置解析 + JSONPath
-├── api_monitor_worker.py       # QThread 轮询
-├── api_balance_badge.py        # 余额角标浮窗
-├── api_monitor_settings.py     # 设置对话框 API Tab
+├── agent_float.py              # 启动入口（python agent_float.py，实际源码在 src/）
+├── src/agentfloat/
+│   ├── app.py                  # 应用引导（托盘 / 热键 / 生命周期 / 更新链路）
+│   ├── core/                   # 路径 / 配置 / 主题 token / 日志 / 自启 / 启动器
+│   ├── ui/                     # 浮球 / 环绕菜单 / 轻面板 / 加载指示器
+│   ├── services/               # API 余额 / AI 快报 / Skills / 喝水 / 更新 / dsh / 安装
+│   └── webshell/               # FastAPI 后端 + 事件桥 + pywebview 窗口
+├── web/                        # Web 设置 / API 用量 / AI 快报 前端资源
+├── tests/                      # pytest 测试（P3 完善）
 ├── config.example.json         # 配置模板（本地 config.json 不入库）
-├── build_debug.py              # 调试版构建
+├── build_debug.py              # 调试版构建（带控制台）
 ├── build_exe.py                # 正式版构建
 ├── build_setup_exe.py          # 安装包构建
 ├── build_utils.py              # 构建辅助（归档 / 版本）
-├── AgentFloat.spec             # PyInstaller 配置
+├── AgentFloat.spec             # PyInstaller 参考配置
 ├── docs/                       # 设计与调研文档
 └── assets/                     # 图标等静态资源
 ```
@@ -143,8 +139,10 @@ AgentFloat/
 - [x] v1.2.0 — **AI 快报**：多源聚合 + 本地 Agent 摘要 + 无边框面板 + 定时/启动补生成（详见调研报告）
 - [x] v1.2.1 — 快报体验优化：关注主题定向偏好、生成加载条、设置应用/保存重构、未读角标美化
 - [x] v1.2.2 — **效率工具**：剪贴板历史 + 自定义命令面板；吸附隐藏与环绕菜单冲突修复、按压即弹出、快报自动弹窗与面板精简、扇区图标/字体/圆点自适应防重叠、移除未读角标、自动更新链路复核
-- [ ] v1.3 — 快捷短语、定时提醒等效率工具
-- [ ] v2.0 — 主题商店 / 插件系统 / 多显示器支持
+- [x] v2.x — Web 套壳（设置 / API 用量 / AI 快报）+ Agent 安装 + DeepSeek Harness 支持
+- [ ] v2.3（进行中）— **P1 结构重构**：src 包化 + 死代码清除（-3.3k 行）+ 主题 token 收敛
+- [ ] v2.4 — **P2 交互与视觉重写**：浮球状态机 / 环菜单手感 / ProjectDock 设计语言
+- [ ] v3.0 — **P3 测试与瘦身**：pytest 单测 / onedir 打包 / 启动提速（详见 docs/v3重构方案.md）
 
 > 📚 功能扩展的完整调研与方案对比见 [AI快报与多功能浮窗助手调研报告](docs/AI快报与多功能浮窗助手调研报告.md)。
 

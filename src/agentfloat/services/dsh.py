@@ -18,6 +18,7 @@ import socket
 import subprocess
 import threading
 import time
+from agentfloat.core.paths import config_dir as _app_config_dir
 
 try:
     import shutil
@@ -238,11 +239,7 @@ def launch_dsh_web(agent, config=None, config_dir=None):
     """
     global _proc
     if config_dir is None:
-        import sys
-        if getattr(sys, "frozen", False):
-            config_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "AgentFloat")
-        else:
-            config_dir = os.path.dirname(os.path.abspath(__file__))
+        config_dir = _app_config_dir()
 
     if _port_open(DSH_WEB_PORT):
         logger.info("dsh web 已在运行，直接打开浏览器")

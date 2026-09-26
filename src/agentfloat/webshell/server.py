@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import os
 import socket
-import sys
 import threading
 import time
 from mimetypes import guess_type
@@ -26,18 +25,9 @@ WEB_PORT = 3087
 
 
 def _locate_web_dir() -> str:
-    """定位前端目录：兼容源码运行与 PyInstaller 冻结模式。"""
-    candidates = []
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        candidates.append(os.path.join(meipass, "web"))
-    candidates.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web"))
-    candidates.append(os.path.join(os.path.dirname(sys.executable), "web"))
-    candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "web"))
-    for cand in candidates:
-        if os.path.isfile(os.path.join(cand, "index.html")):
-            return cand
-    return candidates[0]
+    """定位前端目录：兼容源码运行与 PyInstaller 冻结模式（收敛到 core.paths）。"""
+    from agentfloat.core.paths import web_dir
+    return web_dir()
 
 
 def _find_free_port(start=WEB_PORT, tries=12):
@@ -57,7 +47,7 @@ def _sse(event):
 
 def _api_test_fetch(endpoint):
     """在服务线程中直接测试端点（纯 urllib，不触碰 Qt）。"""
-    from api_fetcher import FetchError, fetch_endpoint
+    from agentfloat.services.api_monitor.fetcher import FetchError, fetch_endpoint
     try:
         res = fetch_endpoint(endpoint)
         return True, {
@@ -73,7 +63,7 @@ def _api_test_fetch(endpoint):
 
 
 def _skills_payload(cfg):
-    from skills_scanner import categorize_skills, default_skill_roots, scan_skills
+    from agentfloat.services.skills.scanner import categorize_skills, default_skill_roots, scan_skills
     roots = [r for r in (cfg.get("roots") or []) if str(r).strip()] or default_skill_roots()
     try:
         skills = scan_skills(roots)
@@ -98,7 +88,7 @@ def _skills_payload(cfg):
 
 def _news_payload(config_dir_hint=None, date=None):
     """读取快报报告（指定日期或最新）+ 历史日期列表。"""
-    from news_fetcher import news_storage_dir
+    from agentfloat.services.news.fetcher import news_storage_dir
     d = news_storage_dir()
     report = None
     fname = "%s.json" % date if date else "latest.json"
@@ -222,12 +212,12 @@ def create_app(bridge, handlers):
     # ── Agent 安装服务（设置页「Agent 安装」模块）──
     @api.get("/agent_install/status")
     def agent_install_status():
-        from agent_installer import detect_all
+        from agentfloat.services.installer import detect_all
         return {"agents": detect_all()}
 
     @api.post("/agent_install/install")
     def agent_install_install(body: dict):
-        from agent_installer import install_agent
+        from agentfloat.services.installer import install_agent
         aid = str(body.get("id") or "").strip()
         action = str(body.get("action") or "install").strip()
         if action not in ("install", "upgrade"):
@@ -237,14 +227,14 @@ def create_app(bridge, handlers):
 
     @api.post("/agent_install/uninstall")
     def agent_install_uninstall(body: dict):
-        from agent_installer import uninstall_agent
+        from agentfloat.services.installer import uninstall_agent
         aid = str(body.get("id") or "").strip()
         ok, msg = uninstall_agent(aid)
         return {"ok": ok, "message": msg}
 
     @api.get("/agent_install/status/{aid}")
     def agent_install_status_one(aid: str):
-        from agent_installer import status_of
+        from agentfloat.services.installer import status_of
         st = status_of(aid)
         if st is None:
             return JSONResponse({"error": "未知 Agent"}, status_code=404)

@@ -2,11 +2,12 @@
 API 用量监控 — HTTP 请求 + 响应解析
 使用标准库 urllib，无需额外依赖
 """
+import time
 import json
 import urllib.request
 import urllib.error
 import ssl
-from api_monitor_config import resolve_url, resolve_headers, resolve_template, jsonpath_get
+from agentfloat.services.api_monitor.config import resolve_url, resolve_headers, resolve_template, jsonpath_get
 
 
 # 禁用 SSL 验证（用户可选 — 用于自签名代理等场景）
@@ -128,3 +129,21 @@ def fetch_endpoint(endpoint: dict, verify_ssl: bool = True) -> FetchResult:
         progress=progress,
         raw_response=raw,
     )
+
+
+def serialize_results(results):
+    """把 ApiMonitorWorker 的 FetchResult 列表转成 Web 友好的 dict。"""
+    out = []
+    for i, r in enumerate(results or []):
+        is_err = bool(r.fields and r.fields[0].get("label") == "错误")
+        out.append({
+            "index": i,
+            "name": r.endpoint_name,
+            "ok": not is_err,
+            "error": r.fields[0].get("value") if is_err else "",
+            "fields": r.fields,
+            "progress": r.progress,
+            "raw_response": (r.raw_response or "")[:400],
+            "ts": time.strftime("%H:%M:%S"),
+        })
+    return out

@@ -16,8 +16,8 @@ import time
 
 from PyQt5.QtCore import QThread, pyqtSignal
 
-from local_ai_service import run_headless, build_headless_command
-from news_fetcher import (
+from agentfloat.services.skills.ai_service import run_headless, build_headless_command
+from agentfloat.services.news.fetcher import (
     DEFAULT_NEWS, fetch_all, dedupe, guess_category,
     build_raw_markdown, save_report, news_storage_dir,
 )

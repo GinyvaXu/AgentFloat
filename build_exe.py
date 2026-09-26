@@ -46,19 +46,22 @@ EXCLUDES = [
 ]
 
 HIDDEN_IMPORTS = [
-    "api_monitor_config", "api_fetcher", "api_monitor_worker",
-    "api_balance_badge", "api_monitor_settings", "updater",
-    "af_theme", "agent_registry", "radial_menu",
-    "skills_scanner", "skills_panel", "agent_manager",
-    "local_ai_service", "news_fetcher", "news_worker", "news_panel",
-    "clipboard_panel", "command_panel",
-    "web_bridge", "web_server", "web_ui", "dsh_launcher",
-    "loading_indicator", "agent_installer", "startup_splash",
+    # AgentFloat 包内（src 布局）动态/延迟导入兜底；PyInstaller 静态分析已覆盖大部分
+    "agentfloat.app",
+    "agentfloat.ui.floatball",
+    "agentfloat.webshell.window",      # multiprocessing 子进程目标
+    "agentfloat.webshell.server",
+    "agentfloat.services.dsh",
+    "agentfloat.services.installer",   # Web API 延迟导入
+    "agentfloat.services.update.updater",
+    "agentfloat.services.skills.ai_service",
+    # 第三方动态导入
     "fastapi", "uvicorn", "pydantic", "webview", "clr",
 ]
 
 args = [
     script,
+    "--paths", os.path.join(SCRIPT_DIR, "src"),
     "--onefile",
     "--windowed",
     "--name", "AgentFloat",

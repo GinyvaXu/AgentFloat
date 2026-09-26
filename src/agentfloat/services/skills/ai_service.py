@@ -26,9 +26,10 @@ import time
 
 from PyQt5.QtCore import QThread, pyqtSignal
 
-from agent_registry import resolve_command
-from api_monitor_config import validate_endpoint, DEFAULTS as API_MONITOR_DEFAULTS
-from skills_translations import SKILL_ZH, _ALIAS
+from agentfloat.core.registry import resolve_command
+from agentfloat.services.api_monitor.config import validate_endpoint, DEFAULTS as API_MONITOR_DEFAULTS
+from agentfloat.services.skills.translations import SKILL_ZH, _ALIAS
+from agentfloat.core.paths import config_dir as _app_config_dir
 
 SERVICE_TIMEOUT_SECONDS = 600
 
@@ -79,9 +80,7 @@ logger = logging.getLogger("AgentFloat.LocalAI")
 
 
 def _config_dir():
-    if getattr(sys, "frozen", False):
-        return os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "AgentFloat")
-    return os.path.dirname(os.path.abspath(__file__))
+    return _app_config_dir()
 
 
 CONFIG_PATH = os.path.join(_config_dir(), "config.json")
@@ -373,7 +372,7 @@ def find_new_skills(roots):
     返回 SkillInfo 列表；已触发过翻译的 skill 在 2 天内不重复触发（防止死循环），
     超过 2 天或已补齐翻译则自动解除标记允许重试。
     """
-    from skills_scanner import scan_skills
+    from agentfloat.services.skills.scanner import scan_skills
     state = _load_skill_state()
     first_run = "last_seen" not in state
     last_seen = state.get("last_seen") or {}
@@ -499,7 +498,7 @@ def run_services(config, agent, tasks=("api", "skills"), only_skills=None):
         if task == "api":
             prompt = _api_task_prompt(CONFIG_PATH)
         elif task == "skills":
-            from skills_scanner import default_skill_roots, scan_skills
+            from agentfloat.services.skills.scanner import default_skill_roots, scan_skills
             roots = (config.get("skills") or {}).get("roots") or []
             if not roots:
                 roots = default_skill_roots()

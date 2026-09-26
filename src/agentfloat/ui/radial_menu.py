@@ -17,7 +17,7 @@ from PyQt5.QtCore import (Qt, QPointF, QRectF, QTimer, QVariantAnimation,
 from PyQt5.QtGui import QPainter, QColor, QPen, QFont, QPainterPath, QCursor
 from PyQt5.QtWidgets import QWidget, QApplication
 
-from af_theme import get_colors
+from agentfloat.core.theme import get_colors
 
 CLOSE_GRACE_MS = 2000   # 移出扇区后的关闭宽限期（用户指定 1~3 秒）
 RADIAL_PAD = 30        # 菜单外缘阴影边距（供主程序计算环心对齐）

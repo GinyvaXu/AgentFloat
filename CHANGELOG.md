@@ -1,5 +1,21 @@
 # 更新日志
 
+## [2.3.0] - 2026-09-26
+### Changed
+- **架构重构（v3 计划 P1/3）**：全库迁入 `src/agentfloat` 包结构（core / ui / services / webshell / app 分层）；根 `agent_float.py` 变为瘦入口，`python agent_float.py` 与打包入口保持兼容
+- 主题色板合并为唯一来源 `src/agentfloat/core/theme.py`（原 `agent_float.THEMES` 与 `af_theme.py` 两份重复定义合一）
+- 路径解析收敛：配置目录 / 数据目录 / 前端目录统一走 `core.paths`（原 dsh / 本地 AI 服务 / 快讯 / 翻译各自实现一套）
+- 构建脚本适配 src 结构（`--paths src` + 新 hiddenimports）；新增 `pyproject.toml`（pytest 配置）与 `requirements-dev.txt`
+
+### Fixed
+- 修复开发模式下图标资源路径解析错误（`_resolve_path` 旧实现回退到项目根上一级，导致源码运行永远走降级绘制）
+- 修复 `web_server._locate_web_dir` 中的冗余候选路径（不可达的上级目录拼接）
+
+### Removed
+- 移除死代码约 3,330 行：`SettingsDialog`（2,040 行，v2.1 迁 Web 设置后无任何实例化）、`api_monitor_settings.py`、`agent_manager.py`、`news_panel.py` 及 26 个死导入
+
+> 说明：P1 目标为「行为零变化」的结构重构；交互与视觉重写在 v2.4（P2），测试与打包瘦身在 v3.0（P3）。详见 `docs/v3重构方案.md`。
+
 ## [2.2.2] - 2026-08-16
 ### Fixed
 - 修复新电脑首次启动 DeepSeek Harness 报「启动超时或已退出」（日志 `ERR_MODULE_NOT_FOUND` / `plugin tree failed to load`）：dsh 0.1.0-rc 在 Windows 首次运行需要为 `~/.dsh/profiles` 建立插件链接（healProfilesModuleFallback），部分环境（npm 全局安装 + 首次初始化）链接未生成导致 100+ 插件解析失败。AgentFloat 现在自动检测该错误 → 调用 dsh 的 healProfiles 重建 `$DSH_HOME/profiles/node_modules` 链接 → 自动重启 dsh；仍失败才弹窗并给出日志路径

@@ -3,7 +3,6 @@ API 用量监控 — 配置 schema、模板引擎、JSONPath 解析
 """
 import os
 import re
-import json
 from datetime import date, datetime
 
 

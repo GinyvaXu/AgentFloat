@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QFont
 
-from af_theme import get_colors
+from agentfloat.core.theme import get_colors
 
 HISTORY_KEY = "clipboard_history"
 MAX_ITEMS = 60

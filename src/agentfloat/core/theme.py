@@ -1,5 +1,10 @@
-# -*- mode: python ; coding: utf-8 -*-
-"""AgentFloat — 共享主题配色（供主程序 / 环绕菜单 / Skills 面板 / 管理对话框使用）"""
+# -*- coding: utf-8 -*-
+"""AgentFloat — 设计 token 唯一来源（配色 / 字体 / 浮球度量）
+
+合并原 agent_float.THEMES 与 af_theme.py 两份重复定义；
+P2 将在此基础上接入 ProjectDock 风格 token（色板/圆角/动效）。
+"""
+
 THEMES = {
     "light": {
         "GLASS_BG":        (255, 255, 255),   # 毛玻璃白底
@@ -33,4 +38,22 @@ THEMES = {
 
 def get_colors(theme="light"):
     """返回当前主题的配色字典"""
-    return THEMES.get(theme, THEMES["light"])
+    t = THEMES.get(theme, THEMES["light"])
+    return t
+
+# 兼容别名：模块加载时使用默认 light 主题
+_LIGHT = THEMES["light"]
+IOS_GLASS_BG   = _LIGHT["GLASS_BG"]
+IOS_BORDER     = _LIGHT["BORDER"]
+IOS_SHADOW     = _LIGHT["SHADOW"]
+IOS_ACCENT     = _LIGHT["ACCENT"]
+IOS_TEXT       = _LIGHT["TEXT"]
+IOS_HINT       = _LIGHT["HINT"]
+IOS_SURFACE    = _LIGHT["SURFACE"]
+
+FONT_FAMILY = "Microsoft YaHei"
+
+DEFAULT_SIZE  = 52          # 默认边长 px
+CORNER_RADIUS = 18          # 圆角半径 (iOS 连续曲线风格)
+HOVER_SCALE   = 1.08        # 悬停放大比例
+PRESS_SCALE   = 0.94        # 按压缩小比例

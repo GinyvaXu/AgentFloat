@@ -13,11 +13,11 @@ from PyQt5.QtCore import Qt, pyqtSignal, QSize as _QSize
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QListWidget, QListWidgetItem, QLineEdit, QComboBox, QFormLayout,
-    QMessageBox, QFileDialog, QApplication,
+    QMessageBox, QFileDialog,
 )
 from PyQt5.QtGui import QFont
 
-from af_theme import get_colors
+from agentfloat.core.theme import get_colors
 
 PRESET_COLORS = ["#5B8DEF", "#16A085", "#E67E22", "#8E44AD", "#2E86C1", "#27AE60"]
 PRESET_CHARS = ["⚙", "▶", "⌘", "▣", "◈", "✎"]

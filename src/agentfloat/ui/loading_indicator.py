@@ -7,8 +7,6 @@
 - error：红色叹号，展示后自动淡出
 - 出现/消失均有淡入淡出动画
 """
-import time
-
 from PyQt5.QtCore import Qt, QTimer, QPointF, QRectF, QPropertyAnimation, QEasingCurve
 from PyQt5.QtGui import QPainter, QColor, QPen, QFont, QPainterPath, QLinearGradient
 from PyQt5.QtWidgets import QWidget, QApplication
