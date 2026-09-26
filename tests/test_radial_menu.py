@@ -3,7 +3,6 @@
 import math
 import time
 
-import pytest
 from PyQt5.QtCore import QPoint
 
 from agentfloat.ui.radial_menu import RadialMenu, RadialMenuItem

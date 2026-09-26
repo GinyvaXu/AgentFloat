@@ -14,6 +14,10 @@ PATCH — Bug 修复、安全补丁
 
 | 版本 | 说明 |
 |------|------|
+| v3.0.0 | **P3 测试/瘦身/打磨**：pytest 测试体系 146 项（覆盖率 43%，纯逻辑模块 75-100%）+ smoke_test.py 构建冒烟脚本；默认 onedir 打包（启动 4.3s→1.8s）+ 安全裁剪 24.6MB（141.9MB）；Web 前端 ES 模块化（util/install 拆分，浏览器实测 0 报错）；安装页并行探测 + TTL 缓存（8.4s→12ms）；结构分层（src/agentfloat）与死代码清理（-3.3k 行）收敛 |
+| v2.4.0 | **P2 交互与视觉重写**：交互状态机（拖拽不误弹/贴边唤出抑制/点按即时反馈/退出弹性收拢）；弹簧动效引擎；环菜单三件套（弹簧展开/磁吸选中/按压微光）；浮球重绘（深色玻璃+渐变描边）+ 固定窗口三态位图（解决掉帧）；Web 壳静默预热（设置/快报秒开）；token 对齐 ProjectDock |
+| v2.3.0 | **P1 结构重构**：死代码清除 -3329 行（SettingsDialog 等）；全库迁入 src/agentfloat 包分层（根入口 5028→24 行）；主题 token 唯一化；路径解析收敛；构建链适配 |
+| v2.2.x | Web 套壳（设置/API 用量/AI 快报）+ Agent 安装模块 + DeepSeek Harness 兼容 + 启动动画与加载指示器 |
 | v2.1.0 | 设置 / API 用量 / AI 快报 迁移为 Web 套壳（FastAPI + pywebview + 原生前端，参考 ProjectDock）；新增 DeepSeek Harness（dsh）Web UI 启动兼容（统一 Agent 框架含 claude/codex/pi/dsh，launcher 字段区分终端/Web 启动）；dsh 自动迁移进内置预设；构建脚本纳入 web 资源与 fastapi/uvicorn/pywebview 依赖 |
 | v1.6.0 | 新增 Pi Coding Agent 启动兼容（pi.dev 多模型终端编码智能体）；内置 Agent 迁移机制：升级后自动追加新内置预设，不覆盖用户自定义 |
 | v1.4.0 | 环绕菜单吸附对齐修复（展开时浮窗居中于圆环，关闭后恢复原位）；AI 快报面板尺寸/字号可配置（设置新增窗口宽高与正文字号），启动与每日定时自动生成后自动弹出快报窗口（可关闭）；设置页 API 用量与 AI 快报统一风格（去外边框、关注主题全平铺显示并修复黑框黑底）；「应用」改为生效并关闭；「保存」仅在有改动时可点，保存后弹出修改摘要 toast |
@@ -35,47 +39,30 @@ PATCH — Bug 修复、安全补丁
 
 ---
 
-## 目录结构
+## 目录结构（v3 重构后）
 
 ```
 AgentFloat/
-├── agent_float.py              # 主程序（浮窗 + 设置 + 托盘）
-├── agent_registry.py           # 多 Agent 注册表与启动模型（含 dsh Web 启动器）
-├── dsh_launcher.py              # DeepSeek Harness Web UI 启动器
-├── web_bridge.py                # Web 壳通信桥（Qt ↔ FastAPI 线程）
-├── web_server.py                # FastAPI 后端（配置/API用量/快报 API + SSE）
-├── web_ui.py                    # pywebview Web 壳窗口管理
-├── web/                         # Web 控制台前端（HTML/CSS/JS）
-├── radial_menu.py              # 悬停/长按环绕菜单（QPainter 自绘）
-├── skills_scanner.py           # Skills 扫描器（SKILL.md 解析）
-├── skills_panel.py             # Skills 辅助窗（无边框 + 中英对照 + 触发指令复制）
-├── local_ai_service.py         # 本地 AI 服务（API 配置 / Skills 翻译）
-├── agent_manager.py            # Agent 管理 / Skills 设置对话框
-├── af_theme.py                 # 共享主题配色
-├── api_fetcher.py              # API HTTP 请求 + 模板变量
-├── api_monitor_config.py       # 配置解析 + JSONPath
-├── api_monitor_worker.py       # QThread 轮询
-├── api_balance_badge.py        # 余额角标浮窗
-├── api_monitor_settings.py     # 设置对话框 API Tab
+├── agent_float.py              # 启动入口（源码在 src/，本文件仅 24 行兼容层）
+├── src/agentfloat/
+│   ├── app.py                  # 应用引导（托盘/热键/生命周期/更新链路）
+│   ├── core/                   # 路径/配置/主题 token/日志/自启/启动器/注册表/版本
+│   ├── ui/                     # 浮球/交互状态机/环菜单/弹簧动效/面板/启动动画
+│   │   └── panels/             # Skills / 剪贴板 / 命令 / 喝水（Qt 轻面板）
+│   ├── services/               # API 监控 / AI 快报 / Skills / 喝水 / 更新 / dsh / 安装
+│   └── webshell/               # FastAPI 后端 + 事件桥 + pywebview 窗口（含静默预热）
+├── web/                        # Web 控制台前端（HTML/CSS + ES Module JS）
+├── tests/                      # pytest 测试（146 项）+ 覆盖率配置
+├── smoke_test.py               # 构建产物冒烟（隔离 APPDATA：存活/日志/启动耗时）
 ├── config.example.json         # 配置模板（本地 config.json 不入库）
-├── VERSION                     # 纯文本版号文件
-├── VERSIONING.md               # 本文件（版本管理规范）
-├── README.md                   # 项目说明
-├── build_exe.py                # 正式版构建
-├── build_debug.py              # 调试版构建
-├── build_setup_exe.py          # 安装包构建
-├── build_utils.py              # 构建辅助（归档/版本）
-├── AgentFloat.spec             # PyInstaller spec
-├── .gitignore
+├── VERSION                     # 版本号唯一来源（core/version.py 读取）
+├── build_debug.py              # 调试版构建（默认 onedir；--onefile 可选）
+├── build_exe.py                # 正式版构建（默认 onedir；--onefile 可选）
+├── build_setup_exe.py          # 安装包构建（Inno Setup，适配 onedir/onefile）
+├── build_utils.py              # 构建辅助（版本读取/旧版归档/onedir 安全裁剪）
+├── agent_float.py / AgentFloat.spec
 ├── versions/                   # 历史版本归档（本地保留，不入库）
-│   └── v1.0.0/
-│       ├── src/                # 源代码快照
-│       ├── installer/          # 安装器源码快照
-│       ├── dist/               # ★ 构建产物
-│       └── CHANGELOG.md
-├── installer/                  # 安装器源代码（当前工作副本）
-├── dist/                       # 构建产物（当前工作副本）
-├── build/                      # PyInstaller 临时文件
+├── dist/                       # 构建产物（当前工作副本；onedir 目录 + 安装包）
 └── assets/                     # 图标等静态资源
 ```
 
@@ -84,19 +71,19 @@ AgentFloat/
 ## 发布流程
 
 ### 1. 开发阶段
-- 每次构建 debug 版：`python build_debug.py` → `dist/AgentFloat_debug.exe`
-- 构建前 `build_utils` 自动把被覆盖的旧版 exe 归档到 `versions/v<旧版本>/dist/`
-- 版本号维护在 `VERSION` 文件与 `agent_float.py` 的 `VERSION` 常量
+- 每次构建 debug 版：`python build_debug.py` → `dist/AgentFloat_debug/AgentFloat_debug.exe`（onedir，默认）
+  - 单文件便携版可选：`python build_debug.py --onefile` → `dist/AgentFloat_debug.exe`
+- 构建后冒烟：`python smoke_test.py`（隔离 APPDATA 运行 12 秒：进程存活 + 日志无 ERROR + 启动耗时）
+- 构建前 `build_utils` 自动把被覆盖的旧版产物归档到 `versions/v<旧版本>/dist/`（支持目录）
+- 版本号唯一来源：根目录 `VERSION`（`core/version.py` 读取；禁止在源码/安装器手写第二份）
 
 ### 2. 版本升级（新功能 / 修复）
 ```
-1. 更新 VERSION 文件 + agent_float.py 中 VERSION 常量
-2. 运行 build_debug.py 构建调试版（自动归档旧版）
-3. 启动验证 + 生成会话/崩溃报告
-4. 确认稳定后：python build_exe.py（正式版）+ python build_setup_exe.py（安装包）
-5. 将 exe 同步到 dist/ 与 versions/v<version>/dist/
-6. 编写 versions/v<version>/CHANGELOG.md
-7. 更新 VERSIONING.md「当前版本」
+1. 更新 VERSION 文件 + CHANGELOG.md
+2. 运行 build_debug.py 构建调试版（自动归档旧版）+ smoke_test.py 冒烟
+3. 用户实测确认稳定后：python build_exe.py（正式版）+ python build_setup_exe.py（安装包）
+4. 将正式产物归档到 versions/v<version>/dist/
+5. 更新 VERSIONING.md 版本历史与当前版本
 ```
 
 ### 3. 发布后
@@ -143,71 +130,13 @@ AgentFloat/
 
 ## 当前版本
 
-**v1.4.0** — 2026-08-09
+**v3.0.0** — 2026-09-26（v3 重构计划 P1–P3 完成）
 
-- 环绕菜单：修复吸附贴边时「浮窗不在扇形菜单中间」——展开菜单时按屏幕钳制后的环心临时平移浮窗，菜单关闭后自动恢复原位
-- AI 快报：新增窗口宽度 / 高度 / 正文字号设置（设置 → AI 快报，默认 860×680、13px）；启动补生成与每日定时生成完成后自动弹出快报窗口（可在设置关闭）；快报面板自动放置在浮窗附近
-- 设置页统一风格：API 用量与 AI 快报页去掉独立外边框，与其他模块一致；关注主题改为全部平铺显示（不再内部滚动），浅色/深色主题下均使用主题配色（修复黑框/黑底）
-- 设置按钮逻辑：「应用」立即生效并关闭设置窗口；「保存」仅在设置被修改后可用（未修改置灰），保存后弹出本次修改内容摘要 toast
-- 配置新增 `news.panel_width / panel_height / font_size`（缺省自动回退，兼容旧配置）
+- P1 结构重构：死代码 -3329 行；全库迁入 `src/agentfloat` 分层包（根入口 5028→24 行）；主题/路径收敛
+- P2 交互与视觉：交互状态机（拖拽不误弹 / 贴边唤出抑制 / 点按即时反馈 / 弹性收尾）+ 弹簧动效引擎 + 环菜单三件套 + 浮球重绘（深色玻璃方案 C）+ Web 壳静默预热
+- P3 测试与瘦身：pytest 146 项（纯逻辑模块覆盖 75-100%）；onedir 打包（启动 4.3s→1.8s，裁剪 24.6MB → 141.9MB）；Web 前端 ES 模块化；安装页探测缓存（8.4s→12ms）
 
-见 `versions/v1.4.0/CHANGELOG.md`。
-
-**v1.3.0** — 2026-08-09
-
-- 安装 / 卸载 / 自动更新链路重构（参考诺丁汉警长桌游项目）：Inno Setup 按用户级安装（PrivilegesRequired=lowest，静默更新不弹 UAC）+ 卸载自动结束进程；多源检查更新（update.json + jsDelivr CDN + 国内 GitHub 代理 + Releases API）返回友好错误码；静默重装并重启 + boot 标记验证；mirror.json 自建镜像
-- 设置「关于」页新增软件更新卡片：检查更新 / 下载更新（带进度条）/ 更新并重启，打开设置自动检查一次
-- 修复深色模式 API 用量与 AI 快报设置页白框（白点采样 66.5% → 0%）；浅色模式输入框边框统一为 INPUT_BORDER 可见样式
-- 关于页整体重建：应用信息、使用教程、下载链接（GitHub Releases / 项目主页 / 个人网站）、数据路径
-- 修复 AI 快报自动生成超时崩溃：fetch_all 超时返回部分结果 + 「超时未完成」错误，不再抛异常
-
-见 `versions/v1.3.0/CHANGELOG.md`。
-
-**v1.2.1** — 2026-08-08
-
-- AI 快报面板与 Skills 辅助窗同款毛玻璃标题栏 + 精致关闭按钮；正文改为分类彩色标签卡片式排版（模型/工具/论文/产品/行业/综合）
-- 设置「AI 快报」新增关注主题编辑器：预设（价格调整/新模型发布/优秀 skills 推荐/开源项目/论文突破/行业融资/产品更新/安全事件）+ 自定义名称 + 权重 1~5 + 颜色选择；注入 AI 提示词并按权重排序，纯列表模式按主题权重排序
-- 「生成今日快报」增加加载进度条反馈
-- 设置对话框「应用/保存/取消」逻辑重构：应用=即时生效并保存、窗口保持打开；保存=生效并保存后关闭；取消=回退到最近一次已应用的主题
-- 浮窗未读角标改为精致渐变红点（去掉数字）
-
-见 `versions/v1.2.1/CHANGELOG.md`。
-
-**v1.2.0** — 2026-08-08
-
-- AI 快报：新增 `news_fetcher.py`（可插拔数据源，并发抓取 + 去重 + 分类）、`news_worker.py`（QThread 生成链路，复用本地 Agent headless 调用）、`news_panel.py`（无边框面板，日期列表 + 可点击链接）
-- 设置新增「AI 快报」Tab：启用开关、语言（中文/English/中英双语）、定时模式（仅手动/每天定时/启动补生成/两者）、条数上限、AI 摘要开关、摘要 Agent 选择、数据源勾选、通知与角标
-- 浮窗左上角未读红点角标（带数字）；生成完成托盘通知；环绕菜单「AI 快报」扇区打开面板
-- 数据纯本地：`%APPDATA%/AgentFloat/news/<日期>.json|md`，不上传
-
-见 `versions/v1.2.0/CHANGELOG.md`。
-
-**v1.1.0** — 2026-08-08
-
-- 环绕菜单扇区模块化：设置 → 交互 可自选扇区数量（4/6/8）与每个扇区的功能（启动指定 Agent、Skills 辅助窗、API 余额、设置、AI 快报预留、退出）
-- 修复“灰色覆盖层乱飞 / 点不到启动”：`QPainterPath.arcTo` 角度约定与数学角度相差 180°，改用 `_sector_path` 折线采样构造扇区路径，高亮/命中/图标完全一致
-- AI 快报功能调研完成：`docs/AI快报与多功能浮窗助手调研报告.md`（生态方案对比 + P0-P2 扩展建议 + 路线图）
-- README 全面重写：特性卡片、快捷键表、模块化菜单说明、构建/归档流程、路线图
-
-见 `versions/v1.1.0/CHANGELOG.md`。
-
-**v1.0.9** — 2026-08-08
-
-- 扇形菜单命中测试修复：改用 `mapFromGlobal`（DPI 安全），命中半径与入场/关闭动画缩放严格同步，解决“展开时点不到启动”与“灰色覆盖层乱飞”
-- Skills 辅助窗：手动触发 skill 在右侧正文完整展示触发说明，超出自动滚动
-- 扇形菜单「API 余额」：点击跳转对应 API 平台网页（已知平台自动匹配，可自定义）
-- 扇形菜单「退出」：全新收拢动画（380ms 缩小至 12% + 淡出）后退出
-
-见 `versions/v1.0.9/CHANGELOG.md`。
-
-**v1.0.8** — 2026-08-08
-
-- 环绕菜单交互升级：悬停灰显无蓝色、按下内容缩小约 7% 加深灰色（真按压感），关闭动画向中心收拢 + 淡出
-- 拖拽与菜单冲突修复：按住取消悬停展开、拖拽超阈值关闭已开菜单、拖拽结束 500ms 冷却
-- 设置界面改为顶部横向标签页：通用 / 外观 / 交互 / Skills / API 用量 / 关于
-- 默认启动方式下拉新增「自定义…」：直接选择可执行文件路径作为点击启动目标
-
-见 `versions/v1.0.8/CHANGELOG.md`。
+详见 `CHANGELOG.md`；重构方案见 `docs/v3重构方案.md`。历史版本说明见 `versions/v<版本>/`。
 
 - 修复悬停菜单消失（悬停离开不再强行关闭）与动画抽搐（防重入）；点击菜单外立即关闭 + OutBack 轻微过冲入场 + 淡出收尾
 - 翻译 skill 自动部署；新装 skill 自动触发翻译（首次跑基线，可在设置中关闭）

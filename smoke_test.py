@@ -40,22 +40,6 @@ def prepare_isolated_appdata():
     return base, cfg_dir
 
 
-def read_first_log_time(cfg_dir):
-    log = os.path.join(cfg_dir, "logs", "AgentFloat.log")
-    try:
-        with io.open(log, "r", encoding="utf-8", errors="replace") as f:
-            for line in f:
-                if line.startswith("[") and "]" in line:
-                    ts = line[1:line.index("]")]
-                    try:
-                        return time.mktime(time.strptime(ts, "%Y-%m-%d %H:%M:%S"))
-                    except ValueError:
-                        return None
-    except OSError:
-        return None
-    return None
-
-
 def scan_errors(cfg_dir):
     bad = []
     for sub in ("logs", "debug_logs"):
@@ -96,14 +80,20 @@ def main():
     t0 = time.time()
     proc = subprocess.Popen([exe], env=env, cwd=os.path.dirname(exe),
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    log_path = os.path.join(cfg_dir, "logs", "AgentFloat.log")
+    first_log_s = None
     try:
-        time.sleep(args.seconds)
+        deadline = t0 + args.seconds
+        while time.time() < deadline:
+            if first_log_s is None and os.path.isfile(log_path) \
+                    and os.path.getsize(log_path) > 0:
+                first_log_s = time.time() - t0
+            time.sleep(0.05)
         alive = proc.poll() is None
         print("[smoke] %.0fs 后进程存活: %s" % (args.seconds, alive))
 
-        first_ts = read_first_log_time(cfg_dir)
-        if first_ts:
-            print("[smoke] 启动耗时（进程启动→首条日志）: %.1fs" % (first_ts - t0))
+        if first_log_s is not None:
+            print("[smoke] 启动耗时（进程启动→首条日志写入）: %.2fs" % first_log_s)
         else:
             print("[smoke] 未读到日志（可能启动失败）")
 

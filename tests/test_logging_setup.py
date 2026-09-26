@@ -4,8 +4,6 @@ import logging
 import os
 import sys
 
-import pytest
-
 
 def _reset_agentfloat_logger():
     logger = logging.getLogger("AgentFloat")

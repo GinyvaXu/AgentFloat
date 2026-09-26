@@ -1,5 +1,20 @@
 # 更新日志
 
+## [3.0.0] - 2026-09-26
+### Added
+- **测试体系（P3）**：`tests/` 共 146 项（config / registry / API 监控 / Skills / 快讯 / 更新 / 喝水 / 环菜单几何 / WebBridge / 适配层 / FastAPI 路由 / 日志 / 本地 AI / 杂项 + 浮球交互集成），纯逻辑模块覆盖 75-100%；`pyproject.toml` 增加覆盖率配置
+- **构建冒烟脚本** `smoke_test.py`：隔离 APPDATA 运行产物，校验进程存活 + 日志无 ERROR，并输出启动耗时
+- **Web 前端 ES 模块化**：`web/js/util.js`（DOM/转义/路径/Toast）+ `web/js/install.js`（Agent 安装页独立状态）；`app.js` 改为 ES 模块入口；真机浏览器验证 4 个页面 0 console 错误
+
+### Changed
+- **打包形态升级**：默认 onedir（启动更快，`--onefile` 可选）；onedir 安全裁剪未使用组件（conda Qt 附带 Pdf/Quick/Qml/DBus/Network/Svg 等库、Qt 翻译与冗余平台插件）+ 排除 sqlite3 / cryptography / setuptools，共 **-24.6MB**
+- **实测对比**：onefile 153.5MB / 启动 4.3s → onedir 141.9MB / 启动 **1.8s**（启动耗时减半）
+- Inno Setup 适配 onedir（ISPP 条件打包，兼容 onefile）；旧版归档支持目录产物
+- **安装页性能**：Agent 探测并行化（4 个 CLI 版本查询并发）+ 5 秒 TTL 缓存 + 前端防重叠轮询；页面请求 8.4s → **12ms**（缓存命中），安装/卸载动作触发缓存失效
+- 文档同步：README（构建/测试/路线图）、TECHSTACK（打包/测试/前端行）、VERSIONING（版本历史/目录结构/发布流程）
+
+> 说明：P1–P3 为一次完整重构的三个阶段（见 `docs/v3重构方案.md`）；2.3.0 / 2.4.0 为中间阶段版本。
+
 ## [2.4.0] - 2026-09-26
 ### Added
 - **P2 交互内核重写**：新增浮球交互状态机 `ui/interaction.py`（纯逻辑可单测），统一裁决单击/悬停/长按/拖拽/贴边五路输入：

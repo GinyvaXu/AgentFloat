@@ -12,7 +12,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 </p>
 
 <p align="center">
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-v2.3.0-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.0.0-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%2010%2F11-8E44AD?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"></a>
@@ -25,7 +25,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 
 | | |
 |---|---|
-| 🪟 **毛玻璃浮窗** | iOS 风格 7 层渐变绘制，亮色 / 暗色双主题一键切换，支持自由拖拽、按压缩放、涟漪动画与贴边吸附 |
+| 🪟 **深色玻璃浮球** | 品牌渐变描边（`#0a84ff→#af52de`）+ 内部光晕 + 白色旋涡（P2 方案 C）；弹簧驱动悬停/按压/退出动效；拖拽不误弹、贴边唤出顺滑（交互状态机） |
 | 🌀 **双通道环绕菜单** | 悬停 400ms 或长按 500ms 唤出环形菜单（通道可在设置中调整），整环统一配色、灰显按压触感、向心收拢关闭动画 |
 | 🎛️ **扇区功能模块化** | 轮盘 4 / 6 / 8 扇区任选，每个扇区可自由分配：启动某 Agent、Skills 辅助窗、API 余额、设置、AI 快报、剪贴板历史、命令面板、退出 |
 | 🧩 **通用多 Agent 启动** | 点击浮窗即启动 Claude Code / Codex CLI / Pi Coding Agent / 自定义命令，右键或托盘可快速切换主 Agent，实时状态指示灯 |
@@ -97,17 +97,25 @@ python agent_float.py
 ## 🛠️ 从源码构建
 
 ```bash
-# 调试版（带控制台，自动归档被覆盖的旧版 exe 到 versions/）
-python build_debug.py
+# 测试（146 项单测 + 覆盖率）
+python -m pytest
+python -m pytest --cov --cov-report=term
 
-# 正式版（确认稳定后）
+# 调试版（默认 onedir，启动更快；自动归档旧产物到 versions/）
+python build_debug.py            # → dist/AgentFloat_debug/AgentFloat_debug.exe
+python build_debug.py --onefile  # 可选：单文件便携版 → dist/AgentFloat_debug.exe
+
+# 构建后冒烟（隔离 APPDATA：进程存活 + 日志无 ERROR + 启动耗时）
+python smoke_test.py
+
+# 正式版（确认稳定后；同样支持 --onefile）
 python build_exe.py
 
-# 安装包
+# 安装包（Inno Setup）
 python build_setup_exe.py
 ```
 
-每次构建前会**自动把旧版 exe 归档**到 `versions/v<旧版本>/dist/`；版本归档目录与构建产物仅保留在本地，不随 git 上传。
+构建前会**自动把旧版产物归档**到 `versions/v<旧版本>/dist/`；onedir 产物会做未用 Qt 组件的安全裁剪。版本归档与构建产物仅保留在本地，不随 git 上传。
 
 ## 📁 目录结构
 
@@ -140,9 +148,10 @@ AgentFloat/
 - [x] v1.2.1 — 快报体验优化：关注主题定向偏好、生成加载条、设置应用/保存重构、未读角标美化
 - [x] v1.2.2 — **效率工具**：剪贴板历史 + 自定义命令面板；吸附隐藏与环绕菜单冲突修复、按压即弹出、快报自动弹窗与面板精简、扇区图标/字体/圆点自适应防重叠、移除未读角标、自动更新链路复核
 - [x] v2.x — Web 套壳（设置 / API 用量 / AI 快报）+ Agent 安装 + DeepSeek Harness 支持
-- [ ] v2.3（进行中）— **P1 结构重构**：src 包化 + 死代码清除（-3.3k 行）+ 主题 token 收敛
-- [ ] v2.4 — **P2 交互与视觉重写**：浮球状态机 / 环菜单手感 / ProjectDock 设计语言
-- [ ] v3.0 — **P3 测试与瘦身**：pytest 单测 / onedir 打包 / 启动提速（详见 docs/v3重构方案.md）
+- [x] v2.3 — **P1 结构重构**：src 包化 + 死代码清除（-3.3k 行）+ 主题 token 收敛
+- [x] v2.4 — **P2 交互与视觉重写**：浮球状态机 / 环菜单手感 / ProjectDock 设计语言
+- [x] v3.0 — **P3 测试与瘦身**：pytest 146 项 / onedir 打包（启动 4.3s→1.8s）/ 依赖裁剪（详见 [docs/v3重构方案.md](docs/v3重构方案.md)）
+- [ ] v3.1+（候选）— pip 版 Qt 构建环境（可再省 ~38MB ICU）/ Web 多标签 / 更多效率工具
 
 > 📚 功能扩展的完整调研与方案对比见 [AI快报与多功能浮窗助手调研报告](docs/AI快报与多功能浮窗助手调研报告.md)。
 

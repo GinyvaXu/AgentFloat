@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 """Web 壳适配层测试：WebAppHandlers 状态聚合 / 配置读写 / 新闻状态 / 打开链接"""
-import pytest
-
 from agentfloat.webshell.bridge import WebBridge
 
 

@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 """AI 快报测试：URL 归一 / 去重 / 分类 / Markdown 兜底 / 落盘读取 / RSS 时间解析"""
-import json
-
 from agentfloat.services.news import fetcher as nf
 
 
