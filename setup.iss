@@ -44,7 +44,11 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 Name: "startup"; Description: "开机自动启动 AgentFloat"; GroupDescription: "启动选项:"
 
 [Files]
+#if FileExists("dist\AgentFloat\AgentFloat.exe")
+Source: "dist\AgentFloat\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+#else
 Source: "dist\AgentFloat.exe"; DestDir: "{app}"; Flags: ignoreversion
+#endif
 Source: "assets\agent_float_icon.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
 Source: "assets\agent_float_icon.png"; DestDir: "{app}\assets"; Flags: ignoreversion
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion

@@ -11,11 +11,13 @@ import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-from build_utils import archive_old_builds, read_version, write_build_version
+from build_utils import archive_old_builds, prune_onedir, read_version, write_build_version
 
 CURRENT_VERSION = read_version()
-print(f"[构建] 当前版本: v{CURRENT_VERSION}")
-print("[构建] 归档旧版 release exe...")
+ONE_FILE = "--onefile" in sys.argv     # 默认 onedir（启动更快）；--onefile 出单文件便携版
+MODE_FLAG = "--onefile" if ONE_FILE else "--onedir"
+print(f"[构建] 当前版本: v{CURRENT_VERSION}（模式: {'onefile' if ONE_FILE else 'onedir'}）")
+print("[构建] 归档旧版 release 产物...")
 archive_old_builds(CURRENT_VERSION)
 
 script = os.path.join(SCRIPT_DIR, "agent_float.py")
@@ -40,6 +42,12 @@ EXCLUDES = [
     "QtTextToSpeech", "QtSpeech", "QtLocation",
     "matplotlib", "numpy", "pandas", "scipy", "streamlit",
     "sklearn", "PIL", "IPython", "jupyter", "notebook",
+    # P3：跨平台 WebView 后端（Windows 仅用 edgechromium）+ 未用 Qt 组件
+    "webview.platforms.android", "webview.platforms.gtk",
+    "webview.platforms.qt", "webview.platforms.cocoa",
+    "webview.platforms.cef",
+    "QtWebSockets", "QtOpenGL", "QtOpenGLWidgets",
+    "QtHelp", "QtDesigner", "QtUiTools",
     # tkinter：AgentFloat 使用 Qt，不依赖 tkinter；排除可避免 PyInstaller
     # 的 pyi_rth__tkinter 运行时钩子因 Tk 数据目录不完整而在启动时崩溃
     "tkinter", "_tkinter", "Tkinter", "tcl", "tk",
@@ -59,10 +67,14 @@ HIDDEN_IMPORTS = [
     "fastapi", "uvicorn", "pydantic", "webview", "clr",
 ]
 
+# P3 裁剪：应用未使用的重量级依赖（onedir/onefile 均生效）
+for _mod in ("sqlite3", "cryptography", "setuptools", "pkg_resources"):
+    EXCLUDES.append(_mod)
+
 args = [
     script,
     "--paths", os.path.join(SCRIPT_DIR, "src"),
-    "--onefile",
+    MODE_FLAG,
     "--windowed",
     "--name", "AgentFloat",
     f"--icon={icon}",
@@ -80,5 +92,12 @@ args = [
 print(f"[构建] 开始构建正式版 (v{CURRENT_VERSION}, windowed) ...")
 PyInstaller.__main__.run(args)
 
+# P3：onedir 安全裁剪（未使用的 Qt 组件/插件）
+if not ONE_FILE:
+    prune_onedir(os.path.join(SCRIPT_DIR, "dist", "AgentFloat"))
+
 write_build_version(CURRENT_VERSION)
-print(f"\n[完成] dist/AgentFloat.exe (v{CURRENT_VERSION})")
+if ONE_FILE:
+    print(f"\n[完成] dist/AgentFloat.exe (v{CURRENT_VERSION}, onefile)")
+else:
+    print(f"\n[完成] dist/AgentFloat/AgentFloat.exe (v{CURRENT_VERSION}, onedir)")

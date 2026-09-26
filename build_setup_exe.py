@@ -22,9 +22,13 @@ def main():
     version = read_version()
     print(f"[构建] 当前版本: v{version}")
 
-    if not os.path.exists(os.path.join(BASE, "dist", "AgentFloat.exe")):
-        print("[ERROR] dist/AgentFloat.exe 不存在，请先运行 build_exe.py")
+    onedir_exe = os.path.join(BASE, "dist", "AgentFloat", "AgentFloat.exe")
+    onefile_exe = os.path.join(BASE, "dist", "AgentFloat.exe")
+    if not os.path.exists(onedir_exe) and not os.path.exists(onefile_exe):
+        print("[ERROR] 未找到 dist/AgentFloat/AgentFloat.exe（onedir）或 dist/AgentFloat.exe（onefile），请先运行 build_exe.py")
         return 1
+    if not os.path.exists(onedir_exe):
+        print("[WARN] 未找到 onedir 产物；安装包将打包 onefile 单文件版（建议使用 onedir，启动更快）")
 
     # 归档旧版 exe（含旧的 Setup.exe）
     print("[构建] 归档旧版 exe...")
