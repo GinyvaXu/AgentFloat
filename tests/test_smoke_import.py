@@ -4,6 +4,7 @@
 说明：tests/ 的完整测试体系在 P3 阶段落地；本文件用于验证 src 结构
 （pytest 配置、导入链路）处于健康状态，不依赖 Qt/网络。
 """
+import importlib
 import os
 import sys
 
@@ -13,9 +14,16 @@ if SRC not in sys.path:
 
 
 def test_core_modules_import():
-    from agentfloat.core import paths, registry, theme, version  # noqa: F401
-    from agentfloat.services.api_monitor import config as api_monitor_config  # noqa: F401
-    from agentfloat.services.skills import scanner, translations  # noqa: F401
+    for name in (
+        "agentfloat.core.paths",
+        "agentfloat.core.registry",
+        "agentfloat.core.theme",
+        "agentfloat.core.version",
+        "agentfloat.services.api_monitor.config",
+        "agentfloat.services.skills.scanner",
+        "agentfloat.services.skills.translations",
+    ):
+        importlib.import_module(name)
 
 
 def test_version_file_is_unique_source():
@@ -28,14 +36,15 @@ def test_version_file_is_unique_source():
 def test_theme_single_source():
     from agentfloat.core.theme import THEMES, get_colors
     assert set(THEMES) == {"light", "dark"}
+    # v2.4.0 起对齐 ProjectDock：强调色统一 #0a84ff（亮/暗）
     assert get_colors("dark")["ACCENT"] == (10, 132, 255)
-    assert get_colors("light")["ACCENT"] == (0, 122, 255)
+    assert get_colors("light")["ACCENT"] == (10, 132, 255)
+    assert get_colors("light")["ACCENT_STRONG"] == (0, 113, 227)
+    assert get_colors("dark")["TEXT"] == (245, 245, 247)
 
 
 def test_registry_defaults():
-    from agentfloat.core.registry import (
-        default_agents, get_primary_agent, normalize_agents,
-    )
+    from agentfloat.core.registry import get_primary_agent, normalize_agents
     agents = normalize_agents([])
     assert agents
     assert get_primary_agent(agents) is agents[0]

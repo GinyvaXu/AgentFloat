@@ -13,11 +13,12 @@
 """
 import math
 from PyQt5.QtCore import (Qt, QPointF, QRectF, QTimer, QVariantAnimation,
-                          QEasingCurve, QAbstractAnimation, pyqtSignal)
+                          QEasingCurve, pyqtSignal)
 from PyQt5.QtGui import QPainter, QColor, QPen, QFont, QPainterPath, QCursor
 from PyQt5.QtWidgets import QWidget, QApplication
 
 from agentfloat.core.theme import get_colors
+from agentfloat.ui.motion import Tokens as MotionTokens, motion, spring
 
 CLOSE_GRACE_MS = 2000   # 移出扇区后的关闭宽限期（用户指定 1~3 秒）
 RADIAL_PAD = 30        # 菜单外缘阴影边距（供主程序计算环心对齐）
@@ -55,20 +56,9 @@ class RadialMenu(QWidget):
         self._anchor_rect = None
         self._sector_cache = []    # (id, start_angle, sweep_angle)
 
-        # 入场动画：统一缩放 + 淡入（OutBack 轻微过冲，可打断）
-        self._anim = QVariantAnimation(self)
-        self._anim.setDuration(240)
-        self._anim.setEasingCurve(QEasingCurve.Linear)
-        self._anim.valueChanged.connect(self._on_anim_value)
-        self._anim.finished.connect(self._on_anim_finished)
-
-        # 关闭淡出动画
-        self._close_anim = QVariantAnimation(self)
-        self._close_anim.setDuration(170)
-        self._close_anim.setEasingCurve(QEasingCurve.OutCubic)
-        self._close_anim.valueChanged.connect(self._on_close_anim_value)
-        self._close_anim.finished.connect(self._really_hide)
-        self._close_progress = 1.0
+        # 展开/收拢：弹簧驱动（可打断、速度继承；展开轻过冲，收拢干脆）
+        self._progress_state = spring(0.0, MotionTokens.RING_OPEN)
+        self._motion_cancel = None
         self._closing = False
 
         # 点击外部检测状态
@@ -86,7 +76,7 @@ class RadialMenu(QWidget):
 
         # 光标轮询（仅用于扇区悬停高亮；关闭由宽限计时器决定）
         self._poll = QTimer(self)
-        self._poll.setInterval(100)
+        self._poll.setInterval(60)      # 60ms：磁吸高亮更跟手
         self._poll.timeout.connect(self._poll_cursor)
 
         # 关闭宽限计时器
@@ -120,13 +110,10 @@ class RadialMenu(QWidget):
             x = max(geo.left(), min(x, geo.right() - side + 1))
             y = max(geo.top(), min(y, geo.bottom() - side + 1))
         self.move(x, y)
-        self._progress = 0.0
         self._hover_idx = -1
         self._sector_cache = []
         self._close_timer.stop()
-        self._close_anim.stop()
         self._closing = False
-        self._close_progress = 1.0
         self._btn_down = False
         self._press_pos = None
         self._press_idx = -1
@@ -134,10 +121,12 @@ class RadialMenu(QWidget):
         self._press_anim.stop()
         self.show()
         self.raise_()
-        self._anim.stop()
-        self._anim.setStartValue(0.0)
-        self._anim.setEndValue(1.0)
-        self._anim.start()
+        self._progress_state.set_params(*MotionTokens.RING_OPEN)
+        if self._motion_cancel is not None:
+            self._motion_cancel()
+        self._motion_cancel = motion().animate_to(
+            self._progress_state, 1.0, self._on_spring_progress,
+            on_done=self._on_open_done)
         self._poll.start()
 
     def close_menu(self):
@@ -145,29 +134,31 @@ class RadialMenu(QWidget):
         self._close_timer.stop()
         if not self.isVisible():
             return
-        if self._close_anim.state() == QAbstractAnimation.Running:
+        if self._closing:
             return
         self._closing = True
-        self._close_anim.stop()
-        self._close_anim.setStartValue(1.0)
-        self._close_anim.setEndValue(0.0)
-        self._close_anim.start()
+        if self._motion_cancel is not None:
+            self._motion_cancel()
+            self._motion_cancel = None
+        self._progress_state.set_params(*MotionTokens.RING_CLOSE)
+        self._motion_cancel = motion().animate_to(
+            self._progress_state, 0.0, self._on_spring_progress,
+            on_done=self._really_hide)
 
-    # ── 动画 ────────────────────────────────────
-    def _on_anim_value(self, v):
+    # ── 动画（弹簧驱动）─────────────────────────
+    def _on_spring_progress(self, v):
         self._progress = float(v)
         self.update()
 
-    def _on_anim_finished(self):
+    def _on_open_done(self):
         self._progress = 1.0
-        self.update()
-
-    def _on_close_anim_value(self, v):
-        self._close_progress = float(v)
         self.update()
 
     def _really_hide(self):
         self._closing = False
+        self._motion_cancel = None
+        self._progress_state.jump(0.0)
+        self._progress = 0.0
         self.hide()
         self.closed.emit()
 
@@ -206,9 +197,8 @@ class RadialMenu(QWidget):
         # 命中半径随入场/关闭动画缩放同步，避免「灰块悬在按键之间 / 悬停错位」
         p = self.mapFromGlobal(global_pos)
         dx, dy = p.x() - c.x(), p.y() - c.y()
-        # 与绘制一致的当前缩放（入场 OutBack + 关闭收拢）
-        close_scale = 0.30 + 0.70 * self._close_progress
-        scale = (0.72 + 0.28 * self._ease_out_back(self._progress)) * close_scale
+        # 与绘制一致的当前缩放（弹簧展开/收拢，含轻过冲）
+        scale = 0.30 + 0.70 * self._progress
         if scale > 0.01:
             dx, dy = dx / scale, dy / scale
         dist = math.hypot(dx, dy)
@@ -222,6 +212,40 @@ class RadialMenu(QWidget):
         idx = int(angle // sweep)
         return idx if idx < n else -1
 
+    def _apply_magnet(self, global_pos, raw):
+        """磁吸滞回：光标贴近扇区边界时保持上一个高亮扇区（防抖/防误击）"""
+        prev = self._hover_idx
+        n = len(self._items)
+        if raw < 0 or prev < 0 or raw == prev or n == 0 or not (0 <= prev < n):
+            return raw
+        c = self._center()
+        p = self.mapFromGlobal(global_pos)
+        dx, dy = p.x() - c.x(), p.y() - c.y()
+        scale = 0.30 + 0.70 * self._progress
+        if scale > 0.01:
+            dx, dy = dx / scale, dy / scale
+        angle = (math.degrees(math.atan2(dy, dx)) + 90.0) % 360.0
+        sweep = 360.0 / n
+        margin = min(6.0, sweep * 0.18)
+        frac = angle % sweep
+        if frac < margin and prev == (raw - 1) % n:
+            return prev
+        if frac > sweep - margin and prev == (raw + 1) % n:
+            return prev
+        return raw
+
+    def _click_index(self, global_pos):
+        """点击判定：优先沿用当前高亮扇区（磁吸），环带边缘 ±14px 宽容"""
+        idx = self._sector_at(global_pos)
+        if idx < 0 and self._hover_idx >= 0:
+            c = self._center()
+            p = self.mapFromGlobal(global_pos)
+            dist = math.hypot(p.x() - c.x(), p.y() - c.y())
+            scale = max(0.01, 0.30 + 0.70 * self._progress)
+            if (self._inner - 14) <= dist / scale <= (self._outer + 14):
+                return self._hover_idx
+        return idx
+
     def _in_menu_rect(self, global_pos):
         """光标是否落在菜单窗口矩形内（DPI 安全：与浮窗同一坐标空间）"""
         return self.rect().adjusted(-6, -6, 6, 6).contains(self.mapFromGlobal(global_pos))
@@ -230,7 +254,7 @@ class RadialMenu(QWidget):
         if not self.isVisible():
             return
         pos = QCursor.pos()
-        idx = self._sector_at(pos)
+        idx = self._apply_magnet(pos, self._sector_at(pos))
         in_anchor = self._anchor_rect is not None and self._anchor_rect.contains(pos)
         in_menu = self._in_menu_rect(pos)
 
@@ -314,7 +338,7 @@ class RadialMenu(QWidget):
         if self._closing:
             event.accept()
             return
-        idx = self._sector_at(event.globalPos())
+        idx = self._click_index(event.globalPos())
         if idx < 0:
             # 中心孔区域：视为点击浮窗本身（快捷启动），由主程序处理
             c = self._center()
@@ -332,7 +356,9 @@ class RadialMenu(QWidget):
             event.accept()
             return
         self._reset_press()
-        idx = self._sector_at(event.globalPos())
+        idx = self._click_index(event.globalPos())
+        if idx < 0:
+            idx = self._press_idx
         if 0 <= idx < len(self._items):
             item = self._items[idx]
             self.close_menu()
@@ -362,17 +388,14 @@ class RadialMenu(QWidget):
         ring_bg = QColor(30, 30, 34, 240) if is_dark else QColor(250, 250, 252, 242)
         ring_border = QColor(255, 255, 255, 70) if is_dark else QColor(0, 0, 0, 42)
         text_c = QColor(*c["TEXT"])
-        accent = QColor(*c["ACCENT"])
         center_pt = self._center()
         n = len(self._items)
         if n == 0:
             return
 
-        eased = self._ease_out_back(self._progress)
-        # 关闭动画：整体向中心收拢（缩小 + 淡出）
-        close_scale = 0.30 + 0.70 * self._close_progress
-        scale = (0.72 + 0.28 * eased) * close_scale
-        fade = min(1.0, self._progress) * self._close_progress
+        # 弹簧展开/收拢：整体缩放 + 淡入淡出（progress 含轻微过冲）
+        scale = 0.30 + 0.70 * self._progress
+        fade = max(0.0, min(1.0, self._progress))
 
         painter.save()
         painter.translate(center_pt)
@@ -402,7 +425,7 @@ class RadialMenu(QWidget):
             a = -90.0 + i * sweep
             painter.drawLine(self._polar(a, self._inner), self._polar(a, self._outer))
 
-        # ── 悬停/按压扇区：中性灰高亮，无蓝无描边；按住时灰色加深 ──
+        # ── 悬停/按压扇区：中性灰高亮 + 按压品牌色微光（P2 三件套）──
         if 0 <= self._hover_idx < n:
             hp = self._sector_path(self._hover_idx)
             press = self._press_progress if self._press_idx == self._hover_idx else 0.0
@@ -413,11 +436,17 @@ class RadialMenu(QWidget):
             painter.setPen(Qt.NoPen)
             painter.setBrush(fill)
             painter.drawPath(hp)
+            if press > 0.01:
+                glow = QColor(self._items[self._hover_idx].color)
+                glow.setAlpha(int(72 * press))
+                painter.setBrush(glow)
+                painter.drawPath(hp)
 
-        # ── 图标字符 + 标签 + 品牌圆点 ──
+        # ── 图标字符 + 标签 + 品牌圆点（展开时按序错峰浮现）──
         self._sector_cache = []
         for i, item in enumerate(self._items):
             self._sector_cache.append((item.id, -90.0 + i * sweep, sweep))
+            sector_p = max(0.0, min(1.0, (self._progress - i * 0.04) / 0.72))
             mid = -90.0 + (i + 0.5) * sweep
             rad = self._outer * (0.60 if n >= 8 else 0.68)
             pt = self._polar(mid, rad)
@@ -427,13 +456,13 @@ class RadialMenu(QWidget):
             dot_pt = self._polar(mid, self._outer - 10)
             painter.setPen(Qt.NoPen)
             dot_c = QColor(item.color)
-            if hovered:
-                dot_c.setAlpha(150)
+            dot_c.setAlpha(int((150 if hovered else 255) * sector_p))
             painter.setBrush(dot_c)
-            painter.drawEllipse(QRectF(dot_pt.x() - 3.0, dot_pt.y() - 3.0, 6, 6))
+            if sector_p > 0.02:
+                painter.drawEllipse(QRectF(dot_pt.x() - 3.0, dot_pt.y() - 3.0, 6, 6))
 
-            # 按压扇区：内容向中心轻微缩小（按下去的触感）
-            content_scale = 1.0 - 0.07 * self._press_progress
+            # 按压扇区：内容向中心轻微缩小（按下去的触感）；错峰浮现
+            content_scale = (1.0 - 0.07 * self._press_progress) * (0.70 + 0.30 * sector_p)
             painter.save()
             painter.translate(pt)
             painter.scale(content_scale, content_scale)
@@ -450,15 +479,19 @@ class RadialMenu(QWidget):
                 label_font = QFont("Microsoft YaHei", 8)
                 char_rect = QRectF(pt.x() - 30, pt.y() - 36, 60, 26)
                 label_rect = QRectF(pt.x() - 52, pt.y() - 10, 104, 18)
-            painter.setPen(QColor(255, 255, 255) if hovered else text_c)
-            painter.setFont(char_font)
-            painter.drawText(char_rect, Qt.AlignCenter, item.char)
+            if sector_p > 0.02:
+                painter.setPen(QColor(255, 255, 255, int(255 * sector_p)) if hovered
+                               else QColor(text_c.red(), text_c.green(), text_c.blue(),
+                                           int(235 * sector_p)))
+                painter.setFont(char_font)
+                painter.drawText(char_rect, Qt.AlignCenter, item.char)
 
-            # 标签
-            painter.setFont(label_font)
-            painter.setPen(QColor(255, 255, 255, 235) if hovered else
-                           QColor(text_c.red(), text_c.green(), text_c.blue(), 150))
-            painter.drawText(label_rect, Qt.AlignCenter, item.label)
+                # 标签
+                painter.setFont(label_font)
+                painter.setPen(QColor(255, 255, 255, int(235 * sector_p)) if hovered else
+                               QColor(text_c.red(), text_c.green(), text_c.blue(),
+                                      int(150 * sector_p)))
+                painter.drawText(label_rect, Qt.AlignCenter, item.label)
 
             painter.restore()
 
@@ -493,12 +526,7 @@ class RadialMenu(QWidget):
     def hideEvent(self, event):
         self._poll.stop()
         self._close_timer.stop()
-        self._close_anim.stop()
+        if self._motion_cancel is not None:
+            self._motion_cancel()
+            self._motion_cancel = None
         super().hideEvent(event)
-
-    @staticmethod
-    def _ease_out_back(t, overshoot=0.9):
-        # OutBack 缓动：末端约 5% 过冲后回落（Apple 式轻回弹）
-        t -= 1.0
-        c = overshoot + 1.0
-        return 1.0 + c * (t ** 3) + overshoot * (t ** 2)

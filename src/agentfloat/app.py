@@ -155,6 +155,11 @@ def _main():
                 _log().info("正在取消 %s…", attr)
                 w.cancel()
                 w.wait(8000)
+        # 关闭 Web 壳子进程（如果存在）
+        try:
+            web_ui.shutdown()
+        except Exception as e:  # noqa: BLE001
+            _log().debug("Web 壳关闭异常: %s", e)
     app.aboutToQuit.connect(_shutdown)
 
     widget = FloatingWidget()
@@ -166,6 +171,8 @@ def _main():
     _web_loading_shown = [False]
 
     def _poll_loading():
+        # 0) Web 壳预热/回收维护（P2：预热窗口空闲回收、关闭后再预热）
+        web_ui.tick()
         # 1) dsh 启动状态（dsh 启动期间独占指示器，避免与 Web 壳互相覆盖）
         st = dsh_status()
         ph = st.get("phase") or "idle"
@@ -218,6 +225,9 @@ def _main():
     web_ui.set_base_url("http://127.0.0.1:%d" % _web_port)
     if _web_ok:
         _log().info("Web 壳后端已启动: http://127.0.0.1:%d", _web_port)
+        # ── Web 壳静默预热（P2）：后台隐藏创建窗口，打开设置/快报秒开；
+        #    长时间未使用由 web_ui.tick() 自动回收 ──
+        QTimer.singleShot(6000, web_ui.preheat)
     else:
         _log().error("Web 壳后端启动失败（端口 %d 未就绪），设置 / API 用量 / AI 快报 将不可用", _web_port)
 

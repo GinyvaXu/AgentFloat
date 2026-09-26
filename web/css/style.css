@@ -1,13 +1,13 @@
 /* ===== AgentFloat Web 壳 — Apple 风格 ===== */
 :root {
-  --accent: #007AFF;
+  --accent: #0A84FF;
   --bg: #F2F2F7;
   --surface: #FFFFFF;
   --surface2: #F7F7FA;
   --sidebar: rgba(242,242,247,0.82);
-  --text: #1C1C1E;
-  --text2: #3C3C43;
-  --hint: #8E8E93;
+  --text: #1D1D1F;
+  --text2: #6E6E73;
+  --hint: #98989D;
   --border: rgba(60,60,67,0.12);
   --input-border: #D1D1D6;
   --shadow: 0 18px 48px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.06);
@@ -24,13 +24,13 @@
   --surface: #2C2C2E;
   --surface2: #333336;
   --sidebar: rgba(44,44,46,0.85);
-  --text: #F2F2F7;
-  --text2: #EBEBF5;
+  --text: #F5F5F7;
+  --text2: #A1A1A6;
   --hint: #98989D;
   --border: rgba(255,255,255,0.10);
   --input-border: #5A5A5F;
   --shadow: 0 18px 48px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3);
-  --warn: #FF6B6B;
+  --warn: #FF453A;
   --ok: #30D158;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }

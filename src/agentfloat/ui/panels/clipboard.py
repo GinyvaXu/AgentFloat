@@ -84,7 +84,6 @@ class ClipboardPanel(QDialog):
         is_dark = self._theme == "dark"
         sf = "#%02X%02X%02X" % c["SURFACE"]
         tx = "#%02X%02X%02X" % c["TEXT"]
-        hi = "#%02X%02X%02X" % c["HINT"]
         ac = "#%02X%02X%02X" % c["ACCENT"]
         bd = "#%02X%02X%02X" % c["SEPARATOR"]
         card = "#333336" if is_dark else "#FFFFFF"

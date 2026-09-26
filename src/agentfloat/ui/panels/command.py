@@ -32,7 +32,6 @@ PRESETS = [
 
 def run_command(cmd_entry):
     """启动一条自定义命令。返回 (ok, 错误信息)。"""
-    name = (cmd_entry.get("name") or "命令").strip() or "命令"
     raw = (cmd_entry.get("command") or "").strip()
     if not raw:
         return False, "命令为空"
@@ -182,7 +181,6 @@ class CommandPanel(QDialog):
         is_dark = self._theme == "dark"
         sf = "#%02X%02X%02X" % c["SURFACE"]
         tx = "#%02X%02X%02X" % c["TEXT"]
-        hi = "#%02X%02X%02X" % c["HINT"]
         ac = "#%02X%02X%02X" % c["ACCENT"]
         bd = "#%02X%02X%02X" % c["SEPARATOR"]
         card = "#333336" if is_dark else "#FFFFFF"

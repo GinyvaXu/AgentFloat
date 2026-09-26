@@ -50,6 +50,9 @@ from agentfloat.ui.panels.clipboard import ClipboardHistory, ClipboardPanel
 from agentfloat.ui.panels.command import CommandPanel
 from agentfloat.ui.panels.skills import SkillsPanel
 from agentfloat.ui.panels.water import WaterPanel, WaterReminderPopup
+from agentfloat.ui.interaction import Actions as InteractionActions, BallInteraction
+from agentfloat.ui.motion import Tokens as MotionTokens, motion, spring
+from agentfloat.ui.toast import LaunchToast
 from agentfloat.ui.radial_menu import RadialMenu, RadialMenuItem, RADIAL_PAD
 from agentfloat.core.autostart import is_auto_start_enabled, toggle_auto_start
 from agentfloat.webshell import window as web_ui
@@ -67,8 +70,6 @@ class FloatingWidget(QWidget):
     news_done   = pyqtSignal(str)
     news_failed = pyqtSignal(str)
     water_reminded = pyqtSignal(str)
-
-    CLICK_THRESHOLD = 4
 
     def __init__(self):
         super().__init__()
@@ -89,15 +90,17 @@ class FloatingWidget(QWidget):
         self._radial_cfg = copy.deepcopy(self.config.get("radial_menu") or DEFAULT_RADIAL_MENU)
         self._skills_cfg = copy.deepcopy(self.config.get("skills") or DEFAULT_SKILLS)
         self._radial_menu = None
-        self._long_press_fired = False
         self._api_last_results = []
 
         # 拖拽状态
         self._drag_active = False
         self._drag_origin = QPoint()
         self._window_origin = QPoint()
-        # 拖拽结束后的悬停冷却截止时间戳（monotonic 秒）
-        self._drag_cooldown_until = 0.0
+        # 交互状态机（P2）：单击/悬停/长按/拖拽/贴边统一裁决
+        self._interaction = BallInteraction(self._radial_cfg)
+        # 启动反馈气泡（P2 点按即时反馈）
+        self._launch_toast = None
+        self.launch_requested.connect(self._show_launch_feedback)
         # 退出动画中，拒绝所有交互
         self._quitting = False
 
@@ -483,10 +486,10 @@ class FloatingWidget(QWidget):
         # 环绕菜单触发定时器（悬停 / 长按双通道）
         self._hover_open_timer = QTimer(self)
         self._hover_open_timer.setSingleShot(True)
-        self._hover_open_timer.timeout.connect(lambda: self._open_radial_menu("hover"))
+        self._hover_open_timer.timeout.connect(self._on_hover_open_fired)
         self._long_press_timer = QTimer(self)
         self._long_press_timer.setSingleShot(True)
-        self._long_press_timer.timeout.connect(lambda: self._open_radial_menu("long_press"))
+        self._long_press_timer.timeout.connect(self._on_long_press_fired)
 
         # 尺寸动画
         self._size_anim = QPropertyAnimation(self, b"widget_size_prop")
@@ -780,15 +783,15 @@ class FloatingWidget(QWidget):
         detector.setStyleSheet("background: transparent;")
         detector.setMouseTracking(True)
 
-        # 检测条：沿屏幕边缘 6px 宽的细条（加宽提升命中率，解决“很难点击打开”）
+        # 检测条：沿屏幕边缘 10px 宽（P2 由 6px 加宽，命中更容易）
         if edge == "right":
-            detector.setGeometry(g.right() - 6, self.pos().y() - 6, 6, sz + 12)
+            detector.setGeometry(g.right() - 10, self.pos().y() - 12, 10, sz + 24)
         elif edge == "left":
-            detector.setGeometry(g.left(), self.pos().y() - 6, 6, sz + 12)
+            detector.setGeometry(g.left(), self.pos().y() - 12, 10, sz + 24)
         elif edge == "top":
-            detector.setGeometry(self.pos().x() - 6, g.top(), sz + 12, 6)
+            detector.setGeometry(self.pos().x() - 12, g.top(), sz + 24, 10)
         else:  # bottom
-            detector.setGeometry(self.pos().x() - 6, g.bottom() - 6, sz + 12, 6)
+            detector.setGeometry(self.pos().x() - 12, g.bottom() - 10, sz + 24, 10)
 
         detector.show()
         self._edge_detector = detector
@@ -862,6 +865,7 @@ class FloatingWidget(QWidget):
             target = g.bottom() - s - 2
 
         self._hidden_now = False
+        self._interaction.notify_reveal(time.monotonic())
         self._animate_slide(target, edge)
         if self._api_badge:
             self._api_badge.show()
@@ -896,6 +900,7 @@ class FloatingWidget(QWidget):
             self._slide_anim.stop()
         self._hide_timer.stop()
         self._hidden_now = False
+        self._interaction.notify_reveal(time.monotonic())
         # 弹出后移除边缘检测器，避免盖住浮窗拦截按压/拖拽
         self._remove_edge_detector()
         if self._api_badge:
@@ -942,6 +947,7 @@ class FloatingWidget(QWidget):
         local_pos = QCursor.pos() - self.pos()
         was = self.is_hovered
         self.is_hovered = self.rect().contains(local_pos)
+        now = time.monotonic()
 
         # 吸附模式下自动管理显示/隐藏
         menu_open = self._radial_menu is not None and self._radial_menu.isVisible()
@@ -958,42 +964,44 @@ class FloatingWidget(QWidget):
         hover_size = int(self.base_size * HOVER_SCALE)
         if self.is_hovered and not was:
             _log().debug("悬停进入: local=%s size=%d", local_pos, hover_size)
+            self._interaction.hover_enter(now)
             self._animate_size(hover_size)
-            self._maybe_start_hover_open()
+            # 悬停展开（状态机裁决：按压/拖拽/菜单打开期间与三类冷却窗口内均不启动）
+            if self._interaction.hover_open_allowed(now):
+                self._hover_open_timer.start(self._interaction.hover_delay_ms)
         elif not self.is_hovered and was:
             _log().debug("悬停离开")
+            self._interaction.hover_leave(now)
             self._animate_size(self.base_size)
             self._hover_open_timer.stop()
             # 环绕菜单打开时不立即关闭：由菜单自身的宽限/点击外部逻辑处理
             if self._radial_menu is None or not self._radial_menu.isVisible():
                 self._close_radial_menu()
 
-    # ── 环绕菜单（悬停 / 长按双通道）──────────────────
-    def _maybe_start_hover_open(self):
-        if not self._radial_cfg.get("enabled", True):
-            return
-        # 拖拽中或冷却期内不启动悬停展开
-        if self._drag_active or time.monotonic() < self._drag_cooldown_until:
-            return
-        mode = self._radial_cfg.get("trigger_mode", "both")
-        if mode in ("hover", "both"):
-            self._hover_open_timer.start(int(self._radial_cfg.get("hover_delay_ms", 400)))
+    # ── 环绕菜单（悬停 / 长按双通道，状态机裁决）────────
+    def _on_hover_open_fired(self):
+        acts = self._interaction.hover_timer_fired(time.monotonic())
+        if InteractionActions.OPEN_MENU in acts:
+            self._open_radial_menu("hover")
+
+    def _on_long_press_fired(self):
+        acts = self._interaction.long_press_fired(time.monotonic())
+        if InteractionActions.OPEN_MENU in acts:
+            self._open_radial_menu("long_press")
 
     def _open_radial_menu(self, source):
         self._hover_open_timer.stop()
         self._long_press_timer.stop()
         if not self._radial_cfg.get("enabled", True):
             return
-        # 防御：拖拽中或冷却期内绝不弹菜单
-        if self._drag_active or time.monotonic() < self._drag_cooldown_until:
+        # 防御：拖拽中绝不弹菜单（冷却窗口由状态机裁决）
+        if self._drag_active:
             return
         # 吸附隐藏状态：先弹出到完全可见位置，避免菜单圆心在屏幕外
         if self._snapped and self._hidden_now:
             self._reveal_now()
         # 菜单打开期间禁止自动缩回
         self._hide_timer.stop()
-        if source == "long_press":
-            self._long_press_fired = True
         items = self._build_radial_items()
         if self._radial_menu is None:
             self._radial_menu = RadialMenu()
@@ -1023,6 +1031,7 @@ class FloatingWidget(QWidget):
                 self._snap_menu_restore = self.pos()
                 self.move(int(cx - self.width() / 2.0), int(cy - self.height() / 2.0))
                 center = self.geometry().center()
+        self._interaction.menu_opened(time.monotonic())
         # 顶层窗口 geometry() 即全局坐标，直接作为菜单圆心（避免 mapToGlobal 高分屏偏移）
         self._radial_menu.open_at(
             center,
@@ -1032,6 +1041,7 @@ class FloatingWidget(QWidget):
             self._api_badge.hide()
 
     def _close_radial_menu(self):
+        self._interaction.menu_closed(time.monotonic())
         if self._radial_menu is not None:
             self._radial_menu.close_menu()
         self._restore_snap_position()
@@ -1040,6 +1050,7 @@ class FloatingWidget(QWidget):
 
     def _on_radial_menu_closed(self):
         # 菜单自行关闭（宽限/点击外部）后恢复余额角标
+        self._interaction.menu_closed(time.monotonic())
         self._restore_snap_position()
         self._maybe_arm_hide()
         self._restore_balance_badge()
@@ -1500,25 +1511,20 @@ class FloatingWidget(QWidget):
         self._close_radial_menu()
         if self._api_badge:
             self._api_badge.hide()
+        if self._launch_toast is not None:
+            self._launch_toast.hide()
         self._hover_timer.stop()
         self._hover_open_timer.stop()
         self._long_press_timer.stop()
-        # 收拢：整体缩小到 12% + 窗口淡出，结束后发出退出信号
-        anim = QPropertyAnimation(self, b"press_scale")
-        anim.setDuration(380)
-        anim.setEasingCurve(QEasingCurve.InCubic)
-        anim.setStartValue(self._press_scale)
-        anim.setEndValue(0.12)
-        anim.finished.connect(self.quit_requested.emit)
-        self._quit_anim = anim  # 保持引用
-        anim.start()
-        fade = QPropertyAnimation(self, b"windowOpacity")
-        fade.setDuration(380)
-        fade.setEasingCurve(QEasingCurve.InCubic)
-        fade.setStartValue(self.windowOpacity())
-        fade.setEndValue(0.0)
-        self._quit_fade = fade
-        fade.start()
+        # 弹性收拢：整体缩小 + 窗口淡出（弹簧驱动，收尾不再生硬）
+        base_opacity = self.windowOpacity()
+        state = spring(self._press_scale, MotionTokens.QUIT)
+
+        def _apply(v):
+            self._press_scale = v
+            self.setWindowOpacity(max(0.0, base_opacity * min(1.0, v / 0.9)))
+
+        motion().animate_to(state, 0.08, _apply, on_done=self.quit_requested.emit)
 
     # ── 绘制（7 层玻璃 + 涟漪 + 指示灯）─────────────────
     def paintEvent(self, event):
@@ -1646,6 +1652,7 @@ class FloatingWidget(QWidget):
     def mousePressEvent(self, event):
         if self._quitting:
             return
+        now = time.monotonic()
         if event.button() == Qt.LeftButton:
             # 吸附隐藏状态：按压即先弹出，保证点击/拖拽落在可见区域
             if self._snapped and self._hidden_now:
@@ -1656,6 +1663,7 @@ class FloatingWidget(QWidget):
             self._drag_active = False
             # 按住即取消悬停展开，避免拖拽时误弹菜单
             self._hover_open_timer.stop()
+            self._interaction.press(now)
             # 按压反馈
             self.is_pressed = True
             self._press_anim.stop()
@@ -1668,16 +1676,16 @@ class FloatingWidget(QWidget):
             self._context_menu()
             return
 
-        # 长按唤醒环绕菜单（双通道，可在设置中调整）
-        mode = self._radial_cfg.get("trigger_mode", "both")
-        if self._radial_cfg.get("enabled", True) and mode in ("long_press", "both"):
-            self._long_press_timer.start(int(self._radial_cfg.get("long_press_delay_ms", 500)))
+        # 长按唤醒环绕菜单（双通道；是否可用由状态机裁决）
+        if self._interaction.should_arm_long_press():
+            self._long_press_timer.start(self._interaction.long_press_delay_ms)
 
     def mouseMoveEvent(self, event):
         if self._quitting or not (event.buttons() & Qt.LeftButton):
             return
         delta = (event.globalPos() - self._drag_origin).manhattanLength()
-        if not self._drag_active and delta > self.CLICK_THRESHOLD:
+        acts = self._interaction.move(delta, time.monotonic())
+        if InteractionActions.BEGIN_DRAG in acts:
             self._drag_active = True
             self._long_press_timer.stop()
             # 拖拽开始：取消悬停展开，并关闭已打开的环绕菜单
@@ -1694,17 +1702,9 @@ class FloatingWidget(QWidget):
         if self._quitting:
             return
         if event.button() == Qt.LeftButton:
-            was_dragging = self._drag_active
-            if not was_dragging:
-                if self._long_press_fired:
-                    # 长按已触发环绕菜单，本次释放不再启动
-                    self._long_press_fired = False
-                else:
-                    # 点击 → 涟漪 + 启动主 Agent
-                    self._start_ripple(event.pos())
-                    self.launch_requested.emit()
-            else:
-                # 拖拽结束 → 保存位置 + 检测吸附
+            acts = self._interaction.release(time.monotonic())
+            if InteractionActions.END_DRAG in acts:
+                # 拖拽结束 → 保存位置 + 检测吸附（状态机已启动 400ms 悬停冷却）
                 self.config["window_x"] = self.pos().x()
                 self.config["window_y"] = self.pos().y()
                 self._check_snap()
@@ -1712,13 +1712,26 @@ class FloatingWidget(QWidget):
                 self.config["window_x"] = self.pos().x()
                 self.config["window_y"] = self.pos().y()
                 save_config(self.config)
-                # 拖拽结束后 500ms 内不响应悬停，避免松手瞬间误弹菜单
-                self._drag_cooldown_until = time.monotonic() + 0.5
-                _log().debug("拖拽结束，悬停冷却 500ms")
+                _log().debug("拖拽结束，悬停冷却 400ms")
+            elif InteractionActions.CLICK in acts:
+                # 点击 → 涟漪 + 启动主 Agent
+                self._start_ripple(event.pos())
+                self.launch_requested.emit()
             self._drag_active = False
             # 同步 API 面板位置
             self._sync_api_panel_position()
         self.is_pressed = False
+
+    def _show_launch_feedback(self):
+        """点按即时反馈：浮球旁弹出「启动中」气泡"""
+        try:
+            primary = get_primary_agent(self._agents)
+            name = primary.get("name", "主 Agent") if primary else "主 Agent"
+            if self._launch_toast is None:
+                self._launch_toast = LaunchToast()
+            self._launch_toast.show_for(self, "启动中 · %s" % name, self.theme)
+        except Exception as e:  # noqa: BLE001
+            _log().debug("启动反馈气泡显示失败: %s", e)
 
     def _start_ripple(self, pos):
         self._ripple_pos = pos
@@ -1776,6 +1789,8 @@ class FloatingWidget(QWidget):
             self._news_worker.wait(3000)
         if self._api_badge:
             self._api_badge.close()
+        if self._launch_toast is not None:
+            self._launch_toast.close()
         pos = self.pos()
         self.config["window_x"] = pos.x()
         self.config["window_y"] = pos.y()
@@ -1802,6 +1817,7 @@ class FloatingWidget(QWidget):
         if new_cfg.get("radial_menu") is not None:
             self._radial_cfg = copy.deepcopy(new_cfg["radial_menu"])
             self.config["radial_menu"] = self._radial_cfg
+            self._interaction.configure(self._radial_cfg)
         if new_cfg.get("skills") is not None:
             self._skills_cfg = copy.deepcopy(new_cfg["skills"])
             self.config["skills"] = self._skills_cfg
