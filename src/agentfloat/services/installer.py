@@ -15,11 +15,13 @@
 """
 from __future__ import annotations
 
+import copy
 import logging
 import shutil
 import subprocess
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger("AgentFloat.AgentInstaller")
 
@@ -160,34 +162,62 @@ def _command_version(cmd):
         return None
 
 
-def detect_all():
-    """返回所有 Agent 的当前状态（命令存在 / 已装版本）。"""
-    result = []
-    for spec in AGENT_INSTALLERS:
-        aid = spec["id"]
-        cmd = spec["command"]
-        path = _which(cmd)
-        ver = _command_version(cmd) or _installed_version(spec["package"]) or ""
-        st = _get_status(aid)
-        result.append({
-            "id": aid,
-            "name": spec["name"],
-            "package": spec["package"],
-            "command": cmd,
-            "icon_color": spec["icon_color"],
-            "icon_char": spec["icon_char"],
-            "description": spec["description"],
-            "homepage": spec["homepage"],
-            "found": bool(path),
-            "path": path or "",
-            "version": ver,
-            "phase": st.get("phase", "idle"),
-            "action": st.get("action", ""),
-            "message": st.get("message", ""),
-            "logs": st.get("logs", []),
-            "busy": st.get("phase") == "running",
-        })
-    return result
+def _detect_one(spec):
+    """探测单个 Agent 的当前状态（供并行调用）"""
+    aid = spec["id"]
+    cmd = spec["command"]
+    path = _which(cmd)
+    ver = _command_version(cmd) or _installed_version(spec["package"]) or ""
+    st = _get_status(aid)
+    return {
+        "id": aid,
+        "name": spec["name"],
+        "package": spec["package"],
+        "command": cmd,
+        "icon_color": spec["icon_color"],
+        "icon_char": spec["icon_char"],
+        "description": spec["description"],
+        "homepage": spec["homepage"],
+        "found": bool(path),
+        "path": path or "",
+        "version": ver,
+        "phase": st.get("phase", "idle"),
+        "action": st.get("action", ""),
+        "message": st.get("message", ""),
+        "logs": st.get("logs", []),
+        "busy": st.get("phase") == "running",
+    }
+
+
+_DETECT_TTL_S = 5.0                       # 结果缓存窗口（Web 页 1.5s 轮询会被合并）
+_detect_cache = {"ts": 0.0, "data": None}
+_detect_lock = threading.Lock()
+
+
+def invalidate_detect_cache():
+    """安装/卸载动作开始后调用：让下一次探测立即反映最新状态"""
+    with _detect_lock:
+        _detect_cache["ts"] = 0.0
+        _detect_cache["data"] = None
+
+
+def detect_all(force=False):
+    """返回所有 Agent 的当前状态。
+
+    P3 优化：并行探测（4 个 CLI 版本查询并发）+ 5 秒 TTL 缓存，
+    避免 Web 安装页轮询造成请求堆积（原先单次约 7-8 秒）。
+    """
+    now = time.time()
+    with _detect_lock:
+        if (not force) and _detect_cache["data"] is not None \
+                and now - _detect_cache["ts"] < _DETECT_TTL_S:
+            return copy.deepcopy(_detect_cache["data"])
+    with ThreadPoolExecutor(max_workers=max(2, len(AGENT_INSTALLERS))) as ex:
+        result = list(ex.map(_detect_one, AGENT_INSTALLERS))
+    with _detect_lock:
+        _detect_cache["ts"] = time.time()
+        _detect_cache["data"] = result
+    return copy.deepcopy(result)
 
 
 def _registry_args():
@@ -261,6 +291,7 @@ def install_agent(aid, action="install"):
             _append_log(aid, "错误: npm 退出码 %s" % proc.returncode)
 
     threading.Thread(target=_run, daemon=True, name="agent-install-%s" % aid).start()
+    invalidate_detect_cache()          # 让安装页下一次轮询立即看到 running 状态
     return True, "已开始安装"
 
 
@@ -310,6 +341,7 @@ def uninstall_agent(aid):
             _append_log(aid, "错误: npm 退出码 %s" % proc.returncode)
 
     threading.Thread(target=_run, daemon=True, name="agent-uninstall-%s" % aid).start()
+    invalidate_detect_cache()          # 让安装页下一次轮询立即看到 running 状态
     return True, "已开始卸载"
 
 

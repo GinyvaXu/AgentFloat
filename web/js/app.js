@@ -1,7 +1,14 @@
 /**
  * app.js — AgentFloat Web 控制台（设置 / API 用量 / AI 快报）
  * 数据流：配置以 JSON 形式在浏览器内编辑 → PUT /api/config 持久化并应用到浮窗。
+ * P3：拆分 ES Module —— 工具函数在 util.js，Agent 安装页在 install.js。
  */
+import { $, $$, esc, getPath, setPath, num, deep, toast } from "./util.js";
+import {
+  renderInstallPage, leaveInstallPage, refreshInstall,
+  installAgent, uninstallAgent, toggleInstallLog,
+} from "./install.js";
+
 (function () {
   "use strict";
 
@@ -13,24 +20,6 @@
   let version = "";
   let apiState = { results: [], testing: {}, error: "" };
   let newsState = { report: null, dates: [], generating: false, phase: "" };
-
-  // ── 工具 ────────────────────────────────────────
-  const $ = (s, r) => (r || document).querySelector(s);
-  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
-  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const getPath = (o, p) => p.split(".").reduce((a, k) => (a == null ? undefined : a[k]), o);
-  const setPath = (o, p, v) => { const ks = p.split("."); let t = o; for (let i = 0; i < ks.length - 1; i++) { if (t[ks[i]] == null || typeof t[ks[i]] !== "object") t[ks[i]] = {}; t = t[ks[i]]; } t[ks[ks.length - 1]] = v; };
-  const num = (v, d) => { const n = parseFloat(v); return isNaN(n) ? (d || 0) : n; };
-  const deep = (o) => JSON.parse(JSON.stringify(o));
-
-  function toast(msg, kind) {
-    const wrap = $("#toastWrap");
-    const t = document.createElement("div");
-    t.className = "toast " + (kind || "ok");
-    t.textContent = msg;
-    wrap.appendChild(t);
-    setTimeout(() => { t.classList.add("out"); setTimeout(() => t.remove(), 320); }, 2600);
-  }
 
   // ── 配置绑定 ────────────────────────────────────
   function bindRead(el) {
@@ -116,6 +105,7 @@
   // ── 页面导航 ────────────────────────────────────
   function goPage(p) {
     page = p;
+    if (p !== "install") leaveInstallPage();
     $$("#nav .nav-item").forEach((a) => a.classList.toggle("active", a.dataset.page === p));
     ["settings", "install", "api", "news"].forEach((id) => $("#page-" + id).classList.toggle("hidden", id !== p));
     $("#pageTitle").textContent = { settings: "设置", install: "Agent 安装", api: "API 用量", news: "AI 快报" }[p];
@@ -283,64 +273,6 @@
       renderAgents($("#settingsContent"));
     });
     $("#modalBox [data-close]").addEventListener("click", closeModal);
-  }
-
-  // ── Agent 安装页 ──────────────────────────────────
-  let installState = { agents: [], timer: null, expanding: null };
-  function renderInstallPage() {
-    const el = $("#installContent");
-    el.innerHTML = '<div class="desc" style="padding:6px 2px 10px">检测本机 Agent 安装情况，支持一键安装 / 升级 / 卸载（npm 全局安装，国内镜像优先自动回退）。</div><div id="installList">加载中…</div>';
-    refreshInstall();
-    if (installState.timer) clearInterval(installState.timer);
-    installState.timer = setInterval(() => {
-      if (page !== "install") { clearInterval(installState.timer); installState.timer = null; return; }
-      refreshInstall(true);
-    }, 1500);
-  }
-  function installCard(a) {
-    const busy = a.busy || a.phase === "running";
-    const ver = a.version ? "v" + esc(a.version) : "未安装";
-    const statusTag = a.found
-      ? '<span class="tag blue">已安装</span>'
-      : '<span class="tag gray">未安装</span>';
-    let actionBtns = "";
-    if (busy) {
-      actionBtns = '<button class="btn sm" disabled>处理中…</button>';
-    } else if (a.found) {
-      actionBtns =
-        '<button class="btn sm" onclick="App.installAgent(\'' + a.id + '\',\'upgrade\')">升级</button>' +
-        '<button class="btn sm danger" onclick="App.uninstallAgent(\'' + a.id + '\')">卸载</button>';
-    } else {
-      actionBtns = '<button class="btn sm primary" onclick="App.installAgent(\'' + a.id + '\',\'install\')">安装</button>';
-    }
-    const phaseMsg = (a.phase === "running") ? '<div class="desc" style="color:#4D6BFE">' + esc(a.message || "处理中…") + "</div>" :
-      (a.phase === "error" ? '<div class="desc" style="color:#FF5F56">' + esc(a.message || "操作失败") + "</div>" :
-      (a.phase === "done" ? '<div class="desc" style="color:#30D158">' + esc(a.message || "完成") + "</div>" : ""));
-    const logsOpen = installState.expanding === a.id;
-    const logBox = logsOpen
-      ? '<pre class="install-log">' + esc((a.logs || []).join("\n")) + "</pre>" +
-        '<button class="btn sm" onclick="App.toggleInstallLog(\'' + a.id + '\')">收起日志</button>'
-      : (a.logs && a.logs.length ? '<button class="btn sm" onclick="App.toggleInstallLog(\'' + a.id + '\')">查看日志（' + a.logs.length + " 行）</button>" : "");
-    return '<div class="agent-card">' +
-      '<div class="agent-ico" style="background:' + esc(a.icon_color || "#5B8DEF") + '">' + esc(a.icon_char || "A") + "</div>" +
-      '<div class="agent-info">' +
-      '<div class="agent-name">' + esc(a.name) + " " + statusTag + "</div>" +
-      '<div class="agent-cmd">' + esc(a.package) + " · " + ver + "</div>" +
-      '<div class="agent-cmd">' + esc(a.description || "") + "</div>" + phaseMsg +
-      "</div>" +
-      '<div class="agent-actions">' + actionBtns + "</div>" +
-      "</div>" + (logBox ? '<div style="margin:0 0 8px 0">' + logBox + "</div>" : "");
-  }
-  async function refreshInstall(silent) {
-    const el = $("#installList");
-    if (!el) return;
-    try {
-      const resp = await API.api("/api/agent_install/status");
-      installState.agents = resp.agents || [];
-      el.innerHTML = installState.agents.map(installCard).join("");
-    } catch (e) {
-      if (!silent) el.innerHTML = '<div class="desc" style="color:#FF5F56">加载失败：' + esc(e.message) + "</div>";
-    }
   }
 
   // ── 环绕菜单 ──
@@ -791,22 +723,9 @@
     editAgent: (i) => agentModal(i),
     delAgent: (i) => { if (confirm("确定删除 Agent「" + cfg.agents[i].name + "」？")) { cfg.agents.splice(i, 1); refreshDirty(); renderAgents($("#settingsContent")); } },
     openDsh: () => API.api("/api/open_url", { method: "POST", body: { url: "http://127.0.0.1:3080" } }).catch(() => toast("请先启动 DeepSeek Harness", "err")),
-    installAgent: async (id, action) => {
-      try {
-        const r = await API.api("/api/agent_install/install", { method: "POST", body: { id: id, action: action } });
-        toast(r.message || "已开始", "ok");
-      } catch (e) { toast("操作失败：" + e.message, "err"); }
-      refreshInstall(true);
-    },
-    uninstallAgent: async (id) => {
-      if (!confirm("确定卸载该 Agent 吗？")) return;
-      try {
-        const r = await API.api("/api/agent_install/uninstall", { method: "POST", body: { id: id } });
-        toast(r.message || "已开始卸载", "ok");
-      } catch (e) { toast("卸载失败：" + e.message, "err"); }
-      refreshInstall(true);
-    },
-    toggleInstallLog: (id) => { installState.expanding = installState.expanding === id ? null : id; refreshInstall(true); },
+    installAgent: installAgent,
+    uninstallAgent: uninstallAgent,
+    toggleInstallLog: toggleInstallLog,
     runAiServices: () => API.api("/api/run_ai_services", { method: "POST", body: { auto: false } }).then(() => toast("已发起本地 AI 自检服务", "ok")).catch((e) => toast("启动失败：" + e.message, "err")),
     checkUpdate: () => API.api("/api/check_update", { method: "POST" }).then(() => toast("已发起检查更新", "ok")).catch((e) => toast("检查失败：" + e.message, "err")),
     addTimer: () => timerModal(null),
