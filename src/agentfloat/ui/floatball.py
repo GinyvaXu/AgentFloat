@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """AgentFloat — 浮球主窗口（绘制 / 交互 / 环绕菜单托管 / 面板调度）
 
-P2 计划：交互状态机、贴边吸附逻辑将从此模块拆出为独立可单测模块；
-绘制走三态 pixmap 预渲染 + 脏区重绘。
+P2：交互裁决已抽到 ui/interaction.py（状态机）；绘制走三态 pixmap
+预渲染 + 固定窗口位图缩放（悬停/按压动画不重建掩码与缓存）。
 """
 import copy
 import ctypes
+import math
 import os
 import subprocess
 import time
@@ -16,7 +17,7 @@ from PyQt5.QtCore import (
     pyqtSignal, pyqtProperty, QRect, QRectF,
 )
 from PyQt5.QtGui import (
-    QPainter, QBrush, QColor, QRadialGradient, QLinearGradient, QPen, QFont,
+    QPainter, QBrush, QColor, QRadialGradient, QLinearGradient, QPen,
     QPixmap, QRegion, QCursor, QPainterPath,
 )
 from PyQt5.QtWidgets import QApplication, QMenu, QMessageBox, QWidget
@@ -24,15 +25,11 @@ from PyQt5.QtWidgets import QApplication, QMenu, QMessageBox, QWidget
 from agentfloat.core.config import load_config, save_config
 from agentfloat.core.launcher import launch_agent
 from agentfloat.core.logging_setup import _log
-from agentfloat.core.paths import ICO_PATH, PNG_PATH
 from agentfloat.core.registry import (
     DEFAULT_RADIAL_MENU, DEFAULT_SKILLS, find_agent, get_primary_agent,
     normalize_agents,
 )
-from agentfloat.core.theme import (
-    CORNER_RADIUS, DEFAULT_SIZE, FONT_FAMILY, HOVER_SCALE, PRESS_SCALE,
-    get_colors,
-)
+from agentfloat.core.theme import DEFAULT_SIZE, HOVER_SCALE, PRESS_SCALE, get_colors
 from agentfloat.services.api_monitor.badge import ApiBalanceBadge
 from agentfloat.services.api_monitor.config import DEFAULTS as API_MONITOR_DEFAULTS
 from agentfloat.services.api_monitor.fetcher import serialize_results
@@ -56,6 +53,9 @@ from agentfloat.ui.toast import LaunchToast
 from agentfloat.ui.radial_menu import RadialMenu, RadialMenuItem, RADIAL_PAD
 from agentfloat.core.autostart import is_auto_start_enabled, toggle_auto_start
 from agentfloat.webshell import window as web_ui
+
+# ── 浮球窗口几何（P2：固定窗口 + 位图缩放）──
+BALL_PAD = 9          # 窗口四周留白（容纳阴影与微光）
 
 
 class FloatingWidget(QWidget):
@@ -83,7 +83,6 @@ class FloatingWidget(QWidget):
         self.is_pressed = False
         self.base_size = self.config.get("widget_size", DEFAULT_SIZE)
         self.current_size = self.base_size
-        self.icon_pixmap = None
 
         # ── 多 Agent / 环绕菜单 ──
         self._agents = normalize_agents(self.config.get("agents"))
@@ -104,8 +103,10 @@ class FloatingWidget(QWidget):
         # 退出动画中，拒绝所有交互
         self._quitting = False
 
-        # 按压缩放 (0.0 ~ 1.0，1.0 = 正常)
-        self._press_scale = 1.0
+        # 按压缩放视觉（P2：弹簧驱动，仅重绘不改变窗口几何）
+        self._visual_scale = 1.0
+        self._scale_state = spring(1.0, MotionTokens.PRESS)
+        self._scale_cancel = None
         # 涟漪 (0.0 ~ 1.0)
         self._ripple_progress = 0.0
         self._ripple_pos = QPoint()
@@ -118,7 +119,6 @@ class FloatingWidget(QWidget):
         self._snap_edge = ""
         self._snap_menu_restore = None   # 打开环绕菜单时的临时移位（关闭菜单后恢复）
         self._hidden_now = False   # 当前是否处于“滑出屏幕外”的隐藏位
-        self._visible_offset = 0  # 完全显示时的屏幕坐标
         self._hidden_offset = 0   # 隐藏时的偏移
         self._slide_anim = None   # 滑动动画引用（防 GC + 可中断）
         self._hide_timer = QTimer(self)
@@ -173,108 +173,129 @@ class FloatingWidget(QWidget):
         if self._news_cfg.get("enabled"):
             self._news_check_timer.start()
 
-        # 预缓存绘制资源
+        # 预缓存绘制资源（三态位图 + 几何）
         self._cache = {}
 
-        self._load_icon()
         self._setup_ui()
         self._apply_opacity()
         self._restore_position()
-        self._build_paint_cache()
+        self._render_pixmaps()
 
-    def _load_icon(self):
-        for p in (PNG_PATH, ICO_PATH):
-            pix = QPixmap(p)
-            if not pix.isNull():
-                self.icon_pixmap = pix
-                return
-        self.icon_pixmap = None
+    # ── 窗口几何（P2：固定窗口 + 位图缩放，动画不再重建掩码/缓存）──
+    def _window_side(self):
+        """窗口边长 = 悬停最大球径 + 两侧留白（容纳阴影与微光）"""
+        return int(math.ceil(self.current_size * max(HOVER_SCALE, 1.0))) + BALL_PAD * 2
 
-    def _build_paint_cache(self, theme=None):
-        """预构建所有渐变和路径对象（避免每帧重复创建）"""
-        if theme is None:
-            theme = self.theme
-        c = get_colors(theme)
-        gb = c["GLASS_BG"]
-        bd = c["BORDER"]
+    def _ball_offset(self):
+        """球体（基准尺寸）在窗口内的左上偏移"""
+        return (self._window_side() - self.current_size) / 2.0
 
+    def _ball_rect(self):
+        off = self._ball_offset()
+        return QRectF(off, off, self.current_size, self.current_size)
+
+    def _update_mask(self):
+        """掩码：球体范围 + 少量余量（拖动/点击命中区域）"""
         s = self.current_size
-        r = CORNER_RADIUS
-        cx, cy = s / 2, s / 2
+        off = self._ball_offset()
+        m = 5.0
+        rad = max(6.0, s * 0.30) + m
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(off - m, off - m, s + 2 * m, s + 2 * m), rad, rad)
+        region = QRegion(path.toFillPolygon().toPolygon())
+        self.setMask(region)
 
-        # 基底路径
-        base = QPainterPath()
-        base.addRoundedRect(QRectF(0, 0, s, s), r, r)
-        self._cache["base"] = base
+    def _render_pixmaps(self):
+        """预渲染球体位图（idle / hover）：固定窗口 + 位图缩放，动画零重建
 
-        # 7 个渐变 — 亮色/暗色共享结构，仅颜色值不同
-        is_dark = (theme == "dark")
+        P2 性能方案：悬停/按压动画只绘制缩放后的位图，不再每帧
+        重建渐变缓存/掩码/窗口尺寸（旧实现的掉帧根因）。
+        """
+        c = get_colors(self.theme)
+        accent = QColor(*c["ACCENT"])
+        side = self._window_side()
+        try:
+            dpr = max(1.0, float(self.devicePixelRatioF()))
+        except Exception:
+            dpr = 1.0
+        cache = {"side": side, "accent": accent}
+        for name, hovered in (("idle", False), ("hover", True)):
+            pm = QPixmap(int(side * dpr), int(side * dpr))
+            pm.setDevicePixelRatio(dpr)
+            pm.fill(Qt.transparent)
+            self._render_ball_pixmap(pm, hovered, accent, side)
+            cache[name] = pm
+        # 球体路径（涟漪裁剪用）
+        off = self._ball_offset()
+        s = self.current_size
+        rad = max(6.0, s * 0.30)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(off, off, s, s), rad, rad)
+        cache["ball_path"] = path
+        self._cache = cache
 
-        radial = QRadialGradient(cx, cy, s * 0.7)
-        radial.setColorAt(0.0, QColor(255, 255, 255, 10 if is_dark else 18))
-        radial.setColorAt(1.0, QColor(255, 255, 255, 0))
-        self._cache["radial"] = radial
+    def _render_ball_pixmap(self, pm, hovered, accent, side):
+        """方案 C：深色玻璃 + 品牌渐变描边 + 内部光晕 + 白色旋涡"""
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        s = float(self.current_size)
+        cx = cy = side / 2.0
+        rad = max(6.0, s * 0.30)
+        rect = QRectF(cx - s / 2.0, cy - s / 2.0, s, s)
 
-        diag = QLinearGradient(0, 0, s, s)
-        if is_dark:
-            diag.setColorAt(0.0, QColor(*gb, 220))
-            diag.setColorAt(0.35, QColor(*gb, 210))
-            diag.setColorAt(0.65, QColor(gb[0]+4, gb[1]+4, gb[2]+6, 200))
-            diag.setColorAt(1.0, QColor(gb[0]-2, gb[1]-2, gb[2]+0, 190))
-        else:
-            diag.setColorAt(0.0, QColor(*gb, 240))
-            diag.setColorAt(0.35, QColor(*gb, 228))
-            diag.setColorAt(0.65, QColor(245, 244, 249, 218))
-            diag.setColorAt(1.0, QColor(238, 237, 242, 205))
-        self._cache["diag"] = diag
+        # 阴影（悬停加深 / P2 弹性放大有阴影托底更立体）
+        p.setPen(Qt.NoPen)
+        base_a = 64 if hovered else 46
+        for off, k in ((0.0, 0.45), (2.2, 0.28), (4.2, 0.15)):
+            p.setBrush(QColor(0, 0, 0, int(base_a * k)))
+            p.drawRoundedRect(rect.adjusted(off, off + 1.2, off, off + 1.2), rad, rad)
 
-        # 玻璃边框渐变（垂直）
-        border = QLinearGradient(0, 0, 0, s)
-        border.setColorAt(0.0, QColor(*bd, 190))
-        border.setColorAt(0.45, QColor(*bd, 110))
-        border.setColorAt(1.0, QColor(*bd, 55))
-        self._cache["border"] = border
+        # 深色玻璃底
+        p.setBrush(QColor(30, 30, 34, 240))
+        p.drawRoundedRect(rect, rad, rad)
 
-        # 顶面柔光渐变 — 暗色下降低 alpha
-        hl_alpha_top = 60 if is_dark else 125
-        hl_alpha_mid = 20 if is_dark else 45
-        hl = QLinearGradient(0, 0, 0, s * 0.58)
-        hl.setColorAt(0.0, QColor(255, 255, 255, hl_alpha_top))
-        hl.setColorAt(0.45, QColor(255, 255, 255, hl_alpha_mid))
-        hl.setColorAt(1.0, QColor(255, 255, 255, 0))
-        self._cache["hl"] = hl
+        # 内部光晕（品牌色，悬停更亮）
+        glow = QRadialGradient(QPointF(cx, rect.y() + s * 0.40), s * 0.55)
+        ga = 64 if hovered else 46
+        glow.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), ga))
+        glow.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 0))
+        p.setBrush(QBrush(glow))
+        p.drawRoundedRect(rect, rad, rad)
 
-        # 内阴影渐变
-        inner = QRadialGradient(cx + s * 0.15, cy + s * 0.15, s * 0.75)
-        inner.setColorAt(0.0, QColor(0, 0, 0, 0))
-        inner.setColorAt(0.6, QColor(0, 0, 0, 0))
-        inner.setColorAt(0.9, QColor(0, 0, 0, 12 if is_dark else 8))
-        inner.setColorAt(1.0, QColor(0, 0, 0, 30 if is_dark else 20))
-        self._cache["inner"] = inner
+        # 品牌渐变描边（135°：#0a84ff → #af52de）
+        lg = QLinearGradient(rect.topLeft(), rect.bottomRight())
+        ba = 250 if hovered else 220
+        lg.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), ba))
+        lg.setColorAt(1.0, QColor(175, 82, 222, ba))
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QBrush(lg), 1.8))
+        p.drawRoundedRect(rect.adjusted(0.9, 0.9, -0.9, -0.9), rad, rad)
 
-        # 镜面反光渐变 — 暗色下降低 alpha
-        spec_alpha_0 = 55 if is_dark else 100
-        spec_alpha_1 = 30 if is_dark else 55
-        spec_alpha_2 = 5 if is_dark else 10
-        spec_r = s * 0.18
-        spec = QRadialGradient(s * 0.28, s * 0.25, spec_r * 1.5)
-        spec.setColorAt(0.0, QColor(255, 255, 255, spec_alpha_0))
-        spec.setColorAt(0.25, QColor(255, 255, 255, spec_alpha_1))
-        spec.setColorAt(0.6, QColor(255, 255, 255, spec_alpha_2))
-        spec.setColorAt(1.0, QColor(255, 255, 255, 0))
-        self._cache["spec"] = spec
+        # 白色旋涡 glyph（品牌延续）
+        self._draw_spiral(p, cx, cy, s / 52.0)
+        p.end()
 
-        # 图标缓存
-        icon_frac = 0.52
-        icon_size = int(s * icon_frac)
-        if self.icon_pixmap and not self.icon_pixmap.isNull():
-            self._cache["icon"] = self.icon_pixmap.scaled(
-                icon_size, icon_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-            self._cache["icon_x"] = int((s - icon_size) / 2)
-            self._cache["icon_y"] = int((s - icon_size) / 2)
-        else:
-            self._cache["icon"] = None
+    @staticmethod
+    def _draw_spiral(p, cx, cy, k=1.0):
+        """白色旋涡：从中心向外 2.35 圈的螺旋线"""
+        path = QPainterPath()
+        n = 56
+        for i in range(n + 1):
+            t = i / n
+            ang = t * math.pi * 2.35 - math.pi * 0.5
+            rad = (1.2 + 7.3 * t) * k
+            x = cx + math.cos(ang) * rad
+            y = cy + math.sin(ang) * rad
+            if i == 0:
+                path.moveTo(x, y)
+            else:
+                path.lineTo(x, y)
+        p.setPen(QPen(QColor(255, 255, 255, 238), max(1.6, 3.2 * k),
+                      Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setBrush(Qt.NoBrush)
+        p.drawPath(path)
+
 
     def _check_claude_process(self):
         """检测主 Agent 进程是否在运行，更新指示灯状态"""
@@ -471,8 +492,8 @@ class FloatingWidget(QWidget):
             self._api_badge.sync_position()
 
     def _setup_ui(self):
-        s = self.current_size
-        self.setFixedSize(s, s)
+        side = self._window_side()
+        self.setFixedSize(side, side)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
@@ -490,17 +511,6 @@ class FloatingWidget(QWidget):
         self._long_press_timer = QTimer(self)
         self._long_press_timer.setSingleShot(True)
         self._long_press_timer.timeout.connect(self._on_long_press_fired)
-
-        # 尺寸动画
-        self._size_anim = QPropertyAnimation(self, b"widget_size_prop")
-        self._size_anim.setDuration(200)
-        self._size_anim.setEasingCurve(QEasingCurve.OutCubic)
-
-        # 按压动画
-        self._press_anim = QPropertyAnimation(self, b"press_scale")
-        self._press_anim.setDuration(100)
-        self._press_anim.setEasingCurve(QEasingCurve.OutCubic)
-        self._press_anim.finished.connect(self._on_press_anim_done)
 
         # 全局快捷键
         self._hotkey_id = 1
@@ -589,7 +599,7 @@ class FloatingWidget(QWidget):
         # 重置 hover 状态
         if self.is_hovered:
             self.is_hovered = False
-            self._animate_size(self.base_size)
+            self._animate_scale(1.0, MotionTokens.SPEED)
         if self._api_badge:
             self._api_badge.hide()
 
@@ -601,22 +611,6 @@ class FloatingWidget(QWidget):
             self._ripple_timer.stop()
         self.update()
 
-    @pyqtProperty(float)
-    def press_scale(self):
-        return self._press_scale
-
-    @press_scale.setter
-    def press_scale(self, v):
-        self._press_scale = v
-        self.update()
-
-    def _on_press_anim_done(self):
-        self._press_anim.stop()
-        self._press_anim.setDuration(300)
-        self._press_anim.setEasingCurve(QEasingCurve.OutBack)
-        self._press_anim.setStartValue(self._press_scale)
-        self._press_anim.setEndValue(1.0)
-        self._press_anim.start()
 
     def _apply_opacity(self):
         self.setWindowOpacity(max(0.3, min(1.0, self.config.get("opacity", 0.88))))
@@ -625,7 +619,7 @@ class FloatingWidget(QWidget):
         """切换主题：更新配色缓存 → 重建绘制资源 → 重绘"""
         self.theme = theme
         self.config["theme"] = theme
-        self._build_paint_cache(theme=theme)
+        self._render_pixmaps()
         self.update()
         self.theme_changed.emit(theme)
         # 同步余额角标主题
@@ -633,20 +627,19 @@ class FloatingWidget(QWidget):
             self._api_badge.set_theme(theme)
         _log().info("主题切换为: %s", theme)
 
-    def _update_mask(self):
-        s = self.current_size
-        r = CORNER_RADIUS
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(0, 0, s, s), r, r)
-        region = QRegion(path.toFillPolygon().toPolygon())
-        self.setMask(region)
 
-    def _animate_size(self, target):
-        if self.current_size == target: return
-        self._size_anim.stop()
-        self._size_anim.setStartValue(self.current_size)
-        self._size_anim.setEndValue(target)
-        self._size_anim.start()
+    def _animate_scale(self, target, params=None):
+        """悬停/按压视觉缩放（弹簧驱动；仅重绘，不改变窗口几何）"""
+        if self._scale_cancel is not None:
+            self._scale_cancel()
+            self._scale_cancel = None
+        self._scale_state.set_params(*(params or MotionTokens.SPEED))
+        self._scale_cancel = motion().animate_to(
+            self._scale_state, float(target), self._on_scale_change)
+
+    def _on_scale_change(self, v):
+        self._visual_scale = float(v)
+        self.update()
 
     @pyqtProperty(int)
     def widget_size_prop(self):
@@ -656,39 +649,43 @@ class FloatingWidget(QWidget):
     def widget_size_prop(self, v):
         if v == self.current_size:
             return
+        old_center = self.geometry().center()
         self.current_size = v
-        c = self.geometry().center()
-        self.setFixedSize(v, v)
+        self.setFixedSize(self._window_side(), self._window_side())
         self._update_mask()
-        self._build_paint_cache()
+        self._render_pixmaps()
         ng = self.frameGeometry()
-        ng.moveCenter(c)
+        ng.moveCenter(old_center)
         self.move(ng.topLeft())
+        self.update()
 
     def _restore_position(self):
+        off = int(self._ball_offset())
         x, y = self.config.get("window_x", -1), self.config.get("window_y", -1)
+        # 配置坐标按「球体坐标」解释，换算为窗口坐标（窗口含四周留白）
         if x < 0 or y < 0:
             screen = QApplication.primaryScreen()
             if screen:
                 g = screen.availableGeometry()
                 x = g.right() - 80
                 y = (g.top() + g.bottom()) // 2 - self.current_size // 2
+        x -= off
+        y -= off
 
         edge = self.config.get("snap_edge", "right")
-        # 如果启用了吸附，调整到正确位置
+        # 如果启用了吸附，调整到正确位置（球体贴边）
         if self.config.get("snap_enabled", True):
             screen = self._screen_geometry()
             if edge == "right":
-                x = screen.right() - self.current_size - 2
+                x = screen.right() - self.current_size - 2 - off
             elif edge == "left":
-                x = screen.left() + 2
+                x = screen.left() + 2 - off
             elif edge == "top":
-                y = screen.top() + 2
+                y = screen.top() + 2 - off
             elif edge == "bottom":
-                y = screen.bottom() - self.current_size - 2
+                y = screen.bottom() - self.current_size - 2 - off
 
-        self.move(x, y)
-        self._visible_offset = self.pos().x() if edge in ("left", "right") else self.pos().y()
+        self.move(int(x), int(y))
 
         # 如果吸附 + 自动隐藏，初始化隐藏状态
         if self.config.get("snap_enabled", True) and self.config.get("snap_hidden", True):
@@ -712,8 +709,9 @@ class FloatingWidget(QWidget):
 
         SNAP_THRESHOLD = 25
         g = self._screen_geometry()
-        cx = self.pos().x() + self.current_size // 2
-        cy = self.pos().y() + self.current_size // 2
+        off = self._ball_offset()
+        cx = int(self.pos().x() + off + self.current_size // 2)
+        cy = int(self.pos().y() + off + self.current_size // 2)
 
         # 检测距离每个边缘的距离
         dist_left = cx - g.left()
@@ -734,20 +732,19 @@ class FloatingWidget(QWidget):
 
             # 吸附到边缘
             if edge == "left":
-                new_x = g.left() + 2
-                new_y = max(g.top(), min(g.bottom() - self.current_size, self.pos().y()))
+                new_x = g.left() + 2 - off
+                new_y = max(g.top(), min(g.bottom() - self.current_size, self.pos().y() + off)) - off
             elif edge == "right":
-                new_x = g.right() - self.current_size - 2
-                new_y = max(g.top(), min(g.bottom() - self.current_size, self.pos().y()))
+                new_x = g.right() - self.current_size - 2 - off
+                new_y = max(g.top(), min(g.bottom() - self.current_size, self.pos().y() + off)) - off
             elif edge == "top":
-                new_x = max(g.left(), min(g.right() - self.current_size, self.pos().x()))
-                new_y = g.top() + 2
+                new_x = max(g.left(), min(g.right() - self.current_size, self.pos().x() + off)) - off
+                new_y = g.top() + 2 - off
             else:  # bottom
-                new_x = max(g.left(), min(g.right() - self.current_size, self.pos().x()))
-                new_y = g.bottom() - self.current_size - 2
+                new_x = max(g.left(), min(g.right() - self.current_size, self.pos().x() + off)) - off
+                new_y = g.bottom() - self.current_size - 2 - off
 
-            self.move(new_x, new_y)
-            self._visible_offset = new_x if edge in ("left", "right") else new_y
+            self.move(int(new_x), int(new_y))
             save_config(self.config)
 
             # 自动隐藏
@@ -768,6 +765,8 @@ class FloatingWidget(QWidget):
         g = self._screen_geometry()
         edge = self._snap_edge
         sz = self.current_size
+        off = int(self._ball_offset())
+        ball_x, ball_y = self.pos().x() + off, self.pos().y() + off
 
         # 必须子类化才能正确重写 C++ 虚函数 enterEvent
         parent_widget = self
@@ -785,13 +784,13 @@ class FloatingWidget(QWidget):
 
         # 检测条：沿屏幕边缘 10px 宽（P2 由 6px 加宽，命中更容易）
         if edge == "right":
-            detector.setGeometry(g.right() - 10, self.pos().y() - 12, 10, sz + 24)
+            detector.setGeometry(g.right() - 10, ball_y - 12, 10, sz + 24)
         elif edge == "left":
-            detector.setGeometry(g.left(), self.pos().y() - 12, 10, sz + 24)
+            detector.setGeometry(g.left(), ball_y - 12, 10, sz + 24)
         elif edge == "top":
-            detector.setGeometry(self.pos().x() - 12, g.top(), sz + 24, 10)
+            detector.setGeometry(ball_x - 12, g.top(), sz + 24, 10)
         else:  # bottom
-            detector.setGeometry(self.pos().x() - 12, g.bottom() - 10, sz + 24, 10)
+            detector.setGeometry(ball_x - 12, g.bottom() - 10, sz + 24, 10)
 
         detector.show()
         self._edge_detector = detector
@@ -824,15 +823,16 @@ class FloatingWidget(QWidget):
         s = self.current_size
         edge = self._snap_edge
         visible_tab = 6  # 留在屏幕内的像素
+        off = self._ball_offset()
 
         if edge == "right":
-            target = g.right() - visible_tab
+            target = g.right() - visible_tab - off
         elif edge == "left":
-            target = g.left() - s + visible_tab
+            target = g.left() - s + visible_tab - off
         elif edge == "top":
-            target = g.top() - s + visible_tab
+            target = g.top() - s + visible_tab - off
         else:  # bottom
-            target = g.bottom() - visible_tab
+            target = g.bottom() - visible_tab - off
 
         self._hidden_offset = target
         self._hidden_now = True
@@ -854,15 +854,16 @@ class FloatingWidget(QWidget):
         g = self._screen_geometry()
         s = self.current_size
         edge = self._snap_edge
+        off = self._ball_offset()
 
         if edge == "right":
-            target = g.right() - s - 2
+            target = g.right() - s - 2 - off
         elif edge == "left":
-            target = g.left() + 2
+            target = g.left() + 2 - off
         elif edge == "top":
-            target = g.top() + 2
+            target = g.top() + 2 - off
         else:
-            target = g.bottom() - s - 2
+            target = g.bottom() - s - 2 - off
 
         self._hidden_now = False
         self._interaction.notify_reveal(time.monotonic())
@@ -888,14 +889,15 @@ class FloatingWidget(QWidget):
         g = self._screen_geometry()
         s = self.current_size
         edge = self._snap_edge
+        off = self._ball_offset()
         if edge == "right":
-            self.move(g.right() - s - 2, self.pos().y())
+            self.move(int(g.right() - s - 2 - off), self.pos().y())
         elif edge == "left":
-            self.move(g.left() + 2, self.pos().y())
+            self.move(int(g.left() + 2 - off), self.pos().y())
         elif edge == "top":
-            self.move(self.pos().x(), g.top() + 2)
+            self.move(self.pos().x(), int(g.top() + 2 - off))
         else:  # bottom
-            self.move(self.pos().x(), g.bottom() - s - 2)
+            self.move(self.pos().x(), int(g.bottom() - s - 2 - off))
         if self._slide_anim is not None:
             self._slide_anim.stop()
         self._hide_timer.stop()
@@ -946,7 +948,9 @@ class FloatingWidget(QWidget):
         # 顶层窗口 pos() 即全局坐标，直接用 QCursor.pos() - pos() 计算本地坐标
         local_pos = QCursor.pos() - self.pos()
         was = self.is_hovered
-        self.is_hovered = self.rect().contains(local_pos)
+        off = self._ball_offset()
+        self.is_hovered = QRectF(off, off, self.current_size, self.current_size).contains(
+            QPointF(local_pos))
         now = time.monotonic()
 
         # 吸附模式下自动管理显示/隐藏
@@ -961,18 +965,17 @@ class FloatingWidget(QWidget):
                 else:
                     self._hide_timer.start(self.config.get("hide_delay_ms", 800))
 
-        hover_size = int(self.base_size * HOVER_SCALE)
         if self.is_hovered and not was:
-            _log().debug("悬停进入: local=%s size=%d", local_pos, hover_size)
+            _log().debug("悬停进入: local=%s scale=%.2f", local_pos, HOVER_SCALE)
             self._interaction.hover_enter(now)
-            self._animate_size(hover_size)
+            self._animate_scale(HOVER_SCALE, MotionTokens.SPEED)
             # 悬停展开（状态机裁决：按压/拖拽/菜单打开期间与三类冷却窗口内均不启动）
             if self._interaction.hover_open_allowed(now):
                 self._hover_open_timer.start(self._interaction.hover_delay_ms)
         elif not self.is_hovered and was:
             _log().debug("悬停离开")
             self._interaction.hover_leave(now)
-            self._animate_size(self.base_size)
+            self._animate_scale(1.0, MotionTokens.SPEED)
             self._hover_open_timer.stop()
             # 环绕菜单打开时不立即关闭：由菜单自身的宽限/点击外部逻辑处理
             if self._radial_menu is None or not self._radial_menu.isVisible():
@@ -1516,135 +1519,81 @@ class FloatingWidget(QWidget):
         self._hover_timer.stop()
         self._hover_open_timer.stop()
         self._long_press_timer.stop()
-        # 弹性收拢：整体缩小 + 窗口淡出（弹簧驱动，收尾不再生硬）
+        # 弹性收拢：整体缩小 + 窗口淡出（弹簧驱动 + 速度继承，收尾不再生硬）
         base_opacity = self.windowOpacity()
-        state = spring(self._press_scale, MotionTokens.QUIT)
 
         def _apply(v):
-            self._press_scale = v
+            self._visual_scale = v
+            self.update()
             self.setWindowOpacity(max(0.0, base_opacity * min(1.0, v / 0.9)))
 
-        motion().animate_to(state, 0.08, _apply, on_done=self.quit_requested.emit)
+        if self._scale_cancel is not None:
+            self._scale_cancel()
+            self._scale_cancel = None
+        self._scale_state.jump(self._visual_scale)
+        self._scale_state.set_params(*MotionTokens.QUIT)
+        motion().animate_to(self._scale_state, 0.08, _apply,
+                            on_done=self.quit_requested.emit)
 
     # ── 绘制（7 层玻璃 + 涟漪 + 指示灯）─────────────────
     def paintEvent(self, event):
+        side = self._cache.get("side") or self._window_side()
+        scale = self._visual_scale
+        if scale <= 0.02:
+            return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
 
-        # 获取当前主题配色
-        tc = get_colors(self.theme)
-        shadow = tc["SHADOW"]
-        border = tc["BORDER"]
-        accent = tc["ACCENT"]
-        text = tc["TEXT"]
-
-        scale = self._press_scale
-        s = self.current_size
-        r = CORNER_RADIUS
-        cx, cy = s / 2, s / 2
-
-        if scale != 1.0:
+        # 三态位图：idle / hover 预渲染；按压沿用 hover 位图 + 弹簧缩放
+        pm = self._cache.get("hover" if (self.is_hovered or self.is_pressed) else "idle")
+        if pm is None:
+            self._render_pixmaps()
+            pm = self._cache.get("idle")
+        if pm is None:
+            painter.end()
+            return
+        if abs(scale - 1.0) > 0.004:
+            cx = cy = side / 2.0
             painter.translate(cx, cy)
             painter.scale(scale, scale)
             painter.translate(-cx, -cy)
+        painter.drawPixmap(QPointF(0, 0), pm)
 
-        shadow_boost = 1.0 + (0.8 if self.is_hovered else 0)
-        is_dark = (self.theme == "dark")
-        hover_alpha = 20 if (self.is_hovered and is_dark) else (30 if self.is_hovered else 0)
+        accent = self._cache.get("accent")
+        if accent is None:
+            accent = QColor(*get_colors(self.theme)["ACCENT"])
+        ball_path = self._cache.get("ball_path")
+        off = self._ball_offset()
+        s = self.current_size
 
-        # 使用预缓存的绘制资源
-        c = self._cache
-        base_path = c["base"]
-
-        # ── Layer 0: 阴影 ──
-        painter.setPen(Qt.NoPen)
-        h_offset = 1 if self.is_hovered else 0
-        for offset, base_alpha in [(0, 18), (2, 10), (4, 5)]:
-            a = min(255, int(base_alpha * shadow_boost))
-            so = offset + h_offset
-            sr = QRectF(2 + so, 3 + so, s, s)
-            sp = QPainterPath()
-            sp.addRoundedRect(sr, r, r)
-            painter.setBrush(QColor(*shadow, a))
-            painter.drawPath(sp)
-
-        # ── Layer 1: 玻璃基底 ──
-        painter.setBrush(QBrush(c["diag"]))
-        painter.setPen(Qt.NoPen)
-        painter.drawPath(base_path)
-        painter.setBrush(QBrush(c["radial"]))
-        painter.drawPath(base_path)
-
-        # ── Layer 2: 玻璃边框 ──
-        if self.is_hovered:
-            border_grad = QLinearGradient(0, 0, 0, s)
-            border_grad.setColorAt(0.0, QColor(*border, int(190 * 1.3)))
-            border_grad.setColorAt(0.45, QColor(*border, int(110 * 1.3)))
-            border_grad.setColorAt(1.0, QColor(*border, int(55 * 1.3)))
-            pen = QPen(QBrush(border_grad), 1.0)
-        else:
-            pen = QPen(QBrush(c["border"]), 1.0)
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRoundedRect(QRect(0, 0, s - 1, s - 1), r, r)
-
-        # ── Layer 3-5: 柔光 + 内阴影 + 镜面反光 ──
-        hl_path = base_path
-        painter.setBrush(QBrush(c["hl"]))
-        painter.setPen(Qt.NoPen)
-        painter.drawPath(hl_path)
-        painter.setBrush(QBrush(c["inner"]))
-        painter.drawPath(hl_path)
-        painter.setBrush(QBrush(c["spec"]))
-        painter.drawPath(hl_path)
-
-        # ── Layer 6: 悬停蓝色微染 ──
-        if hover_alpha > 0:
-            painter.setBrush(QColor(*accent, hover_alpha))
-            painter.setPen(Qt.NoPen)
-            painter.drawPath(hl_path)
-
-        # ── Layer 7: 图标 ──
-        if c.get("icon"):
-            painter.drawPixmap(c["icon_x"], c["icon_y"], c["icon"])
-        else:
-            font = QFont(FONT_FAMILY, int(s * 0.40), QFont.Bold)
-            painter.setFont(font)
-            painter.setPen(QColor(*text, 200))
-            painter.drawText(QRect(0, 0, s, s), Qt.AlignCenter, "CC")
-
-        # ── 涟漪 ──
-        if self._ripple_progress > 0 and not self._ripple_pos.isNull():
+        # 涟漪（裁剪在球体内）
+        if self._ripple_progress > 0 and not self._ripple_pos.isNull() and ball_path is not None:
             rp = self._ripple_progress
-            max_rad = s * 0.8
-            rad = max_rad * rp
-            alpha = int(60 * (1.0 - rp))
-            ripple_grad = QRadialGradient(self._ripple_pos, rad)
-            ripple_grad.setColorAt(0.0, QColor(*accent, alpha))
-            ripple_grad.setColorAt(1.0, QColor(*accent, 0))
-            painter.setBrush(QBrush(ripple_grad))
+            r = s * 0.8 * rp
+            grad = QRadialGradient(self._ripple_pos, max(1.0, r))
+            grad.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(),
+                                        int(60 * (1.0 - rp))))
+            grad.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 0))
+            painter.setBrush(QBrush(grad))
             painter.setPen(Qt.NoPen)
-            painter.drawPath(hl_path)
+            painter.drawPath(ball_path)
 
-        # ── 安全模式指示器：skip-permissions 时右上角红色圆点 ──
+        # 安全模式指示器：skip-permissions 时右上角红点
         if self.config.get("launch_mode") == "skip_permissions":
-            dot_r = max(4, s * 0.08)
-            dot_margin = s * 0.18
-            dot_cx = s - dot_margin
-            dot_cy = dot_margin
+            dot_r = max(3.5, s * 0.075)
+            margin = s * 0.18
             painter.setBrush(QColor(255, 59, 48, 220))
             painter.setPen(Qt.NoPen)
-            painter.drawEllipse(QPointF(dot_cx, dot_cy), dot_r, dot_r)
+            painter.drawEllipse(QPointF(off + s - margin, off + margin), dot_r, dot_r)
 
-        # ── Claude 运行中指示器：左下角绿色圆点 ──
+        # 运行中指示器：左下角绿点
         if self._claude_running:
-            dot_r = max(4, s * 0.07)
-            dot_margin = s * 0.18
-            dot_cx = dot_margin
-            dot_cy = s - dot_margin
+            dot_r = max(3.5, s * 0.065)
+            margin = s * 0.18
             painter.setBrush(QColor(52, 199, 89, 220))
             painter.setPen(Qt.NoPen)
-            painter.drawEllipse(QPointF(dot_cx, dot_cy), dot_r, dot_r)
+            painter.drawEllipse(QPointF(off + margin, off + s - margin), dot_r, dot_r)
 
         painter.end()
 
@@ -1666,12 +1615,7 @@ class FloatingWidget(QWidget):
             self._interaction.press(now)
             # 按压反馈
             self.is_pressed = True
-            self._press_anim.stop()
-            self._press_anim.setDuration(100)
-            self._press_anim.setEasingCurve(QEasingCurve.OutCubic)
-            self._press_anim.setStartValue(self._press_scale)
-            self._press_anim.setEndValue(PRESS_SCALE)
-            self._press_anim.start()
+            self._animate_scale(PRESS_SCALE, MotionTokens.PRESS)
         elif event.button() == Qt.RightButton:
             self._context_menu()
             return
@@ -1704,13 +1648,14 @@ class FloatingWidget(QWidget):
         if event.button() == Qt.LeftButton:
             acts = self._interaction.release(time.monotonic())
             if InteractionActions.END_DRAG in acts:
-                # 拖拽结束 → 保存位置 + 检测吸附（状态机已启动 400ms 悬停冷却）
-                self.config["window_x"] = self.pos().x()
-                self.config["window_y"] = self.pos().y()
+                # 拖拽结束 → 保存位置（球体坐标）+ 检测吸附（状态机已启动 400ms 悬停冷却）
+                off = int(self._ball_offset())
+                self.config["window_x"] = self.pos().x() + off
+                self.config["window_y"] = self.pos().y() + off
                 self._check_snap()
                 # 无论是否吸附都保存位置
-                self.config["window_x"] = self.pos().x()
-                self.config["window_y"] = self.pos().y()
+                self.config["window_x"] = self.pos().x() + off
+                self.config["window_y"] = self.pos().y() + off
                 save_config(self.config)
                 _log().debug("拖拽结束，悬停冷却 400ms")
             elif InteractionActions.CLICK in acts:
@@ -1720,6 +1665,8 @@ class FloatingWidget(QWidget):
             self._drag_active = False
             # 同步 API 面板位置
             self._sync_api_panel_position()
+            # 松手回弹（弹簧）
+            self._animate_scale(HOVER_SCALE if self.is_hovered else 1.0, MotionTokens.PRESS)
         self.is_pressed = False
 
     def _show_launch_feedback(self):
@@ -1791,9 +1738,10 @@ class FloatingWidget(QWidget):
             self._api_badge.close()
         if self._launch_toast is not None:
             self._launch_toast.close()
+        off = int(self._ball_offset())
         pos = self.pos()
-        self.config["window_x"] = pos.x()
-        self.config["window_y"] = pos.y()
+        self.config["window_x"] = pos.x() + off
+        self.config["window_y"] = pos.y() + off
         save_config(self.config)
         super().closeEvent(event)
 
@@ -1855,8 +1803,9 @@ class FloatingWidget(QWidget):
 
         if not preview_only:
             self.config["widget_size"] = ns
-            self.config["window_x"] = self.pos().x()
-            self.config["window_y"] = self.pos().y()
+            off = int(self._ball_offset())
+            self.config["window_x"] = self.pos().x() + off
+            self.config["window_y"] = self.pos().y() + off
 
             # API 用量监控配置变更
             new_api_config = new_cfg.get("api_monitor")
