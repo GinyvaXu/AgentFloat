@@ -1,5 +1,13 @@
 # 更新日志
 
+## [3.0.2] - 2026-09-27（崩溃修复）
+### Fixed
+- **修复打开设置后崩溃（0xC0000409 / BEX64，故障模块 Qt5Core.dll）**：更新检查线程（QThread）在查询结束的同一瞬间被释放，Qt 触发 qFatal「QThread: Destroyed while thread is still running」→ abort，进程无提示消失、设置页随之中断（表现为「设置无法保存」）。所有 QThread worker（更新检查 / 更新下载 / 本地 AI / 自动翻译 / AI 快报）统一改为「线程真正结束后再释放引用」+ `wait` 兜底
+- 崩溃诊断增强：出现该 Qt 致命消息时，自动把全部 Python 线程栈写入 `logs/faulthandler.log`，便于定位残留 worker
+
+### Added
+- **并存实例提醒**：启动时检测到旧版 / 调试版 AgentFloat 同时运行（共用 `%APPDATA%/AgentFloat/config.json`，会互相覆盖设置）时，写入警告日志并弹出托盘通知
+
 ## [3.0.1] - 2026-09-27（稳定性修复）
 ### Added
 - **浮窗位置自愈**：启动时把保存坐标收敛到最近可见屏幕（整球可见）；`showEvent` 兜底——发现窗口完全离屏时自动收回并记录警告。修复更换显示器 / 修改 DPI 缩放后浮窗「失踪」、扇形菜单无法唤出的问题

@@ -16,8 +16,11 @@ from agentfloat.core.logging_setup import (
     _install_error_handlers, _log, _setup_logger,
 )
 from agentfloat.core.paths import ICO_PATH, _IS_FROZEN, config_dir
+from agentfloat.core.qtutil import release_thread_later, track
 from agentfloat.core.registry import default_agents, find_agent, get_primary_agent
-from agentfloat.core.single_instance import acquire_single_instance, activate_existing
+from agentfloat.core.single_instance import (
+    acquire_single_instance, activate_existing, other_instances,
+)
 from agentfloat.core.sysutil import _open_url, ensure_utf8_stdio
 from agentfloat.core.theme import FONT_FAMILY, get_colors
 from agentfloat.core.version import VERSION
@@ -32,6 +35,9 @@ from agentfloat.webshell import window as web_ui
 from agentfloat.webshell.bridge import WebBridge
 from agentfloat.webshell.handlers import WebAppHandlers
 from agentfloat.webshell.server import start_server_thread
+
+# 启动时检测到的其他 AgentFloat 实例（供 _main 的托盘提醒使用，PATCH 3.0.2）
+_OTHER_INSTANCES = []
 
 
 def _find_unclean_session(report_dir, current_path):
@@ -56,6 +62,19 @@ def _find_unclean_session(report_dir, current_path):
             continue
         return p if "状态:" not in text else None
     return None
+
+
+def _release_worker(ref, key="worker"):
+    """线程结束后再释放 worker 引用（PATCH 3.0.2，防 QThread 运行中析构 qFatal）"""
+    w = ref.get(key)
+    if w is None:
+        return
+
+    def _pop_if_current():
+        if ref.get(key) is w:      # 期间若已换新 worker，不能误清
+            ref.pop(key, None)
+
+    release_thread_later(w, _pop_if_current)
 
 
 def _exit_process(code):
@@ -88,6 +107,17 @@ def main():
         except Exception:
             pass
         return 0
+
+    # ── 其他实例提醒（旧版/调试版；共用 config.json 会互相覆盖设置）──
+    global _OTHER_INSTANCES
+    _OTHER_INSTANCES = []
+    try:
+        _OTHER_INSTANCES = [x for x in other_instances() if x[0] != os.getpid()]
+        if _OTHER_INSTANCES:
+            _log().warning("检测到其他 AgentFloat 实例: %s（共用配置，设置可能互相覆盖）",
+                           ", ".join("PID %s (%s)" % (pid, name) for pid, name in _OTHER_INSTANCES))
+    except Exception:
+        pass
 
     # ── 原生崩溃堆栈落盘（faulthandler），便于事后定位 ──
     try:
@@ -338,7 +368,7 @@ def _main():
             return
 
         def _on_done(path):
-            download_worker_ref.pop("worker", None)
+            _release_worker(download_worker_ref)
             _log().info("更新包下载完成: %s", path)
             if updater.apply_update(path):
                 _update_box(None, QMessageBox.Information, "更新已开始",
@@ -356,7 +386,7 @@ def _main():
                         _update_box(None, QMessageBox.Warning, "启动失败", f"无法启动安装程序:\n{e}")
 
         def _on_failed(msg):
-            download_worker_ref.pop("worker", None)
+            _release_worker(download_worker_ref)
             _log().warning("更新下载失败: %s", msg)
             box = QMessageBox(QMessageBox.Warning, "下载失败",
                               "下载更新失败：\n%s\n\n"
@@ -369,6 +399,7 @@ def _main():
                 updater.open_release_page()
 
         worker = DownloadWorker(url)
+        track(worker, "DownloadWorker")
         worker.done.connect(_on_done)
         worker.failed.connect(_on_failed)
         download_worker_ref["worker"] = worker
@@ -376,7 +407,7 @@ def _main():
         _log().info("开始下载更新: %s", url)
 
     def _on_update_result(info, manual):
-        update_worker_ref.pop("worker", None)
+        _release_worker(update_worker_ref)
         if info is None or not info.get("available"):
             if manual:
                 if info is not None and info.get("error"):
@@ -394,7 +425,7 @@ def _main():
             _tray_download_latest(info)
 
     def _on_check_failed(msg, manual):
-        update_worker_ref.pop("worker", None)
+        _release_worker(update_worker_ref)
         if manual:
             _update_box(None, QMessageBox.Warning, "检查更新失败", f"无法连接更新服务器：\n{msg}")
 
@@ -402,6 +433,7 @@ def _main():
         if update_worker_ref.get("worker"):
             return  # 正在检查中
         worker = UpdateWorker(VERSION)
+        track(worker, "UpdateWorker")
         worker.result_ready.connect(lambda info: _on_update_result(info, manual))
         worker.check_failed.connect(lambda msg: _on_check_failed(msg, manual))
         update_worker_ref["worker"] = worker
@@ -513,6 +545,12 @@ def _main():
     tray_icon.activated.connect(lambda r: widget.show() if r == QSystemTrayIcon.DoubleClick else None)
     tray_icon.show()
     tray_icon.showMessage("AgentFloat", "AI Agent 浮窗助手已启动", QSystemTrayIcon.Information, 2000)
+    if _OTHER_INSTANCES:
+        QTimer.singleShot(1200, lambda: tray_icon.showMessage(
+            "AgentFloat — 检测到其他实例",
+            "另有 AgentFloat 正在运行（可能为旧版本），两者共用配置，设置可能互相覆盖；"
+            "建议只保留一个版本。",
+            QSystemTrayIcon.Warning, 8000))
 
     # 翻译 skill 自动部署 + 新装 skill 自动触发翻译（延迟执行，避免拖慢启动）
     QTimer.singleShot(

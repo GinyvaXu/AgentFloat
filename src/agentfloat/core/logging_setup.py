@@ -79,7 +79,6 @@ def _setup_logger():
 
 def _log():
     """获取 logger 实例（惰性初始化，避免循环依赖）"""
-    global _logger
     if _logger is None:
         return _setup_logger()
     return _logger
@@ -124,6 +123,21 @@ def _install_error_handlers():
         if "UpdateLayeredWindowIndirect failed" in msg:
             _log().debug("Qt: %s", msg)
             return
+        # QThread 运行中被销毁会触发 qFatal（0xC0000409 崩溃）：
+        # 输出当前全部 Python 线程栈 + 仍在运行的 worker，便于定位（PATCH 3.0.2）
+        if "QThread: Destroyed while thread is still running" in msg:
+            try:
+                from agentfloat.core.qtutil import alive_threads
+                _log().error("崩溃前仍在运行的 worker: %s", alive_threads() or "(无登记)")
+            except Exception:
+                pass
+            try:
+                import faulthandler
+                faulthandler.dump_traceback(
+                    file=open(os.path.join(config_dir(), "logs", "faulthandler.log"),
+                              "a", encoding="utf-8"))
+            except Exception:
+                pass
         if msg_type == QtMsgType.QtDebugMsg:
             _log().debug("Qt: %s", msg)
         elif msg_type == QtMsgType.QtWarningMsg:

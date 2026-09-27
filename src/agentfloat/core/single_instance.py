@@ -14,11 +14,56 @@ _ACTIVATE_MSG_NAME = "AgentFloat.ActivateExisting"
 _BALL_TITLE = "AgentFloat"
 ERROR_ALREADY_EXISTS = 183
 
+TH32CS_SNAPPROCESS = 0x00000002
+_AGENTFLOAT_EXES = ("agentfloat.exe", "agentfloat_debug.exe")
+
 _kernel32 = ctypes.windll.kernel32
 _user32 = ctypes.windll.user32
 
 _mutex_handle = None     # 进程存活期间保持互斥体句柄，防止被回收
 _activate_msg = 0
+
+
+class _PROCESSENTRY32W(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", wintypes.DWORD),
+        ("cntUsage", wintypes.DWORD),
+        ("th32ProcessID", wintypes.DWORD),
+        ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
+        ("th32ModuleID", wintypes.DWORD),
+        ("cntThreads", wintypes.DWORD),
+        ("th32ParentProcessID", wintypes.DWORD),
+        ("pcPriClassBase", ctypes.c_long),
+        ("dwFlags", wintypes.DWORD),
+        ("szExeFile", wintypes.WCHAR * 260),
+    ]
+
+
+def other_instances():
+    """枚举其他 AgentFloat 进程（含旧版 / 调试版），返回 [(pid, exe_name), ...]
+
+    旧版程序与本版共用 %APPDATA%/AgentFloat/config.json，同时运行会互相
+    覆盖设置（PATCH 3.0.2 增加提醒）。
+    """
+    import os
+    result = []
+    _kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    _kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    snap = _kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if not snap or snap == ctypes.c_void_p(-1).value:
+        return result
+    try:
+        entry = _PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(_PROCESSENTRY32W)
+        ok = _kernel32.Process32FirstW(snap, ctypes.byref(entry))
+        while ok:
+            name = entry.szExeFile
+            if name.lower() in _AGENTFLOAT_EXES and int(entry.th32ProcessID) != os.getpid():
+                result.append((int(entry.th32ProcessID), name))
+            ok = _kernel32.Process32NextW(snap, ctypes.byref(entry))
+    finally:
+        _kernel32.CloseHandle(snap)
+    return result
 
 
 def activate_message_id():

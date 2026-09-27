@@ -48,6 +48,7 @@ from agentfloat.ui.panels.command import CommandPanel
 from agentfloat.ui.panels.skills import SkillsPanel
 from agentfloat.ui.panels.water import WaterPanel, WaterReminderPopup
 from agentfloat.core.single_instance import activate_message_id
+from agentfloat.core.qtutil import release_thread_later, track
 from agentfloat.ui.interaction import Actions as InteractionActions, BallInteraction
 from agentfloat.ui.motion import Tokens as MotionTokens, motion, spring
 from agentfloat.ui.placement import (
@@ -343,6 +344,7 @@ class FloatingWidget(QWidget):
             endpoints=am_config.get("endpoints", []),
             interval_seconds=am_config.get("poll_interval_seconds", 60),
         )
+        track(self._api_worker, "ApiMonitorWorker")
         self._api_worker.data_ready.connect(self._on_api_data_ready)
         self._api_worker.start()
         _log().info("API 用量监控已启动: %d 端点", len(am_config.get("endpoints", [])))
@@ -365,6 +367,16 @@ class FloatingWidget(QWidget):
         self._init_api_monitor()
 
     # ── 本地 AI 服务（手动：API 余额配置 / Skills 翻译）──────────
+    def _release_worker_attr(self, attr):
+        """worker 线程结束后再清空引用（PATCH 3.0.2：防运行中析构 qFatal）"""
+        w = getattr(self, attr, None)
+
+        def _clear_if_current():
+            if getattr(self, attr, None) is w:   # 期间若已换新 worker，不能误清
+                setattr(self, attr, None)
+
+        release_thread_later(w, _clear_if_current)
+
     def _run_local_ai_services(self, auto=False):
         """后台线程运行本地 AI 服务；auto=True 用托盘通知，False 弹窗"""
         if self._ai_worker is not None and self._ai_worker.isRunning():
@@ -377,13 +389,14 @@ class FloatingWidget(QWidget):
                 QMessageBox.warning(None, "AI 自检服务", "未配置主 Agent，请先在「设置 → Agent 管理」中配置。")
             return
         self._ai_worker = LocalAiWorker(self.config, agent, parent=self)
+        track(self._ai_worker, "LocalAiWorker")
         self._ai_worker.finished_ok.connect(lambda res: self._on_ai_service_done(res, auto))
         self._ai_worker.failed.connect(lambda err: self._on_ai_service_failed(err, auto))
         self._ai_worker.start()
         _log().info("本地 AI 服务已启动 (auto=%s, agent=%s)", auto, agent.get("name"))
 
     def _on_ai_service_done(self, res, auto):
-        self._ai_worker = None
+        self._release_worker_attr("_ai_worker")
         api = res.get("api") or {}
         if api.get("api_config") is not None:
             self.config["api_monitor"] = api["api_config"]
@@ -402,7 +415,7 @@ class FloatingWidget(QWidget):
             QMessageBox.information(None, "AI 自检服务", summary)
 
     def _on_ai_service_failed(self, err, auto):
-        self._ai_worker = None
+        self._release_worker_attr("_ai_worker")
         _log().warning("本地 AI 服务失败: %s", err)
         if auto:
             self.ai_service_failed.emit(str(err))
@@ -436,19 +449,20 @@ class FloatingWidget(QWidget):
         _log().info("自动翻译：检测到 %d 个新 skill，调用 %s 补译",
                     len(new_skills), agent.get("name"))
         worker = AutoTranslateWorker(self.config, agent, new_skills, parent=self)
+        track(worker, "AutoTranslateWorker")
         worker.done.connect(self._on_auto_translate_done)
         worker.failed.connect(self._on_auto_translate_failed)
         self._auto_worker = worker
         worker.start()
 
     def _on_auto_translate_done(self, added, names):
-        self._auto_worker = None
+        self._release_worker_attr("_auto_worker")
         _log().info("自动翻译完成：新增 %d 条（%s）", added, ", ".join(names[:5]))
         self.auto_translate_done.emit(
             "检测到 %d 个新 skill，自动翻译完成：新增 %d 条中文翻译" % (len(names), added))
 
     def _on_auto_translate_failed(self, err):
-        self._auto_worker = None
+        self._release_worker_attr("_auto_worker")
         _log().warning("自动翻译失败: %s", err)
         self.auto_translate_failed.emit(str(err))
 
@@ -1433,6 +1447,7 @@ class FloatingWidget(QWidget):
         if self._news_panel is not None and self._news_panel.isVisible():
             self._news_panel.set_generating(True)
         worker = NewsWorker(cfg, self._agents, parent=self)
+        track(worker, "NewsWorker")
         worker.done.connect(self._on_news_done)
         worker.failed.connect(self._on_news_failed)
         self._news_worker = worker
@@ -1441,7 +1456,7 @@ class FloatingWidget(QWidget):
                      auto, cfg.get("sources"), bool(cfg.get("use_ai", True)))
 
     def _on_news_done(self, payload):
-        self._news_worker = None
+        self._release_worker_attr("_news_worker")
         self._news_generating = False
         date = payload.get("date", "")
         count = payload.get("count", 0)
@@ -1473,7 +1488,7 @@ class FloatingWidget(QWidget):
             QTimer.singleShot(500, self._open_news_panel)
 
     def _on_news_failed(self, err):
-        self._news_worker = None
+        self._release_worker_attr("_news_worker")
         self._news_generating = False
         _log().warning("AI 快报生成失败: %s", err)
         _bridge = getattr(self, "_web_bridge", None)
