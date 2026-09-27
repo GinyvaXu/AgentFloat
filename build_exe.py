@@ -11,9 +11,14 @@ import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-from build_utils import archive_old_builds, prune_onedir, read_version, write_build_version
+from build_utils import (
+    archive_old_builds, check_ascii_build_path, prune_onedir, read_version,
+    write_build_version,
+)
 
 CURRENT_VERSION = read_version()
+if not check_ascii_build_path():
+    sys.exit(1)
 ONE_FILE = "--onefile" in sys.argv     # 默认 onedir（启动更快）；--onefile 出单文件便携版
 MODE_FLAG = "--onefile" if ONE_FILE else "--onedir"
 print(f"[构建] 当前版本: v{CURRENT_VERSION}（模式: {'onefile' if ONE_FILE else 'onedir'}）")

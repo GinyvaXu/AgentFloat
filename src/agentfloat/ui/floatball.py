@@ -47,8 +47,13 @@ from agentfloat.ui.panels.clipboard import ClipboardHistory, ClipboardPanel
 from agentfloat.ui.panels.command import CommandPanel
 from agentfloat.ui.panels.skills import SkillsPanel
 from agentfloat.ui.panels.water import WaterPanel, WaterReminderPopup
+from agentfloat.core.single_instance import activate_message_id
 from agentfloat.ui.interaction import Actions as InteractionActions, BallInteraction
 from agentfloat.ui.motion import Tokens as MotionTokens, motion, spring
+from agentfloat.ui.placement import (
+    EDGE_MARGIN, VALID_EDGES, clamp_visible, edge_position, normalize_edge,
+    screen_index_for,
+)
 from agentfloat.ui.toast import LaunchToast
 from agentfloat.ui.radial_menu import RadialMenu, RadialMenuItem, RADIAL_PAD
 from agentfloat.core.autostart import is_auto_start_enabled, toggle_auto_start
@@ -570,11 +575,20 @@ class FloatingWidget(QWidget):
                 else:
                     self.show()
                 return True, 0
+            if msg.message == activate_message_id():
+                # 重复启动（第二实例）请求唤出浮窗（PATCH 3.0.1）
+                self._ensure_on_screen()
+                if self._snapped:
+                    self._show_full()
+                self.show()
+                self.raise_()
+                return True, 0
         return super().nativeEvent(eventType, message)
 
     def showEvent(self, event):
         """显示时启动 hover 检测"""
         super().showEvent(event)
+        self._ensure_on_screen()   # PATCH 3.0.1：兜底收回屏幕外浮窗
         _log().debug("浮窗显示")
         if not self._hover_timer.isActive():
             self._hover_timer.start()
@@ -659,40 +673,92 @@ class FloatingWidget(QWidget):
         self.move(ng.topLeft())
         self.update()
 
+    def _screen_rects(self):
+        """所有屏幕的可用区域（逻辑坐标，右下为闭区间，与 QRect 一致）"""
+        out = []
+        for s in QApplication.screens():
+            g = s.availableGeometry()
+            out.append((g.left(), g.top(), g.right(), g.bottom()))
+        return out
+
     def _restore_position(self):
         off = int(self._ball_offset())
+        size = self.current_size
+        screens = self._screen_rects()
+
         x, y = self.config.get("window_x", -1), self.config.get("window_y", -1)
         # 配置坐标按「球体坐标」解释，换算为窗口坐标（窗口含四周留白）
         if x < 0 or y < 0:
-            screen = QApplication.primaryScreen()
-            if screen:
-                g = screen.availableGeometry()
-                x = g.right() - 80
-                y = (g.top() + g.bottom()) // 2 - self.current_size // 2
-        x -= off
-        y -= off
+            if screens:
+                l, t, r, b = screens[0]
+                x = r - size - EDGE_MARGIN
+                y = (t + b) // 2 - size // 2
+            else:
+                x, y = 100, 100
 
-        edge = self.config.get("snap_edge", "right")
-        # 如果启用了吸附，调整到正确位置（球体贴边）
-        if self.config.get("snap_enabled", True):
-            screen = self._screen_geometry()
-            if edge == "right":
-                x = screen.right() - self.current_size - 2 - off
-            elif edge == "left":
-                x = screen.left() + 2 - off
-            elif edge == "top":
-                y = screen.top() + 2 - off
-            elif edge == "bottom":
-                y = screen.bottom() - self.current_size - 2 - off
+        # PATCH 3.0.1：保存坐标可能因换屏/DPI 缩放越界——先收敛到可见屏幕，
+        # 避免浮窗落在屏幕外「失踪」且无法唤出扇形菜单
+        x, y = clamp_visible(x, y, size, screens)
 
-        self.move(int(x), int(y))
+        edge = normalize_edge(self.config.get("snap_edge")) \
+            if self.config.get("snap_enabled", True) else ""
+        if edge and screens:
+            idx = screen_index_for(x + size / 2.0, y + size / 2.0, screens)
+            x, y = edge_position(edge, x, y, size, screens[idx])
 
-        # 如果吸附 + 自动隐藏，初始化隐藏状态
-        if self.config.get("snap_enabled", True) and self.config.get("snap_hidden", True):
+        self.move(int(x - off), int(y - off))
+
+        if edge:
             self._snapped = True
             self._snap_edge = edge
-            self._setup_edge_detector()
-            self._do_hide()
+            # 吸附 + 自动隐藏：初始化隐藏状态（滑出后仍留可见小标签）
+            if self.config.get("snap_hidden", True):
+                self._setup_edge_detector()
+                self._do_hide()
+        else:
+            # 自由位置（含非法 snap_edge）：保持完全可见，不进入吸附隐藏
+            self._snapped = False
+            self._snap_edge = ""
+
+    def _ensure_on_screen(self):
+        """窗口完全落在所有屏幕之外时，收回到可见区域（PATCH 3.0.1 安全网）"""
+        screens = self._screen_rects()
+        if not screens:
+            return
+        r = self.geometry()
+        visible = 0
+        for (l, t, rr, b) in screens:
+            w = min(r.right(), rr) - max(r.left(), l) + 1
+            h = min(r.bottom(), b) - max(r.top(), t) + 1
+            if w > 0 and h > 0:
+                visible = max(visible, min(w, h))
+        if visible >= 4:
+            return
+        off = int(self._ball_offset())
+        x, y = clamp_visible(self.pos().x() + off, self.pos().y() + off,
+                             self.current_size, screens)
+        self.move(int(x - off), int(y - off))
+        _log().warning("浮窗曾完全处于屏幕外，已收回到可见区域: (%d, %d)", x, y)
+
+    def reset_position(self):
+        """应急恢复：移回主屏右边缘中部并保持可见（托盘菜单入口）"""
+        screens = self._screen_rects()
+        if not screens:
+            return
+        l, t, r, b = screens[0]
+        size = self.current_size
+        x = r - size - EDGE_MARGIN
+        y = (t + b) // 2 - size // 2
+        off = int(self._ball_offset())
+        self._snapped = False
+        self._snap_edge = ""
+        self.config["snap_edge"] = ""
+        self.config["window_x"], self.config["window_y"] = int(x), int(y)
+        self.move(int(x - off), int(y - off))
+        self.show()
+        self.raise_()
+        save_config(self.config)
+        _log().info("浮窗位置已重置: (%d, %d)", x, y)
 
     # ── 边缘吸附系统 ────────────────────────────────
     def _screen_geometry(self):
@@ -760,10 +826,12 @@ class FloatingWidget(QWidget):
             save_config(self.config)
 
     def _setup_edge_detector(self):
-        """创建屏幕边缘的透明检测窗口"""
+        """创建屏幕边缘的透明检测窗口（吸附边非法时不创建）"""
         self._remove_edge_detector()
-        g = self._screen_geometry()
         edge = self._snap_edge
+        if edge not in VALID_EDGES:
+            return
+        g = self._screen_geometry()
         sz = self.current_size
         off = int(self._ball_offset())
         ball_x, ball_y = self.pos().x() + off, self.pos().y() + off
@@ -812,7 +880,7 @@ class FloatingWidget(QWidget):
 
     def _do_hide(self):
         """将 widget 滑出屏幕（仅留一小部分可见）"""
-        if not self._snapped:
+        if not self._snapped or self._snap_edge not in VALID_EDGES:
             return
         # 环绕菜单打开 / 拖拽期间绝不缩回
         if self._drag_active:
@@ -844,7 +912,7 @@ class FloatingWidget(QWidget):
 
     def _show_full(self):
         """将 widget 完全滑入屏幕"""
-        if not self._snapped:
+        if not self._snapped or self._snap_edge not in VALID_EDGES:
             return
         # 环绕菜单打开时：浮窗已被临时移到环心对齐位置，不能移动它；
         # 只确保不缩回，避免「菜单还开着、浮窗却缩回/错位」。

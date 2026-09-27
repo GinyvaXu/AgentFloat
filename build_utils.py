@@ -11,6 +11,22 @@ VERSIONS_DIR = os.path.join(SCRIPT_DIR, "versions")
 BUILD_VERSION_FILE = os.path.join(DIST_DIR, ".build_version")
 
 
+def check_ascii_build_path():
+    """构建路径含非 ASCII 字符时给出明确提示（PATCH 3.0.1）
+
+    PyInstaller 的 Qt 钩子通过 QLibraryInfo 获取插件目录，非 ASCII 路径下
+    会得到乱码路径（.../????/...）而导致构建失败。返回 False 表示应中止。
+    """
+    if SCRIPT_DIR.isascii():
+        return True
+    print("[错误] 项目路径包含非 ASCII 字符，PyInstaller 的 Qt 钩子无法解析 Qt 插件目录。")
+    print("       建议：为项目创建 ASCII 目录联接，并从联接路径构建，例如：")
+    print('         cmd /c mklink /J "C:\\AIAgentBase\\AgentFloat_build" "%s"' % SCRIPT_DIR)
+    print('         cd /d "C:\\AIAgentBase\\AgentFloat_build"')
+    print('         .venv\\Scripts\\python build_exe.py')
+    return False
+
+
 # ── P3 onedir 安全裁剪（conda Qt 附带、AgentFloat 未使用的组件）──
 PRUNE_TOP_FILES = [
     "Qt5Pdf_conda.dll",            # PDF 组件（应用不使用）

@@ -59,6 +59,31 @@ def version_path():
     return _resolve_path("VERSION")
 
 
+def ensure_qt_plugin_paths():
+    """非 ASCII 安装路径下 PyQt5/Qt 插件前缀解析失效的兜底（PATCH 3.0.1）
+
+    QLibraryInfo 在含中文等非 ASCII 字符的路径下可能返回乱码路径
+    （如 ``C:/.../Project3-AgentFloat????/...``），导致 QApplication 创建时
+    找不到平台插件而卡死/崩溃；显式补充插件搜索路径即可恢复。
+
+    仅当 PyQt5 安装路径含非 ASCII 字符时生效，正常环境零影响。
+    """
+    if os.environ.get("QT_QPA_PLATFORM_PLUGIN_PATH"):
+        return
+    try:
+        import PyQt5
+        base = os.path.dirname(os.path.abspath(PyQt5.__file__))
+        if base.isascii():
+            return
+        plugins = os.path.join(base, "Qt5", "plugins")
+        if os.path.isdir(os.path.join(plugins, "platforms")):
+            os.environ.setdefault("QT_PLUGIN_PATH", plugins)
+            os.environ.setdefault("QT_QPA_PLATFORM_PLUGIN_PATH",
+                                  os.path.join(plugins, "platforms"))
+    except Exception:
+        pass
+
+
 def web_dir():
     """定位前端目录 web/：兼容源码运行与 PyInstaller 冻结模式。"""
     candidates = []

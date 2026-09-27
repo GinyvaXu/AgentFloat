@@ -17,6 +17,7 @@ from agentfloat.core.logging_setup import (
 )
 from agentfloat.core.paths import ICO_PATH, _IS_FROZEN, config_dir
 from agentfloat.core.registry import default_agents, find_agent, get_primary_agent
+from agentfloat.core.single_instance import acquire_single_instance, activate_existing
 from agentfloat.core.sysutil import _open_url, ensure_utf8_stdio
 from agentfloat.core.theme import FONT_FAMILY, get_colors
 from agentfloat.core.version import VERSION
@@ -33,12 +34,69 @@ from agentfloat.webshell.handlers import WebAppHandlers
 from agentfloat.webshell.server import start_server_thread
 
 
+def _find_unclean_session(report_dir, current_path):
+    """返回最近一次「没有正常退出标记」的会话报告路径（PATCH 3.0.1）
+
+    只检查最近一次会话：它若正常结束则更早的无需关心。
+    """
+    try:
+        names = [n for n in os.listdir(report_dir)
+                 if n.endswith("_session.txt") and n.startswith("v")]
+    except OSError:
+        return None
+    names.sort(reverse=True)
+    for n in names:
+        p = os.path.join(report_dir, n)
+        if os.path.abspath(p) == os.path.abspath(current_path):
+            continue
+        try:
+            with open(p, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError:
+            continue
+        return p if "状态:" not in text else None
+    return None
+
+
+def _exit_process(code):
+    """显式结束进程（PATCH 3.0.1）
+
+    跳过解释器 / Qt 收尾：规避退出期仍有 QThread 在运行时被析构触发的
+    qFatal（0xC0000409 崩溃，旧版反复出现的崩溃签名）与 WebView 子进程
+    收尾卡顿；日志与错误报告已在此之前落盘。
+    """
+    import logging as _logging
+    try:
+        _logging.shutdown()
+    except Exception:
+        pass
+    os._exit(int(code))
+
+
 def main():
     ensure_utf8_stdio()
     # ── 启动日志 ──
     _setup_logger()
     _log().info("=" * 50)
     _log().info("AgentFloat v%s 启动 | Frozen=%s | PID=%s", VERSION, _IS_FROZEN, os.getpid())
+
+    # ── 单实例守卫（PATCH 3.0.1）：已有实例则唤出它的浮窗并退出 ──
+    if not acquire_single_instance():
+        _log().info("检测到已有实例在运行，请求其显示浮窗，本进程退出")
+        try:
+            activate_existing()
+        except Exception:
+            pass
+        return 0
+
+    # ── 原生崩溃堆栈落盘（faulthandler），便于事后定位 ──
+    try:
+        import faulthandler
+        _fh_path = os.path.join(config_dir(), "logs", "faulthandler.log")
+        os.makedirs(os.path.dirname(_fh_path), exist_ok=True)
+        faulthandler.enable(file=open(_fh_path, "a", encoding="utf-8"), all_threads=True)
+    except Exception:
+        pass
 
     from datetime import datetime as _dt
     _start_ts = _dt.now().strftime("%Y%m%d_%H%M%S")
@@ -59,8 +117,16 @@ def main():
     except Exception:
         pass
 
+    # ── 上一次会话是否异常结束（崩溃/被强杀）──
     try:
-        _main()
+        _prev = _find_unclean_session(_report_dir, _session_path)
+        if _prev:
+            _log().warning("上一次会话未正常结束（崩溃或被强制结束）: %s", os.path.basename(_prev))
+    except Exception:
+        pass
+
+    try:
+        code = _main()
         _log().info("AgentFloat 正常退出")
         try:
             with open(_session_path, "a", encoding="utf-8") as _sf:
@@ -71,6 +137,7 @@ def main():
         _flush = _flush_error_report()
         if _flush:
             _log().info("错误汇总报告已导出: %s", _flush)
+        _exit_process(int(code or 0))
     except Exception:
         import traceback
         tb = traceback.format_exc()
@@ -106,10 +173,15 @@ def main():
         _flush = _flush_error_report()
         if _flush:
             _log().info("错误汇总报告已导出: %s", _flush)
+        if _IS_FROZEN:
+            _exit_process(1)
         raise
 
 
 def _main():
+    # PATCH 3.0.1：非 ASCII 路径下补 Qt 插件搜索路径（否则 QApplication 可能起不来）
+    from agentfloat.core.paths import ensure_qt_plugin_paths
+    ensure_qt_plugin_paths()
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("agentfloat.launcher")
     except Exception: pass
@@ -398,6 +470,7 @@ def _main():
     tray_menu.setStyleSheet(_build_menu_stylesheet(widget.theme))
 
     tray_menu.addAction("显示浮窗", widget.show)
+    tray_menu.addAction("重置浮窗位置", widget.reset_position)
     tray_menu.addSeparator()
     tray_primary = get_primary_agent(widget.config.get("agents", default_agents()))
     tray_pname = tray_primary.get("name", "主 Agent") if tray_primary else "主 Agent"
@@ -481,4 +554,6 @@ def _main():
     if config.get("check_updates", True):
         QTimer.singleShot(3000, lambda: _check_update(manual=False))
 
-    sys.exit(app.exec_())
+    # PATCH 3.0.1：返回退出码而非 sys.exit——SystemExit 会绕过上方的
+    # 「正常退出」收尾（会话报告与错误汇总此前从未落盘）
+    return app.exec_()

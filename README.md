@@ -12,7 +12,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 </p>
 
 <p align="center">
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.0.0-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.0.1-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%2010%2F11-8E44AD?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"></a>
@@ -151,6 +151,7 @@ AgentFloat/
 - [x] v2.3 — **P1 结构重构**：src 包化 + 死代码清除（-3.3k 行）+ 主题 token 收敛
 - [x] v2.4 — **P2 交互与视觉重写**：浮球状态机 / 环菜单手感 / ProjectDock 设计语言
 - [x] v3.0 — **P3 测试与瘦身**：pytest 146 项 / onedir 打包（启动 4.3s→1.8s）/ 依赖裁剪（详见 [docs/v3重构方案.md](docs/v3重构方案.md)）
+- [x] v3.0.1 — **稳定性修复**：浮窗位置自愈（越界收敛 / 离屏收回 / 托盘重置）+ 单实例守卫 + 退出链路修复 + 中文路径 Qt 兜底
 - [ ] v3.1+（候选）— pip 版 Qt 构建环境（可再省 ~38MB ICU）/ Web 多标签 / 更多效率工具
 
 > 📚 功能扩展的完整调研与方案对比见 [AI快报与多功能浮窗助手调研报告](docs/AI快报与多功能浮窗助手调研报告.md)。
