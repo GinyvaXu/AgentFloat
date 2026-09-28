@@ -92,6 +92,21 @@ def test_render_and_scale(ball, qapp):
     assert abs(w._visual_scale - 1.0) < 0.02
 
 
+def test_apply_settings_merges_plain_keys(ball, qapp):
+    """PATCH 3.1.1：check_updates / hide_delay_ms 等顶层键必须真正合并，
+
+    否则保存收尾的 save_config(self.config) 会把它们写回旧值（改了存不住）。
+    """
+    w = ball
+    new_cfg = dict(w.config)
+    new_cfg["check_updates"] = not w.config.get("check_updates", True)
+    new_cfg["hide_delay_ms"] = 1234
+    new_cfg["auto_start"] = w.config.get("auto_start", False)   # 保持不变，避免真去创建快捷方式
+    w.apply_settings(new_cfg, preview_only=False)
+    assert w.config["check_updates"] == new_cfg["check_updates"]
+    assert w.config["hide_delay_ms"] == 1234
+
+
 def test_quit_spring(ball, qapp):
     w = ball
     got = []

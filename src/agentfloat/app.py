@@ -445,8 +445,10 @@ def _main():
         if kind == "apply":
             widget.apply_settings(payload.get("config") or widget.config, preview_only=False)
             bridge.publish("config_applied", {"changed_keys": payload.get("changed_keys") or []})
+            bridge.resolve_wait(payload.get("_wait_token"))   # PATCH 3.1.1：唤醒等待中的保存请求
         elif kind == "preview":
             widget.apply_settings(payload.get("config") or widget.config, preview_only=True)
+            bridge.resolve_wait(payload.get("_wait_token"))
         elif kind == "generate_news":
             widget._generate_news(auto=False)
         elif kind == "news_read":

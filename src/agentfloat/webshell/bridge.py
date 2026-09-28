@@ -21,6 +21,7 @@ class WebBridge(object):
         self._lock = threading.Lock()
         self._to_app = queue.Queue()
         self._to_web = queue.Queue()
+        self._waiters = {}
         self._snapshot = {
             "version": "",
             "api_results": [],
@@ -33,6 +34,34 @@ class WebBridge(object):
     def command(self, kind, payload=None):
         """投递一条命令给 Qt 主线程（由主线程定时器 drain 执行）。"""
         self._to_app.put((kind, copy.deepcopy(payload) if payload is not None else {}))
+
+    def command_wait(self, kind, payload=None, timeout=3.0):
+        """投递命令并等待 Qt 主线程处理完成（PATCH 3.1.1）。
+
+        用于「保存设置」：后端等 apply 真正执行完再回读配置，
+        避免前端拿到 apply 之前的旧配置（开关被"打回"）。
+        返回 True 表示在超时内完成。
+        """
+        data = dict(payload or {})
+        token = "%d-%d" % (int(time.time() * 1000), abs(hash(repr(sorted(data.keys())))) & 0xFFFF)
+        evt = threading.Event()
+        with self._lock:
+            self._waiters[token] = evt
+        data["_wait_token"] = token
+        self.command(kind, data)
+        done = evt.wait(timeout)
+        with self._lock:
+            self._waiters.pop(token, None)
+        return done
+
+    def resolve_wait(self, token):
+        """Qt 主线程处理完命令后回调（唤醒 command_wait）。"""
+        if not token:
+            return
+        with self._lock:
+            evt = self._waiters.get(token)
+        if evt is not None:
+            evt.set()
 
     def drain_commands(self):
         """取出所有待处理命令（Qt 主线程调用）。"""

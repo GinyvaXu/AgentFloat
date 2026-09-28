@@ -1930,6 +1930,23 @@ class FloatingWidget(QWidget):
                     _log().info("API 监控配置已变更，重启监控")
                     self._restart_api_monitor()
 
+            # PATCH 3.1.1：补齐此前被忽略的顶层键——它们不在上面任何分支里，
+            # 收尾 save_config(self.config) 会把它们写回旧值（表现为「改了存不住」）
+            try:
+                self.config["hide_delay_ms"] = max(200, min(3000, int(
+                    new_cfg.get("hide_delay_ms", self.config.get("hide_delay_ms", 800)))))
+            except (TypeError, ValueError):
+                self.config["hide_delay_ms"] = self.config.get("hide_delay_ms", 800)
+            self.config["check_updates"] = bool(
+                new_cfg.get("check_updates", self.config.get("check_updates", True)))
+            new_auto = bool(new_cfg.get("auto_start", self.config.get("auto_start", False)))
+            if new_auto != bool(self.config.get("auto_start")):
+                self.config["auto_start"] = new_auto
+                try:
+                    toggle_auto_start(new_auto)
+                except Exception:  # noqa: BLE001
+                    _log().warning("开机自启切换失败", exc_info=True)
+
             save_config(self.config)
 
             # 吸附设置变更后重新应用

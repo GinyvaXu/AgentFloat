@@ -127,9 +127,9 @@ def create_app(bridge, handlers):
         if not isinstance(cfg, dict):
             return JSONResponse({"error": "配置格式错误"}, status_code=400)
         changed_keys = body.get("changed_keys") or []
-        handlers.save_config(cfg)
-        bridge.command("apply", {"config": cfg, "changed_keys": changed_keys})
-        return {"ok": True}
+        handlers.save_config(cfg)                           # 先原子落盘（兜底）
+        applied = handlers.apply_config(cfg, changed_keys)  # 同步应用并回读（PATCH 3.1.1）
+        return {"ok": True, "config": applied}
 
     @api.post("/preview")
     def post_preview(body: dict):

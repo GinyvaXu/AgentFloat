@@ -27,6 +27,16 @@ class WebAppHandlers(object):
     def save_config(self, cfg):
         save_config(cfg)
 
+    def apply_config(self, cfg, changed_keys=None, timeout=3.0):
+        """同步应用配置（等待 Qt 主线程 apply 完成）并回读应用后的完整配置
+
+        PATCH 3.1.1：此前 apply 是异步投递，前端保存后立即 GET 会拿到旧配置，
+        导致「切换选项无法保存」（开关被打回）。
+        """
+        self.bridge.command_wait("apply", {"config": cfg, "changed_keys": changed_keys or []},
+                                 timeout=timeout)
+        return copy.deepcopy(getattr(self.widget, "config", None) or cfg)
+
     def get_app_state(self):
         return {
             "version": VERSION,

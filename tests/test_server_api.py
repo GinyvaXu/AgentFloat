@@ -12,6 +12,7 @@ class FakeHandlers:
 
     def __init__(self, skills_root=""):
         self.saved = []
+        self.applied = []
         self.opened = []
         self.skills_root = skills_root
 
@@ -20,6 +21,13 @@ class FakeHandlers:
 
     def save_config(self, cfg):
         self.saved.append(cfg)
+
+    def apply_config(self, cfg, changed_keys=None, timeout=3.0):
+        """PATCH 3.1.1：同步应用并回读（测试替身：合并后返回）"""
+        self.applied.append({"config": cfg, "changed_keys": changed_keys})
+        merged = dict(self.get_config())
+        merged.update(cfg)
+        return merged
 
     def get_app_state(self):
         return {"version": "test", "theme": "light"}
@@ -59,10 +67,11 @@ def test_config_get_and_put(client):
     assert c.get("/api/config").json()["config"]["theme"] == "light"
 
     r = c.put("/api/config", json={"config": {"theme": "dark"}, "changed_keys": ["theme"]})
-    assert r.json() == {"ok": True}
+    body = r.json()
+    assert body["ok"] is True
+    assert body["config"]["theme"] == "dark", "PUT 应返回同步应用后的配置（PATCH 3.1.1）"
     assert h.saved == [{"theme": "dark"}]
-    cmds = b.drain_commands()
-    assert cmds and cmds[0][0] == "apply"
+    assert h.applied and h.applied[0]["changed_keys"] == ["theme"]
 
 
 def test_config_put_invalid(client):

@@ -87,11 +87,17 @@ import {
   // ── 保存 ────────────────────────────────────────
   async function save() {
     try {
-      $$("[data-bind]").forEach(bindRead);
+      // PATCH 3.1.1：虚拟绑定（__slot_* / __primary / __wtimer_en_*）不写入配置，避免垃圾键；
+      // 普通开关/输入统一由委托监听置脏
+      $$("[data-bind]").forEach((el) => {
+        if (!el.dataset.bind.startsWith("__")) bindRead(el);
+      });
       const changed = diffKeys(cfg, JSON.parse(baseStr));
-      await API.api("/api/config", { method: "PUT", body: { config: cfg, changed_keys: changed } });
-      const resp = await API.api("/api/config");
-      cfg = resp.config;
+      const put = await API.api("/api/config", { method: "PUT", body: { config: cfg, changed_keys: changed } });
+      // PATCH 3.1.1：PUT 返回「同步应用后」的完整配置（后端等待 Qt 线程 apply 完成），
+      // 避免异步 apply 间隙回读把刚改的开关打回
+      if (put && put.config) cfg = put.config;
+      else { const resp = await API.api("/api/config"); cfg = resp.config; }
       baseStr = JSON.stringify(cfg);
       applyTheme();
       refreshDirty();
@@ -100,6 +106,15 @@ import {
     } catch (e) {
       toast("保存失败：" + e.message, "err");
     }
+  }
+
+  // PATCH 3.1.1：补回本地 renderPage（此前只挂在 window.App 上，save 收尾调用时报
+  //「renderPage is not defined」→ 明明保存成功却提示失败）
+  function renderPage() {
+    if (page === "settings") renderSettings();
+    else if (page === "install") renderInstallPage();
+    else if (page === "api") loadApiPage();
+    else loadNewsPage();
   }
 
   // ── 页面导航 ────────────────────────────────────
@@ -338,7 +353,7 @@ import {
     const timerRows = timers.map((t, i) =>
       '<div class="mini-row"><span class="dot" style="background:' + esc(t.color || "#00A6A6") + '"></span>' +
       '<span class="grow">' + esc(t.name) + " · 每 " + esc(t.interval_min) + " 分钟</span>" +
-      '<label class="switch"><input type="checkbox" data-bind="__wtimer_en_' + i + '" ' + (t.enabled ? "checked" : "") + "><span class='track'></span></label>" +
+      '<label class="switch"><input type="checkbox" data-bind="water.timers.' + i + '.enabled" ' + (t.enabled ? "checked" : "") + "><span class='track'></span></label>" +
       '<button class="btn sm" onclick="App.editTimer(' + i + ')">编辑</button>' +
       '<button class="btn sm danger" onclick="App.delTimer(' + i + ')">删除</button></div>').join("");
     el.innerHTML =
@@ -355,11 +370,6 @@ import {
       card("计时器", "每个计时器可独立启停、设置间隔与提醒文案。",
         timerRows + '<div style="margin-top:10px"><button class="btn primary" onclick="App.addTimer()">＋ 添加计时器</button></div>');
     bindAll(el);
-    $$("#settingsContent [data-bind^='__wtimer_en_']").forEach((s) => s.addEventListener("change", () => {
-      const i = parseInt(s.dataset.bind.split("_").pop(), 10);
-      if (timers[i]) timers[i].enabled = s.checked;
-      refreshDirty();
-    }));
   }
 
   function timerModal(idx) {
@@ -696,6 +706,17 @@ import {
     $$("#nav .nav-item").forEach((a) => a.addEventListener("click", () => goPage(a.dataset.page)));
     $$("#settingsSubnav .sub").forEach((b) => b.addEventListener("click", () => goSub(b.dataset.sub)));
     $("#btnSave").addEventListener("click", save);
+    // PATCH 3.1.1：统一委托监听（此前普通开关没有 change 监听 → 不置脏 → 保存按钮禁用 →
+    //「切换选项无法保存」）。__ 前缀为虚拟控件（扇区槽位/主 Agent/计时器开关）由各自处理器负责。
+    document.addEventListener("change", (e) => {
+      const el = e.target;
+      if (el && el.dataset && el.dataset.bind && !el.dataset.bind.startsWith("__")) bindRead(el);
+    });
+    document.addEventListener("input", (e) => {
+      const el = e.target;
+      if (!el || !el.dataset || !el.dataset.bind || el.dataset.bind.startsWith("__")) return;
+      if (el.type === "range" || el.type === "number" || el.type === "text" || el.tagName === "TEXTAREA") bindRead(el);
+    });
     $("#btnTheme").addEventListener("click", () => {
       cfg.theme = cfg.theme === "dark" ? "light" : "dark";
       applyTheme();
@@ -776,7 +797,7 @@ import {
       toast("已添加 5 个预设主题", "ok");
     },
     viewNews: (d) => loadNewsState(d),
-    renderPage: () => { if (page === "settings") renderSettings(); else if (page === "install") renderInstallPage(); else if (page === "api") loadApiPage(); else loadNewsPage(); },
+    renderPage: renderPage,
   };
 
   document.addEventListener("DOMContentLoaded", init);
