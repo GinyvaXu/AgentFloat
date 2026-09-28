@@ -17,6 +17,7 @@ from PyQt5.QtWidgets import (
 )
 
 from agentfloat.core.theme import get_colors
+from agentfloat.ui.panel_style import FadePanelMixin, panel_css
 from agentfloat.ui.panels.skills import _TitleBar
 from agentfloat.services.water.reminder import STATE_CN
 
@@ -34,7 +35,7 @@ def _hex(c):
     return "#%02X%02X%02X" % (c[0], c[1], c[2])
 
 
-class WaterPanel(QDialog):
+class WaterPanel(FadePanelMixin, QDialog):
     """喝水助手主面板：今日杯数 + 三个循环计时器"""
 
     open_settings_requested = pyqtSignal()
@@ -50,7 +51,7 @@ class WaterPanel(QDialog):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFixedSize(380, 468)
-        self.setStyleSheet(self._stylesheet())
+        self.setStyleSheet(self._stylesheet() + panel_css(self._theme))
         self._setup_ui()
         manager.timers_changed.connect(self._refresh)
         manager.cups_changed.connect(self._refresh)

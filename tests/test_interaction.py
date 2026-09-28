@@ -8,7 +8,7 @@ if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
 from agentfloat.ui.interaction import (  # noqa: E402
-    Actions, BallInteraction, CLICK_MOVE_PX,
+    Actions, BallInteraction,
 )
 
 CFG = {"enabled": True, "hover_delay_ms": 400, "long_press_delay_ms": 500,
@@ -27,28 +27,52 @@ def test_click():
     assert m.release(1.2) == [Actions.CLICK]
 
 
-def test_long_press_then_release_no_click():
+def test_long_press_replaced_by_hold_launch():
+    """PATCH 3.3.0：长按不再开菜单——按住不动到时长触发默认启动"""
+    m = make(hold_launch_ms=1000, move_delay_ms=350)
+    m.press(0.0)
+    assert m.hold_progress(0.5) == 0.5
+    assert m.hold_tick(0.9) == []
+    assert m.hold_tick(1.0) == [Actions.LAUNCH_HOLD]
+    assert m.release(1.2) == []                  # 已启动：松手不再触发点击
+
+
+def test_hold_release_before_finish_is_click():
+    m = make(hold_launch_ms=1000)
+    m.press(0.0)
+    assert m.release(0.4) == [Actions.CLICK]      # 提前松手 = 单击启动
+
+
+def test_wheel_on_early_outward_drag():
+    """按住立即外滑（未超移动延迟）→ 轮盘；松手由菜单执行"""
+    m = make(move_delay_ms=350, wheel_enabled=True)
+    m.press(0.0)
+    assert m.move(2, 0.05) == []                  # 中心区内微动不打断
+    assert m.move(20, 0.10) == [Actions.BEGIN_WHEEL]
+    assert m.state == "wheel"
+    assert m.release(0.2) == []
+
+
+def test_outward_move_always_wheel_when_enabled():
+    """PATCH 3.3.1：轮盘开启时外滑始终开轮盘（移动浮窗改由轮盘扇区提供）"""
+    m = make(wheel_enabled=True)
+    m.press(0.0)
+    assert m.move(20, 5.0) == [Actions.BEGIN_WHEEL]   # 按住很久后外滑仍是轮盘
+    assert m.state == "wheel"
+
+
+def test_wheel_disabled_falls_back_to_drag():
+    m = make(wheel_enabled=False)
+    m.press(0.0)
+    assert m.move(20, 0.1) == [Actions.BEGIN_DRAG]
+
+
+def test_slow_press_below_zone_no_drag():
     m = make()
     m.press(0.0)
-    assert m.should_arm_long_press() is True
-    assert m.long_press_fired(0.6) == [Actions.OPEN_MENU]
-    assert m.release(0.7) == []          # 长按后释放不再触发点击
-
-
-def test_drag_cancels_long_press_and_click():
-    m = make()
-    m.press(0.0)
-    assert m.move(CLICK_MOVE_PX + 1, 0.1) == [Actions.BEGIN_DRAG]
-    assert m.should_arm_long_press() is False
-    assert m.long_press_fired(0.6) == []  # 拖拽中长按无效（防误弹菜单）
-    assert m.release(0.9) == [Actions.END_DRAG]
-
-
-def test_slow_press_below_threshold_is_long_press():
-    m = make()
-    m.press(0.0)
-    m.move(2.0, 0.3)                      # 轻微抖动不判拖拽
-    assert m.long_press_fired(0.6) == [Actions.OPEN_MENU]
+    m.move(2.0, 0.3)                              # 轻微抖动不判拖拽/轮盘
+    assert m.state == "pressed"
+    assert m.hold_progress(1.0) > 0
 
 
 def test_hover_open():
@@ -67,12 +91,12 @@ def test_hover_suppressed_after_reveal():
 
 
 def test_hover_suppressed_after_drag_end():
-    m = make()
+    m = make(wheel_enabled=False)                  # 关闭轮盘 → 回落为拖动
     m.press(0.0)
-    m.move(10, 0.1)
-    m.release(0.2)                                 # 拖拽结束 → ② 250ms 抑制（PATCH 3.2.0）
-    assert m.hover_open_allowed(0.4) is False
-    assert m.hover_open_allowed(0.5) is True
+    m.move(20, 0.5)
+    m.release(0.6)                                 # 拖拽结束 → ② 250ms 抑制
+    assert m.hover_open_allowed(0.8) is False
+    assert m.hover_open_allowed(1.0) is True
 
 
 def test_hover_suppressed_after_menu_closed():
@@ -98,43 +122,33 @@ def test_menu_open_press_release_no_double_launch():
     assert m.release(1.1) == []                    # 不重复触发 CLICK
 
 
-def test_mode_long_press_only():
-    m = make(trigger_mode="long_press")
-    assert m.hover_open_allowed(1.0) is False
-    m.press(1.0)
-    assert m.long_press_fired(1.6) == [Actions.OPEN_MENU]
-
-
 def test_mode_hover_only():
     m = make(trigger_mode="hover")
-    m.press(0.0)
-    assert m.should_arm_long_press() is False
-    assert m.long_press_fired(0.6) == []
+    assert m.hover_open_allowed(1.0) is True
 
 
 def test_disabled_menu_keeps_click():
     m = make(enabled=False)
     assert m.hover_open_allowed(1.0) is False
     m.press(0.0)
-    assert m.should_arm_long_press() is False
     assert m.release(0.1) == [Actions.CLICK]       # 菜单禁用不影响单击启动
 
 
-def test_v320_defaults_and_hold_select():
-    """PATCH 3.2.0：默认灵敏档（悬停 180 / 长按 300）+ 按住选环默认开启"""
+def test_v330_defaults():
+    """PATCH 3.3.0：按住启动 2000ms / 移动延迟 350ms / 轮盘开启 / 按住选环开启"""
     m = BallInteraction({})
-    assert m.hover_delay_ms == 180
-    assert m.long_press_delay_ms == 300
+    assert m.hold_launch_ms == 2000
+    assert m.move_delay_ms == 350
+    assert m.wheel_enabled is True
     assert m.hold_select is True
-    m2 = BallInteraction({"hold_select": False})
-    assert m2.hold_select is False
+    assert m.hover_delay_ms == 180
 
 
 def test_hold_select_state_machine():
-    """按住选环：长按弹出后移动不转为拖拽，松手不触发点击"""
-    m = make(hold_select=True)
+    """轮盘状态：外滑打开后不再进入拖拽，松手不触发点击（由菜单执行扇区）"""
+    m = make(wheel_enabled=True, move_delay_ms=350)
     m.press(0.0)
-    assert m.long_press_fired(0.4) == [Actions.OPEN_MENU]
-    assert m.move(60, 0.5) == []                 # 菜单已弹出：移动不再进入拖拽
-    assert m.state == "menu_held"
-    assert m.release(0.6) == []                  # 松手不触发 CLICK（由菜单执行扇区动作）
+    assert m.move(40, 0.1) == [Actions.BEGIN_WHEEL]
+    assert m.state == "wheel"
+    assert m.move(80, 0.2) == []                 # 已进入轮盘：不转拖拽
+    assert m.release(0.3) == []

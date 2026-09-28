@@ -527,13 +527,21 @@ class FloatingWidget(QWidget):
         self._hover_timer.timeout.connect(self._check_hover)
         self._hover_timer.start()
 
-        # 环绕菜单触发定时器（悬停 / 长按双通道）
+        # 环绕菜单触发定时器（悬停通道）+ 按住启动（PATCH 3.3.0）
         self._hover_open_timer = QTimer(self)
         self._hover_open_timer.setSingleShot(True)
         self._hover_open_timer.timeout.connect(self._on_hover_open_fired)
-        self._long_press_timer = QTimer(self)
-        self._long_press_timer.setSingleShot(True)
-        self._long_press_timer.timeout.connect(self._on_long_press_fired)
+        self._hold_timer = QTimer(self)
+        self._hold_timer.setInterval(16)
+        self._hold_timer.timeout.connect(self._on_hold_tick)
+        self._hold_progress = 0.0
+
+        # PATCH 3.3.1：移动浮窗模式（由轮盘「移动浮窗」扇区进入）
+        self._move_mode = False
+        self._move_origin = QPoint()
+        self._move_timer = QTimer(self)
+        self._move_timer.setInterval(16)
+        self._move_timer.timeout.connect(self._on_move_tick)
 
         # 全局快捷键
         self._hotkey_id = 1
@@ -593,6 +601,10 @@ class FloatingWidget(QWidget):
                 else:
                     self.show()
                 return True, 0
+            if msg.message == WM_HOTKEY and msg.wParam == 2 and self._move_mode:
+                # PATCH 3.3.1：移动模式下 Esc = 取消（回原位）
+                self._exit_move_mode(place=False)
+                return True, 0
             if msg.message == activate_message_id():
                 # 重复启动（第二实例）请求唤出浮窗（PATCH 3.0.1）
                 self._ensure_on_screen()
@@ -626,7 +638,10 @@ class FloatingWidget(QWidget):
         _log().debug("浮窗隐藏")
         self._hover_timer.stop()
         self._hover_open_timer.stop()
-        self._long_press_timer.stop()
+        self._hold_timer.stop()
+        self._hold_progress = 0.0
+        if self._move_mode:
+            self._exit_move_mode(place=False)             # PATCH 3.3.1：隐藏即退出移动模式（回原位）
         self._close_radial_menu()
         # 重置 hover 状态
         if self.is_hovered:
@@ -1028,7 +1043,7 @@ class FloatingWidget(QWidget):
             self.move(self.pos().x(), int(v))
 
     def _check_hover(self):
-        if self._quitting:
+        if self._quitting or self._move_mode:
             return
         # 高分屏下 mapFromGlobal 可能返回 2 倍偏移坐标，导致悬停检测错乱；
         # 顶层窗口 pos() 即全局坐标，直接用 QCursor.pos() - pos() 计算本地坐标
@@ -1073,14 +1088,26 @@ class FloatingWidget(QWidget):
         if InteractionActions.OPEN_MENU in acts:
             self._open_radial_menu("hover")
 
-    def _on_long_press_fired(self):
-        acts = self._interaction.long_press_fired(time.monotonic())
-        if InteractionActions.OPEN_MENU in acts:
-            self._open_radial_menu("long_press")
+    def _on_hold_tick(self):
+        """按住启动进度（PATCH 3.3.0）：环形进度实时更新，满 → 默认启动"""
+        if self._move_mode:
+            return
+        now = time.monotonic()
+        acts = self._interaction.hold_tick(now)
+        self._hold_progress = self._interaction.hold_progress(now)
+        self.update()
+        if InteractionActions.LAUNCH_HOLD in acts:
+            self._hold_timer.stop()
+            self._hold_progress = 0.0
+            self.update()
+            _log().info("按住启动完成 → 启动主 Agent")
+            self.launch_requested.emit()
 
     def _open_radial_menu(self, source):
+        if self._move_mode:
+            return                                        # 移动模式：只可移动浮窗
         self._hover_open_timer.stop()
-        self._long_press_timer.stop()
+        self._hold_timer.stop()
         if not self._radial_cfg.get("enabled", True):
             return
         # 防御：拖拽中绝不弹菜单（冷却窗口由状态机裁决）
@@ -1126,8 +1153,8 @@ class FloatingWidget(QWidget):
         self._radial_menu.open_at(
             center,
             anchor_rect=QRect(self.pos(), self.size()))
-        if source == "long_press":
-            # PATCH 3.2.0：按住选环——弹出后不松手，滑到扇区松手即执行
+        if source in ("long_press", "wheel"):
+            # PATCH 3.2.0/3.3.0：按住选环——弹出后不松手，滑到扇区松手即执行
             self._radial_menu.begin_hold()
         # 环绕菜单打开时隐藏余额角标，避免重叠遮挡
         if self._api_badge:
@@ -1191,6 +1218,7 @@ class FloatingWidget(QWidget):
         items.append(RadialMenuItem("skills", "Skills", "辅助窗", "#8E44AD", "S"))
         items.append(RadialMenuItem("api", "API 用量", "余额监控", "#16A085", "¥"))
         items.append(RadialMenuItem("settings", "设置", "偏好", "#5B8DEF", "⚙"))
+        items.append(RadialMenuItem("move", "移动浮窗", "拖动放置", "#0EA5E9", "移"))
         items.append(RadialMenuItem("quit", "退出", "AgentFloat", "#E74C3C", "✕"))
         return items
 
@@ -1224,6 +1252,7 @@ class FloatingWidget(QWidget):
             "clip": ("剪贴板", "历史记录", "#E67E22", "C"),
             "cmd": ("命令", "命令面板", "#27AE60", "⌘"),
             "water": ("喝水", "喝水助手", "#00A6A6", "水"),
+            "move": ("移动浮窗", "拖动放置", "#0EA5E9", "移"),
             "quit": ("退出", "AgentFloat", "#E74C3C", "✕"),
         }
         if action in labels:
@@ -1255,6 +1284,8 @@ class FloatingWidget(QWidget):
             self._open_command_panel()
         elif action_id == "water":
             self._open_water_panel()
+        elif action_id == "move":
+            self._enter_move_mode()
         elif action_id == "quit":
             self._animate_quit()
 
@@ -1609,7 +1640,7 @@ class FloatingWidget(QWidget):
             self._launch_toast.hide()
         self._hover_timer.stop()
         self._hover_open_timer.stop()
-        self._long_press_timer.stop()
+        self._hold_timer.stop()
         # 弹性收拢：整体缩小 + 窗口淡出（弹簧驱动 + 速度继承，收尾不再生硬）
         base_opacity = self.windowOpacity()
 
@@ -1670,6 +1701,44 @@ class FloatingWidget(QWidget):
             painter.setPen(Qt.NoPen)
             painter.drawPath(ball_path)
 
+        # PATCH 3.3.0：按住启动环形进度（品牌渐变 + 微光，实时提醒）
+        if self._hold_progress > 0.01:
+            rp = max(0.0, min(1.0, self._hold_progress))
+            radius = s / 2.0 + 5.5
+            cx = off + s / 2.0
+            cy = off + s / 2.0
+            rect = QRectF(cx - radius, cy - radius, radius * 2, radius * 2)
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(QPen(QColor(accent.red(), accent.green(), accent.blue(), 55), 3.6,
+                                Qt.SolidLine, Qt.RoundCap))
+            painter.drawArc(rect, 90 * 16, -360 * 16)
+            grad2 = QLinearGradient(cx - radius, cy - radius, cx + radius, cy + radius)
+            grad2.setColorAt(0.0, accent)
+            grad2.setColorAt(1.0, QColor(0xAF, 0x52, 0xDE))
+            glow = QColor(accent)
+            glow.setAlpha(70)
+            painter.setPen(QPen(glow, 6.5, Qt.SolidLine, Qt.RoundCap))
+            painter.drawArc(rect, 90 * 16, int(-360 * 16 * rp))
+            painter.setPen(QPen(QBrush(grad2), 3.2, Qt.SolidLine, Qt.RoundCap))
+            painter.drawArc(rect, 90 * 16, int(-360 * 16 * rp))
+
+        # PATCH 3.3.1：移动浮窗模式视觉（虚线环 + 品牌光晕）
+        if self._move_mode:
+            radius = s / 2.0 + 6.5
+            cx = off + s / 2.0
+            cy = off + s / 2.0
+            rect = QRectF(cx - radius, cy - radius, radius * 2, radius * 2)
+            glow = QColor(accent)
+            glow.setAlpha(46)
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(QPen(glow, 6.0))
+            painter.drawEllipse(rect)
+            pen = QPen(QColor(accent.red(), accent.green(), accent.blue(), 210), 2.0,
+                       Qt.DashLine, Qt.RoundCap)
+            pen.setDashPattern([3, 3])
+            painter.setPen(pen)
+            painter.drawEllipse(rect)
+
         # 安全模式指示器：skip-permissions 时右上角红点
         if self.config.get("launch_mode") == "skip_permissions":
             dot_r = max(3.5, s * 0.075)
@@ -1692,6 +1761,14 @@ class FloatingWidget(QWidget):
     def mousePressEvent(self, event):
         if self._quitting:
             return
+        if self._move_mode:
+            # PATCH 3.3.1：移动模式——左键放置 / 右键取消（只可移动）
+            if event.button() == Qt.LeftButton:
+                self._exit_move_mode(place=True)
+            elif event.button() == Qt.RightButton:
+                self._exit_move_mode(place=False)
+            event.accept()
+            return
         now = time.monotonic()
         if event.button() == Qt.LeftButton:
             # 吸附隐藏状态：按压即先弹出，保证点击/拖拽落在可见区域
@@ -1711,11 +1788,77 @@ class FloatingWidget(QWidget):
             self._context_menu()
             return
 
-        # 长按唤醒环绕菜单（双通道；是否可用由状态机裁决）
-        if self._interaction.should_arm_long_press():
-            self._long_press_timer.start(self._interaction.long_press_delay_ms)
+        # PATCH 3.3.0：按住启动进度（中心区不动 → 2s 默认启动；立即外滑 → 轮盘）
+        self._hold_progress = 0.0
+        self._hold_timer.start()
+
+    # ── 移动浮窗模式（PATCH 3.3.1：由轮盘「移动浮窗」扇区进入）──
+    def _enter_move_mode(self):
+        """进入移动模式：浮窗跟随光标；左键放置 / 右键或 Esc 取消（只可移动）"""
+        if self._move_mode:
+            return
+        self._move_mode = True
+        self._move_origin = self.pos()
+        self._hold_timer.stop()
+        self._hold_progress = 0.0
+        self._interaction.cancel()
+        self._close_radial_menu()
+        self._register_move_hotkey()
+        self._move_timer.start()
+        if self._launch_toast is None:
+            self._launch_toast = LaunchToast()
+        self._launch_toast.show_for(self, "移动模式：左键放置 · 右键/Esc 取消",
+                                    self.theme, duration_ms=600000)
+        _log().info("进入移动浮窗模式")
+        self.update()
+
+    def _exit_move_mode(self, place=True):
+        """退出移动模式：place=True 放置（吸附+保存）；False 取消（回原位）"""
+        if not self._move_mode:
+            return
+        self._move_mode = False
+        self._move_timer.stop()
+        self._unregister_move_hotkey()
+        if not place:
+            self.move(self._move_origin)
+        else:
+            self._check_snap()
+            off = int(self._ball_offset())
+            self.config["window_x"] = self.pos().x() + off
+            self.config["window_y"] = self.pos().y() + off
+            save_config(self.config)
+        if self._launch_toast is not None:
+            self._launch_toast.hide()
+        _log().info("退出移动模式: %s", "放置" if place else "取消")
+        self.update()
+
+    def _on_move_tick(self):
+        """移动模式：浮窗居中跟随光标（只响应移动）"""
+        if not self._move_mode:
+            return
+        cur = QCursor.pos()
+        side = self._window_side()
+        self.move(int(cur.x() - side / 2.0), int(cur.y() - side / 2.0))
+
+    def _register_move_hotkey(self):
+        """移动模式临时注册全局 Esc（退出即注销）"""
+        try:
+            MOD_NOREPEAT = 0x4000
+            VK_ESCAPE = 0x1B
+            ctypes.windll.user32.RegisterHotKey(
+                int(self.winId()), 2, MOD_NOREPEAT, VK_ESCAPE)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _unregister_move_hotkey(self):
+        try:
+            ctypes.windll.user32.UnregisterHotKey(int(self.winId()), 2)
+        except Exception:  # noqa: BLE001
+            pass
 
     def mouseMoveEvent(self, event):
+        if self._move_mode:
+            return                                        # 移动模式：只由定时器跟随光标
         if self._quitting or not (event.buttons() & Qt.LeftButton):
             return
         # PATCH 3.2.1：菜单可见（按住选环）时把鼠标位置直接转发给菜单 → 高亮零延迟跟手
@@ -1723,9 +1866,18 @@ class FloatingWidget(QWidget):
             self._radial_menu.update_hold_pos(event.globalPos())
         delta = (event.globalPos() - self._drag_origin).manhattanLength()
         acts = self._interaction.move(delta, time.monotonic())
+        if InteractionActions.BEGIN_WHEEL in acts:
+            # PATCH 3.3.0：按住外滑 → 打开轮盘菜单（游戏式，松手执行）
+            self._hold_timer.stop()
+            self._hold_progress = 0.0
+            self.update()
+            self._hover_open_timer.stop()
+            self._open_radial_menu("wheel")
         if InteractionActions.BEGIN_DRAG in acts:
             self._drag_active = True
-            self._long_press_timer.stop()
+            self._hold_timer.stop()
+            self._hold_progress = 0.0
+            self.update()
             # 拖拽开始：取消悬停展开，并关闭已打开的环绕菜单
             self._hover_open_timer.stop()
             if self._slide_anim is not None:
@@ -1737,14 +1889,19 @@ class FloatingWidget(QWidget):
             self.move(new_pos)
 
     def mouseReleaseEvent(self, event):
-        if self._quitting:
+        if self._quitting or self._move_mode:
             return
         if event.button() == Qt.LeftButton:
-            if (self._interaction.state == "menu_held"
+            # PATCH 3.3.0：松手即取消「按住启动」进度
+            self._hold_timer.stop()
+            if self._hold_progress > 0.01:
+                self._hold_progress = 0.0
+                self.update()
+            if (self._interaction.state in ("menu_held", "wheel")
                     and self._radial_menu is not None and self._radial_menu.isVisible()):
-                # PATCH 3.2.0：按住选环松手 → 命中扇区执行，空白/中心取消
+                # PATCH 3.2.0/3.3.0：按住选环/轮盘松手 → 命中扇区执行，空白/中心取消
                 self._radial_menu.end_hold(event.globalPos())
-                self._interaction.release(time.monotonic())   # 退出 menu_held，不触发 CLICK
+                self._interaction.release(time.monotonic())   # 退出菜单状态，不触发 CLICK
                 self._drag_active = False
                 self.is_pressed = False
                 self._sync_api_panel_position()

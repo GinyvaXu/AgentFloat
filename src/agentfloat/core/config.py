@@ -136,6 +136,11 @@ def load_config():
         if "hold_select" not in _rm:
             _rm["hold_select"] = True
             _migrated = True
+        # PATCH 3.3.0：按住启动 / 轮盘 / 移动延迟（缺省补齐，不覆盖用户自定义）
+        for _k, _v in (("hold_launch_ms", 2000), ("move_delay_ms", 350), ("wheel_enabled", True)):
+            if _k not in _rm:
+                _rm[_k] = _v
+                _migrated = True
 
     if _migrated and (loaded or not parse_error):
         save_config(defaults)

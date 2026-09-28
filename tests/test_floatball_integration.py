@@ -50,30 +50,47 @@ def test_interaction_flow(ball, qapp):
     w.mouseReleaseEvent(_mev(QEvent.MouseButtonRelease, (20, 20), gx, gy))
     assert launched == [1]
 
-    # 长按 → 环菜单（释放不再启动）
+    # PATCH 3.3.0：按住不动 → 环形进度 → 默认启动
     w.mousePressEvent(_mev(QEvent.MouseButtonPress, (20, 20), gx, gy))
-    w._on_long_press_fired()
-    _pump(qapp, 0.3)
-    assert w._interaction.state == "menu_held"
-    assert w._radial_menu is not None and w._radial_menu.isVisible()
+    assert w._interaction.hold_progress(time.monotonic() + 0.5) > 0
+    w._interaction._press_t = time.monotonic() - 10     # 模拟已按满
+    w._on_hold_tick()
+    assert launched == [1, 1]
     w.mouseReleaseEvent(_mev(QEvent.MouseButtonRelease, (20, 20), gx, gy))
-    assert launched == [1]
-    w._close_radial_menu()
+    assert launched == [1, 1]                            # 已启动：松手不再触发点击
+
+    # PATCH 3.3.0：按住外滑 → 轮盘（松手取消/执行）
+    w.mousePressEvent(_mev(QEvent.MouseButtonPress, (20, 20), gx, gy))
+    w.mouseMoveEvent(_mev(QEvent.MouseMove, (44, 44), gx + 24, gy + 24))
+    _pump(qapp, 0.3)
+    assert w._interaction.state == "wheel"
+    assert w._radial_menu is not None and w._radial_menu.isVisible()
+    w.mouseReleaseEvent(_mev(QEvent.MouseButtonRelease, (20, 20), gx, gy))  # 中心松手 = 取消
+    assert launched == [1, 1]
     t_close = time.monotonic()
     # 菜单关闭冷却（用显式参考时刻，避免依赖关闭动画信号何时触发）
     assert w._interaction.hover_open_allowed(t_close + 0.1) is False
     _pump(qapp, 0.5)
 
-    # 拖拽 → 不弹菜单、不触发启动
+    # PATCH 3.3.1：轮盘开启时，按住外滑始终是轮盘（移动浮窗由轮盘「移动浮窗」扇区提供）
+    w.mousePressEvent(_mev(QEvent.MouseButtonPress, (20, 20), gx, gy))
+    w.mouseMoveEvent(_mev(QEvent.MouseMove, (44, 44), gx + 24, gy + 24))
+    assert w._interaction.state == "wheel"
+    assert w._radial_menu is not None and w._radial_menu.isVisible()
+    w.mouseReleaseEvent(_mev(QEvent.MouseButtonRelease, (20, 20), gx, gy))
+    _pump(qapp, 0.3)
+
+    # 关闭轮盘通道 → 回落为直接拖动浮窗（不弹菜单、不触发启动）
+    w._interaction._wheel_enabled = False
     w.mousePressEvent(_mev(QEvent.MouseButtonPress, (20, 20), gx, gy))
     w.mouseMoveEvent(_mev(QEvent.MouseMove, (44, 44), gx + 24, gy + 24))
     assert w._interaction.state == "dragging" and w._drag_active is True
-    w._on_long_press_fired()
     assert w._radial_menu is None or not w._radial_menu.isVisible()
     w.mouseReleaseEvent(_mev(QEvent.MouseButtonRelease, (44, 44), gx + 24, gy + 24))
-    assert launched == [1]
+    assert launched == [1, 1]
     assert w._interaction.hover_open_allowed(time.monotonic()) is False  # 拖拽冷却
     assert w._interaction.hover_open_allowed(time.monotonic() + 0.5) is True
+    w._interaction._wheel_enabled = True
 
     # 贴边唤出抑制
     w._interaction.notify_reveal(time.monotonic())
@@ -107,6 +124,29 @@ def test_apply_settings_merges_plain_keys(ball, qapp):
     w.apply_settings(new_cfg, preview_only=False)
     assert w.config["check_updates"] == new_cfg["check_updates"]
     assert w.config["hide_delay_ms"] == 1234
+
+
+def test_hold_ring_renders(ball, qapp):
+    """PATCH 3.3.0：按住启动环形进度条应能正常出图"""
+    w = ball
+    w._hold_progress = 0.5
+    grab = w.grab()
+    assert not grab.isNull() and grab.width() > 0
+    w._hold_progress = 0.0
+
+
+def test_move_mode_enter_place_cancel(ball, qapp):
+    """PATCH 3.3.1：轮盘「移动浮窗」→ 移动模式（放置/取消都应正确退出）"""
+    w = ball
+    origin = w.pos()
+    w._enter_move_mode()
+    assert w._move_mode is True
+    w._exit_move_mode(place=False)                # 取消 → 回原位
+    assert w._move_mode is False
+    assert w.pos() == origin
+    w._enter_move_mode()
+    w._exit_move_mode(place=True)                 # 放置 → 保存（save_config 已 mock）
+    assert w._move_mode is False
 
 
 def test_quit_spring(ball, qapp):

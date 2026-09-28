@@ -19,8 +19,12 @@
 """
 from __future__ import annotations
 
-CLICK_MOVE_PX = 4.0          # 位移超过该值判定为拖拽（同时长按失效）
-# PATCH 3.2.0（菜单手感）：冷却窗口整体缩短，弹过的浮球更快恢复悬停响应
+CLICK_MOVE_PX = 4.0          # 位移超过该值判定为拖拽（兼容旧逻辑）
+# PATCH 3.3.0（游戏式手势）：
+#   按住不动（中心区）→ 环形进度条 → 约 2s 默认启动
+#   按住后立即向外滑（未超移动延迟）→ 环形菜单（轮盘，松手执行）
+#   按住超过移动延迟后拖动 → 移动浮窗
+CENTER_ZONE_PX = 14.0        # 「中心区」半径：按住期间位移不超过它才算「按住不动」
 REVEAL_SUPPRESS_S = 0.35     # ① 贴边唤出后：悬停展开抑制窗口
 DRAG_SUPPRESS_S = 0.25       # ② 拖拽结束后：悬停展开抑制窗口
 MENU_SUPPRESS_S = 0.30       # ③ 菜单关闭后：悬停展开抑制窗口
@@ -31,8 +35,10 @@ class Actions(object):
     HOVER_IN = "hover_in"
     HOVER_OUT = "hover_out"
     BEGIN_DRAG = "begin_drag"
+    BEGIN_WHEEL = "begin_wheel"      # PATCH 3.3.0：按住外滑 → 打开轮盘菜单
     END_DRAG = "end_drag"
     CLICK = "click"
+    LAUNCH_HOLD = "launch_hold"      # PATCH 3.3.0：按住不动完成 → 默认启动
     OPEN_MENU = "open_menu"
 
 
@@ -57,6 +63,10 @@ class BallInteraction(object):
         self._long_press_ms = 300.0
         self._trigger_mode = "both"
         self._hold_select = True
+        self._hold_launch_ms = 2000.0    # PATCH 3.3.0
+        self._move_delay_ms = 350.0      # PATCH 3.3.0
+        self._wheel_enabled = True       # PATCH 3.3.0
+        self._press_t = 0.0
         return self
 
     def configure(self, radial_cfg=None):
@@ -65,8 +75,11 @@ class BallInteraction(object):
         self._hover_ms = float(cfg.get("hover_delay_ms", 180))
         self._long_press_ms = float(cfg.get("long_press_delay_ms", 300))
         mode = cfg.get("trigger_mode", "both")
-        self._trigger_mode = mode if mode in ("hover", "long_press", "both") else "both"
+        self._trigger_mode = mode if mode in ("hover", "long_press", "both", "wheel") else "both"
         self._hold_select = bool(cfg.get("hold_select", True))
+        self._hold_launch_ms = max(500.0, float(cfg.get("hold_launch_ms", 2000)))
+        self._move_delay_ms = max(120.0, float(cfg.get("move_delay_ms", 350)))
+        self._wheel_enabled = bool(cfg.get("wheel_enabled", True))
         return self
 
     # ── 只读属性 ──────────────────────────────────
@@ -83,16 +96,21 @@ class BallInteraction(object):
         return self._enabled and self._trigger_mode in ("hover", "both")
 
     @property
-    def long_press_channel(self):
-        return self._enabled and self._trigger_mode in ("long_press", "both")
+    def wheel_enabled(self):
+        """按住外滑唤出轮盘（PATCH 3.3.0）"""
+        return bool(self._enabled and self._wheel_enabled)
 
     @property
     def hover_delay_ms(self):
         return int(self._hover_ms)
 
     @property
-    def long_press_delay_ms(self):
-        return int(self._long_press_ms)
+    def hold_launch_ms(self):
+        return int(self._hold_launch_ms)
+
+    @property
+    def move_delay_ms(self):
+        return int(self._move_delay_ms)
 
     @property
     def hold_select(self):
@@ -122,46 +140,47 @@ class BallInteraction(object):
                     or t < self._t_drag_end + DRAG_SUPPRESS_S
                     or t < self._t_menu_closed + MENU_SUPPRESS_S)
 
-    def should_arm_long_press(self):
-        return self.long_press_channel and self._state == "pressed"
-
     # ── 输入事件 ──────────────────────────────────
     def press(self, t):
         """左键按下"""
         self._press_in_menu = self._menu_open
         self._press_moved = 0.0
+        self._press_t = t
         if self._state == "idle":
             self._state = "pressed"
         return []
 
     def move(self, total_delta_px, t):
-        """按住移动（total_delta_px = 相对按下点的累计曼哈顿距离）"""
+        """按住移动（total_delta_px = 相对按下点的累计曼哈顿距离）
+
+        PATCH 3.3.1：
+        - 中心区（≤14px）内不动 → 继续累计「按住启动」进度
+        - 中心区外滑 → 打开轮盘菜单（松手执行）；移动浮窗改由轮盘「移动浮窗」扇区提供
+        - 轮盘关闭时回落为直接拖动浮窗（兼容旧行为）
+        """
         self._press_moved = float(total_delta_px)
-        if self._state == "pressed" and self._press_moved > CLICK_MOVE_PX:
-            self._state = "dragging"
-            return [Actions.BEGIN_DRAG]
+        if self._state != "pressed" or self._press_moved <= CENTER_ZONE_PX:
+            return []
+        if self._wheel_enabled:
+            self._state = "wheel"
+            return [Actions.BEGIN_WHEEL]
+        self._state = "dragging"
+        return [Actions.BEGIN_DRAG]
+
+    def hold_progress(self, t):
+        """按住不动进度 0..1（供视图绘制环形进度条）"""
+        if self._state != "pressed" or self._press_moved > CENTER_ZONE_PX:
+            return 0.0
+        return max(0.0, min(1.0, (t - self._press_t) * 1000.0 / self._hold_launch_ms))
+
+    def hold_tick(self, t):
+        """按住进度检查（视图定时器调用）；完成时返回 LAUNCH_HOLD"""
+        if self._state != "pressed" or self._press_moved > CENTER_ZONE_PX:
+            return []
+        if (t - self._press_t) * 1000.0 >= self._hold_launch_ms:
+            self._state = "launched"
+            return [Actions.LAUNCH_HOLD]
         return []
-
-    def long_press_fired(self, t):
-        """长按计时器到点（视图精确计时，状态机校验有效性）"""
-        if not self.should_arm_long_press():
-            return []
-        if self._press_moved > CLICK_MOVE_PX:
-            return []
-        self._state = "menu_held"
-        return [Actions.OPEN_MENU]
-
-    def hover_enter(self, t):
-        return [Actions.HOVER_IN]
-
-    def hover_leave(self, t):
-        return [Actions.HOVER_OUT]
-
-    def hover_timer_fired(self, t):
-        """悬停计时器到点（视图精确计时，状态机做最终校验）"""
-        if not self.hover_open_allowed(t):
-            return []
-        return [Actions.OPEN_MENU]
 
     def release(self, t):
         """左键释放"""
@@ -176,3 +195,19 @@ class BallInteraction(object):
                 return []
             return [Actions.CLICK]
         return []
+
+    def cancel(self):
+        """强制回到待机（关闭菜单 / 取消操作时）"""
+        self._state = "idle"
+
+    def hover_enter(self, t):
+        return [Actions.HOVER_IN]
+
+    def hover_leave(self, t):
+        return [Actions.HOVER_OUT]
+
+    def hover_timer_fired(self, t):
+        """悬停计时器到点（视图精确计时，状态机做最终校验）"""
+        if not self.hover_open_allowed(t):
+            return []
+        return [Actions.OPEN_MENU]

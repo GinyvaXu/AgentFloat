@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QFont
 
 from agentfloat.core.theme import get_colors
+from agentfloat.ui.panel_style import FadePanelMixin, panel_css
 
 PRESET_COLORS = ["#5B8DEF", "#16A085", "#E67E22", "#8E44AD", "#2E86C1", "#27AE60"]
 PRESET_CHARS = ["⚙", "▶", "⌘", "▣", "◈", "✎"]
@@ -160,7 +161,7 @@ class CommandEditDialog(QDialog):
         return self._entry
 
 
-class CommandPanel(QDialog):
+class CommandPanel(FadePanelMixin, QDialog):
     """命令面板：列表 + 运行 / 新建 / 编辑 / 删除 / 预设"""
 
     commands_changed = pyqtSignal(list)
@@ -202,7 +203,7 @@ class CommandPanel(QDialog):
         )
 
     def _setup_ui(self):
-        self.setStyleSheet(self._css())
+        self.setStyleSheet(self._css() + panel_css(self._theme))
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 12)
         root.setSpacing(8)

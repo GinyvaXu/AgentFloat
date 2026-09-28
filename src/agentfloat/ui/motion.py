@@ -29,6 +29,9 @@ class Tokens(object):
     PRESS = (480.0, 30.0)         # 按压回弹：快、微过冲
     QUIT = (300.0, 28.0)          # 退出收拢
     SPEED = (300.0, 26.0)         # 通用速度感
+    # PATCH 3.3.0：窗口/面板渐入渐出时长（ms）
+    PANEL_IN_MS = 200
+    PANEL_OUT_MS = 150
 
 
 SNAP_EPS = 0.0015        # 到位判定：值差

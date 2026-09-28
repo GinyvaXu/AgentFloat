@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QFont
 
 from agentfloat.core.theme import get_colors
+from agentfloat.ui.panel_style import FadePanelMixin, panel_css
 
 HISTORY_KEY = "clipboard_history"
 MAX_ITEMS = 60
@@ -62,7 +63,7 @@ class ClipboardHistory(object):
         self.save()
 
 
-class ClipboardPanel(QDialog):
+class ClipboardPanel(FadePanelMixin, QDialog):
     """剪贴板历史面板：点击条目复制回剪贴板"""
 
     copied = pyqtSignal(str)
@@ -105,7 +106,7 @@ class ClipboardPanel(QDialog):
         )
 
     def _setup_ui(self):
-        self.setStyleSheet(self._css())
+        self.setStyleSheet(self._css() + panel_css(self._theme))
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 12)
         root.setSpacing(8)

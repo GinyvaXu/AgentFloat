@@ -307,17 +307,18 @@ import {
     const agents = cfg.agents || [];
     const slotOpts = [["", "自动（默认布局）"]];
     agents.forEach((a) => slotOpts.push(["agent:" + a.id, "启动 " + a.name]));
-    [["skills", "Skills 辅助窗"], ["api", "API 用量"], ["settings", "设置"], ["news", "AI 快报"], ["clip", "剪贴板历史"], ["cmd", "命令面板"], ["water", "喝水助手"], ["quit", "退出"]].forEach((o) => slotOpts.push(o));
+    [["skills", "Skills 辅助窗"], ["api", "API 用量"], ["settings", "设置"], ["news", "AI 快报"], ["clip", "剪贴板历史"], ["cmd", "命令面板"], ["water", "喝水助手"], ["move", "移动浮窗"], ["quit", "退出"]].forEach((o) => slotOpts.push(o));
     const slots = Array.isArray(rm.slots) ? rm.slots : [];
     const slotRows = Array.from({ length: rm.slot_count || 6 }, (_, i) =>
       row("扇区 " + (i + 1), "", selectCtl("__slot_" + i, slots[i] || "", slotOpts))).join("");
     el.innerHTML =
       card("环绕菜单", "鼠标悬停 / 长按浮窗唤出环绕菜单；扇区功能可自由映射，未来扩展功能在此预留。",
         row("启用环绕菜单", "", switchCtl("radial_menu.enabled", rm.enabled)) +
-        row("触发方式", "", selectCtl("radial_menu.trigger_mode", rm.trigger_mode || "both", [["both", "悬停 + 长按"], ["hover", "仅悬停"], ["long_press", "仅长按"]])) +
-        row("按住选环", "长按弹出后不松手：滑到目标扇区松开即执行（PATCH 3.2.0）", switchCtl("radial_menu.hold_select", rm.hold_select !== false)) +
+        row("触发方式", "", selectCtl("radial_menu.trigger_mode", rm.trigger_mode || "both", [["both", "悬停 + 轮盘"], ["hover", "仅悬停"]])) +
+        row("按住选环", "轮盘弹出后滑到目标扇区松开即执行（PATCH 3.2.0）", switchCtl("radial_menu.hold_select", rm.hold_select !== false)) +
+        row("按住外滑唤出轮盘", "按住后立即向外滑 = 游戏式轮盘；轮盘里可选「移动浮窗」（PATCH 3.3.0/3.3.1）", switchCtl("radial_menu.wheel_enabled", rm.wheel_enabled !== false)) +
+        row("按住启动 (ms)", "按住不动完成该时长 → 启动主 Agent（环形进度条，PATCH 3.3.0）", numCtl("radial_menu.hold_launch_ms", rm.hold_launch_ms || 2000, { min: 500, max: 5000 })) +
         row("悬停延迟 (ms)", "越小越灵敏（默认 180）", numCtl("radial_menu.hover_delay_ms", rm.hover_delay_ms || 180, { min: 100, max: 2000 })) +
-        row("长按延迟 (ms)", "越小越灵敏（默认 300）", numCtl("radial_menu.long_press_delay_ms", rm.long_press_delay_ms || 300, { min: 100, max: 2000 })) +
         row("半径 (px)", "", numCtl("radial_menu.radius", rm.radius || 120, { min: 80, max: 260 })) +
         row("扇区数量", "", selectCtl("__slot_count", rm.slot_count || 6, [[4, "4 扇区"], [6, "6 扇区"], [8, "8 扇区"]], true))) +
       card("扇区功能映射", "每个扇区可映射为启动某 Agent 或打开某面板；「自动」表示按默认布局（所有 Agent + 固定 4 项）自动填充。", slotRows);

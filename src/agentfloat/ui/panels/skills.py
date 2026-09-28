@@ -17,6 +17,7 @@ from PyQt5.QtWidgets import (
 )
 
 from agentfloat.core.theme import get_colors
+from agentfloat.ui.panel_style import FadePanelMixin, panel_css
 from agentfloat.services.skills.scanner import scan_skills, default_skill_roots, categorize_skills
 from agentfloat.services.skills.translations import get_zh
 
@@ -169,7 +170,7 @@ class _TitleBar(QFrame):
         event.accept()
 
 
-class SkillsPanel(QDialog):
+class SkillsPanel(FadePanelMixin, QDialog):
     def __init__(self, skills_cfg, theme="light", parent=None):
         super().__init__(parent)
         self._skills_cfg = skills_cfg or {}
@@ -184,7 +185,7 @@ class SkillsPanel(QDialog):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMinimumSize(920, 600)
-        self.setStyleSheet(self._stylesheet())
+        self.setStyleSheet(self._stylesheet() + panel_css(self._theme))
         self._setup_ui()
         self.refresh()
 

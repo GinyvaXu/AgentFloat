@@ -148,10 +148,13 @@ BUILTIN_PRESETS = [
 
 DEFAULT_RADIAL_MENU = {
     "enabled": True,
-    "trigger_mode": "both",          # hover / long_press / both
-    "hold_select": True,             # PATCH 3.2.0：按住选环（长按弹出后滑到扇区松手即执行）
-    "hover_delay_ms": 180,           # PATCH 3.2.0：灵敏档（原 400）
-    "long_press_delay_ms": 300,      # PATCH 3.2.0：灵敏档（原 500）
+    "trigger_mode": "both",          # hover / both（悬停通道；轮盘由按住外滑触发）
+    "hold_select": True,             # 按住选环（轮盘/长按弹出后滑到扇区松手即执行）
+    "hover_delay_ms": 180,
+    "long_press_delay_ms": 300,
+    "hold_launch_ms": 2000,          # PATCH 3.3.0：按住不动 2s → 默认启动（环形进度条）
+    "move_delay_ms": 350,            # PATCH 3.3.0：超过该时长后再拖动 = 移动浮窗
+    "wheel_enabled": True,           # PATCH 3.3.0：按住外滑唤出轮盘（游戏式）
     "radius": 120,
     # 扇区功能模块化：每个元素是一个动作 id（可用：
     #   agent:<id> 启动某 Agent / skills / api / settings / news / quit）
