@@ -126,7 +126,7 @@ def test_hold_select_flow(qapp):
     assert m.begin_hold() is True
     assert m._hold_active is True
     assert m.end_hold(gp(30)) is True       # 命中扇区 0（顶部）
-    pump(qapp, 0.4)
+    pump(qapp, 1.2)                          # 确认脉冲 90ms + 顺滑收合动画
     assert got == ["i0"]
 
 

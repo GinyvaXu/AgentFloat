@@ -64,6 +64,9 @@ class RadialMenu(QWidget):
         self._pixmaps = {}         # (i, hovered, dpr) -> QPixmap
         self._cache_dpr = 0.0
         self._bg_cache = {}        # (theme, dpr, n) -> QPixmap（整环背景/发光/描边预渲染）
+        # PATCH 3.3.1：选中确认 + 丝滑收合（动画结束后才执行动作）
+        self._selected_idx = -1
+        self._on_closed = None
 
         # 展开/收拢：弹簧驱动（可打断、速度继承；展开轻过冲，收拢干脆）
         self._progress_state = spring(0.0, MotionTokens.RING_OPEN)
@@ -121,18 +124,34 @@ class RadialMenu(QWidget):
         return self._hold_active
 
     def end_hold(self, global_pos):
-        """按住选环松手：命中扇区则执行，否则取消关闭。返回是否处理了本次松手"""
+        """按住选环松手：命中扇区则执行（确认脉冲 + 丝滑收合后触发），否则取消关闭"""
         if not self._hold_active:
             return False
         self._hold_active = False
         idx = self._click_index(global_pos)
         if 0 <= idx < len(self._items):
-            item = self._items[idx]
-            self.close_menu()
-            self.action_triggered.emit(item.id)
+            self.select(idx)
         else:
             self.close_menu()
         return True
+
+    def select(self, idx):
+        """选中扇区（PATCH 3.3.1）：确认脉冲 → 顺滑收合 → 动画结束后再执行动作"""
+        if not (0 <= idx < len(self._items)):
+            self.close_menu()
+            return
+        item = self._items[idx]
+        self._selected_idx = idx
+        self._hover_idx = idx
+        self._start_press(idx)                 # 确认脉冲：扇区放大 + 品牌发光
+        self._poll.stop()
+
+        def _collapse():
+            if not self.isVisible():
+                return
+            self.close_menu(on_closed=lambda: self.action_triggered.emit(item.id))
+
+        QTimer.singleShot(90, _collapse)       # 先让确认脉冲被看到，再顺滑收合
 
     def update_hold_pos(self, global_pos):
         """按住选环期间由浮球转发鼠标位置：零延迟更新高亮（PATCH 3.2.1）
@@ -165,6 +184,8 @@ class RadialMenu(QWidget):
             y = max(geo.top(), min(y, geo.bottom() - side + 1))
         self.move(x, y)
         self._hover_idx = -1
+        self._selected_idx = -1
+        self._on_closed = None
         self._sector_cache = []
         self._close_timer.stop()
         self._closing = False
@@ -183,7 +204,10 @@ class RadialMenu(QWidget):
             on_done=self._on_open_done)
         self._poll.start()
 
-    def close_menu(self):
+    def close_menu(self, on_closed=None):
+        """收合菜单；on_closed 在动画真正结束后回调（PATCH 3.3.1：选中后先播完动画再执行）"""
+        if on_closed is not None:
+            self._on_closed = on_closed
         self._poll.stop()
         self._close_timer.stop()
         if not self.isVisible():
@@ -215,6 +239,13 @@ class RadialMenu(QWidget):
         self._progress = 0.0
         self.hide()
         self.closed.emit()
+        # PATCH 3.3.1：动画播完后再执行选中动作（保证关闭动画丝滑完整）
+        cb, self._on_closed = self._on_closed, None
+        if cb is not None:
+            try:
+                cb()
+            except Exception:  # noqa: BLE001
+                pass
 
     def _on_press_anim_value(self, v):
         self._press_progress = float(v)
@@ -414,9 +445,7 @@ class RadialMenu(QWidget):
         if idx < 0:
             idx = self._press_idx
         if 0 <= idx < len(self._items):
-            item = self._items[idx]
-            self.close_menu()
-            self.action_triggered.emit(item.id)
+            self.select(idx)
         else:
             self.close_menu()
         event.accept()
@@ -517,10 +546,12 @@ class RadialMenu(QWidget):
             painter.setBrush(dot_c)
             painter.drawEllipse(QRectF(dot_pt.x() - 3.0, dot_pt.y() - 3.0, 6, 6))
 
-            # 按压缩小 / 悬停放大（1.06）
+            # 按压缩小 / 悬停放大（1.06）/ 选中确认放大（1.12）
             content_scale = (1.0 - 0.07 * self._press_progress) * (0.70 + 0.30 * sector_p)
             if hovered:
                 content_scale *= 1.06
+            if i == self._selected_idx:
+                content_scale *= 1.12
             pm = self._sector_pixmap(i, hovered, dpr)
             painter.save()
             painter.translate(pt)

@@ -1070,9 +1070,7 @@ class FloatingWidget(QWidget):
             _log().debug("悬停进入: local=%s scale=%.2f", local_pos, HOVER_SCALE)
             self._interaction.hover_enter(now)
             self._animate_scale(HOVER_SCALE, MotionTokens.SPEED)
-            # 悬停展开（状态机裁决：按压/拖拽/菜单打开期间与三类冷却窗口内均不启动）
-            if self._interaction.hover_open_allowed(now):
-                self._hover_open_timer.start(self._interaction.hover_delay_ms)
+            # PATCH 3.3.1：悬停不再唤出菜单（只做视觉反馈）；唤出仅剩「按住外滑轮盘」
         elif not self.is_hovered and was:
             _log().debug("悬停离开")
             self._interaction.hover_leave(now)

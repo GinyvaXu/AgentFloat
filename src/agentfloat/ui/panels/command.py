@@ -241,9 +241,7 @@ class CommandPanel(FadePanelMixin, QDialog):
         run_bar = QHBoxLayout()
         run_bar.addStretch()
         self.btn_run = QPushButton("▶ 运行")
-        self.btn_run.setStyleSheet("QPushButton { background: #%02X%02X%02X; color: #FFF;"
-                                   " border: none; border-radius: 8px; padding: 7px 22px;"
-                                   " font-size: 13px; font-weight: bold; }" % get_colors(self._theme)["ACCENT"])
+        self.btn_run.setObjectName("primary")      # PATCH 3.3.1：统一品牌渐变主按钮
         self.btn_run.clicked.connect(self._run_current)
         run_bar.addWidget(self.btn_run)
         root.addLayout(run_bar)

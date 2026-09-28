@@ -244,6 +244,7 @@ class WaterReminderPopup(QDialog):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self._build_animation()
         self._build_ui()
+        self.setStyleSheet(panel_css(self._theme))     # PATCH 3.3.1：统一新风格
 
     def _build_animation(self):
         self._op_effect = QGraphicsOpacityEffect(self)
@@ -263,7 +264,6 @@ class WaterReminderPopup(QDialog):
 
     def _build_ui(self):
         c = self._c
-        ac = _hex(c["ACCENT"])
         tx = _hex(c["TEXT"])
         hi = _hex(c["HINT"])
         card_bg = "rgba(44,44,46,0.92)" if self._theme == "dark" else "rgba(250,250,252,0.94)"
@@ -312,17 +312,13 @@ class WaterReminderPopup(QDialog):
 
         btn_snooze = QPushButton("稍后提醒")
         btn_snooze.setCursor(Qt.PointingHandCursor)
-        btn_snooze.setStyleSheet(
-            "QPushButton { background: transparent; color: %s; border: 1px solid %s;"
-            " border-radius: 10px; padding: 10px 18px; font-size: 13px; }" % (hi, border))
+        # PATCH 3.3.1：使用统一幽灵按钮样式（panel_css）
         btn_snooze.clicked.connect(self._on_snooze)
         btn_row.addWidget(btn_snooze)
 
         btn_ok = QPushButton(confirm_text)
         btn_ok.setCursor(Qt.PointingHandCursor)
-        btn_ok.setStyleSheet(
-            "QPushButton { background: %s; color: #FFF; border: none; border-radius: 10px;"
-            " padding: 10px 22px; font-size: 13px; font-weight: bold; }" % ac)
+        btn_ok.setObjectName("primary")            # PATCH 3.3.1：统一品牌渐变主按钮
         btn_ok.clicked.connect(self._on_confirm)
         btn_row.addWidget(btn_ok)
 

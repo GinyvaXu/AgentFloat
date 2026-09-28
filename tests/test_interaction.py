@@ -75,42 +75,16 @@ def test_slow_press_below_zone_no_drag():
     assert m.hold_progress(1.0) > 0
 
 
-def test_hover_open():
+def test_hover_never_opens_menu():
+    """PATCH 3.3.1：悬停唤出已取消（只保留按住启动 / 按住外滑轮盘）"""
     m = make()
     m.hover_enter(1.0)
-    assert m.hover_open_allowed(1.2) is True
-    assert m.hover_timer_fired(1.4) == [Actions.OPEN_MENU]
-
-
-def test_hover_suppressed_after_reveal():
-    m = make()
-    m.notify_reveal(10.0)
-    assert m.hover_open_allowed(10.2) is False    # ① 350ms 抑制（PATCH 3.2.0）
-    assert m.hover_timer_fired(10.3) == []        # 计时器到点也被最终校验拦下
-    assert m.hover_open_allowed(10.4) is True     # 窗口结束后需重新进入才会重新计时
-
-
-def test_hover_suppressed_after_drag_end():
-    m = make(wheel_enabled=False)                  # 关闭轮盘 → 回落为拖动
-    m.press(0.0)
-    m.move(20, 0.5)
-    m.release(0.6)                                 # 拖拽结束 → ② 250ms 抑制
-    assert m.hover_open_allowed(0.8) is False
-    assert m.hover_open_allowed(1.0) is True
-
-
-def test_hover_suppressed_after_menu_closed():
-    m = make()
-    m.menu_opened(0.0)
-    m.menu_closed(1.0)                             # ③ 300ms 抑制（PATCH 3.2.0）
-    assert m.hover_open_allowed(1.25) is False
-    assert m.hover_open_allowed(1.35) is True
-
-
-def test_press_cancels_hover_open():
-    m = make()
-    m.hover_enter(0.0)
-    m.press(0.1)                                   # 按压后计时器到点也不展开（④）
+    assert m.hover_channel is False
+    assert m.hover_open_allowed(1.2) is False
+    assert m.hover_timer_fired(1.4) == []
+    m.notify_reveal(2.0)                           # 贴边唤出后同样不展开
+    assert m.hover_open_allowed(3.0) is False
+    m.press(0.1)
     assert m.hover_timer_fired(0.5) == []
     assert m.release(0.6) == [Actions.CLICK]
 
@@ -120,11 +94,6 @@ def test_menu_open_press_release_no_double_launch():
     m.menu_opened(0.0)
     m.press(1.0)                                   # 菜单打开时按压（交由菜单中心孔处理）
     assert m.release(1.1) == []                    # 不重复触发 CLICK
-
-
-def test_mode_hover_only():
-    m = make(trigger_mode="hover")
-    assert m.hover_open_allowed(1.0) is True
 
 
 def test_disabled_menu_keeps_click():

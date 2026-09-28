@@ -37,7 +37,9 @@ def panel_css(theme="light"):
         " stop:0 %(top)s, stop:1 %(bottom)s); border: 1px solid %(sep)s;"
         " border-radius: 16px; }" % {"top": glass_top, "bottom": glass_bottom, "sep": sep} +
         "QFrame#titleBar { background: %(h)s; border-top-left-radius: 16px;"
-        " border-top-right-radius: 16px; border-bottom: 1px solid %(sep)s; }" % {"h": header, "sep": sep} +
+        " border-top-right-radius: 16px; border-bottom: 2px solid qlineargradient("
+        "x1:0,y1:0,x2:1,y2:0, stop:0 %(a1)s, stop:1 %(a2)s); }" % {"h": header, "a1": ACCENT, "a2": ACCENT_2} +
+        "QFrame#titleBar QLabel { font-size: 13px; font-weight: 600; }" +
         # 文字
         "QLabel { color: %s; font-size: 12px; background: transparent; }" % tx +
         "QLabel#hint, QLabel.hint { color: %s; }" % hint +
@@ -87,7 +89,7 @@ def panel_css(theme="light"):
 
 
 class FadePanelMixin(object):
-    """统一渐入渐出（PATCH 3.3.0）：面板 show 时渐入、close 时渐出后隐藏。
+    """统一渐入渐出 + Esc 关闭（PATCH 3.3.0/3.3.1）
 
     用法： ``class XxxPanel(FadePanelMixin, QDialog)``
     """
@@ -107,3 +109,14 @@ class FadePanelMixin(object):
             fade_out(self, on_done=self.hide)
         except Exception:  # noqa: BLE001
             super().closeEvent(event)
+
+    def keyPressEvent(self, event):
+        """Esc 关闭面板（渐出）"""
+        try:
+            from PyQt5.QtCore import Qt
+            if event.key() == Qt.Key_Escape:
+                self.close()
+                return
+        except Exception:  # noqa: BLE001
+            pass
+        super().keyPressEvent(event)

@@ -88,11 +88,10 @@ def test_interaction_flow(ball, qapp):
     assert w._radial_menu is None or not w._radial_menu.isVisible()
     w.mouseReleaseEvent(_mev(QEvent.MouseButtonRelease, (44, 44), gx + 24, gy + 24))
     assert launched == [1, 1]
-    assert w._interaction.hover_open_allowed(time.monotonic()) is False  # 拖拽冷却
-    assert w._interaction.hover_open_allowed(time.monotonic() + 0.5) is True
+    assert w._interaction.hover_open_allowed(time.monotonic()) is False  # 悬停不再唤出
     w._interaction._wheel_enabled = True
 
-    # 贴边唤出抑制
+    # PATCH 3.3.1：悬停唤出已取消（贴边唤出后同样不展开）
     w._interaction.notify_reveal(time.monotonic())
     assert w._interaction.hover_open_allowed(time.monotonic() + 0.2) is False
 

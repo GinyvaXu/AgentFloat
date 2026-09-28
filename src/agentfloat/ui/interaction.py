@@ -93,7 +93,8 @@ class BallInteraction(object):
 
     @property
     def hover_channel(self):
-        return self._enabled and self._trigger_mode in ("hover", "both")
+        """悬停唤出已取消（PATCH 3.3.1）"""
+        return False
 
     @property
     def wheel_enabled(self):
@@ -131,14 +132,11 @@ class BallInteraction(object):
 
     # ── 裁决 ──────────────────────────────────────
     def hover_open_allowed(self, t):
-        """此刻是否允许启动悬停展开计时"""
-        if not self.hover_channel:
-            return False
-        if self._menu_open or self._state != "idle":
-            return False
-        return not (t < self._t_reveal + REVEAL_SUPPRESS_S
-                    or t < self._t_drag_end + DRAG_SUPPRESS_S
-                    or t < self._t_menu_closed + MENU_SUPPRESS_S)
+        """悬停唤出已取消（PATCH 3.3.1）：悬停只做视觉反馈，不再展开菜单。
+
+        菜单唤出方式仅剩「按住立即外滑（轮盘）」；按住不动则为启动进度。
+        """
+        return False
 
     # ── 输入事件 ──────────────────────────────────
     def press(self, t):
