@@ -10,11 +10,16 @@ from agentfloat.core.paths import WORKSPACE_DIR
 from agentfloat.core.registry import (
     build_agent_args, default_agents, get_primary_agent, resolve_command,
 )
-from agentfloat.services.dsh import launch_dsh_web
+from agentfloat.services.webagent import start as start_web_agent
 
 
 def launch_agent(agent, config=None):
-    """通用 Agent 启动器：检测命令 → wt 启动 → cmd fallback"""
+    """通用 Agent 启动器：终端 / Web / 桌面应用 三通道
+
+    - terminal：Windows Terminal（wt）启动，cmd 兜底
+    - web     ：后台服务 + 自动打开浏览器（dsh web / opencode serve，可终止）
+    - app     ：直接启动桌面 GUI 应用（如 OpenCode Desktop）
+    """
     if config is None:
         config = load_config()
     if not agent:
@@ -22,11 +27,12 @@ def launch_agent(agent, config=None):
         return
 
     name = agent.get("name") or "Agent"
+    launcher = agent.get("launcher") or "terminal"
 
-    # Web 启动器（如 DeepSeek Harness dsh）：后台启动服务并自动打开浏览器
-    if (agent.get("launcher") or "terminal") == "web":
+    # Web 启动器：后台服务 + 自动打开浏览器（PATCH 3.1.0 通用化）
+    if launcher == "web":
         _log().info("以 Web UI 模式启动 Agent: %s", name)
-        launch_dsh_web(agent, config)
+        start_web_agent(agent, config)
         return
 
     cmd_path, err = resolve_command(agent)
@@ -43,13 +49,25 @@ def launch_agent(agent, config=None):
             pass
         return
 
-    mode = agent.get("launch_mode", "normal")
-    args = build_agent_args(agent, mode)
-    args[0] = cmd_path  # 使用解析后的真实路径
-
     working_dir = (agent.get("working_directory") or config.get("working_directory") or "").strip()
     if not working_dir or not os.path.isdir(working_dir):
         working_dir = os.environ.get("USERPROFILE", WORKSPACE_DIR)
+
+    # 桌面应用：无终端窗口，后台直接启动
+    if launcher == "app":
+        _log().info("启动桌面 Agent [%s] 命令=%s 工作目录=%s", name, cmd_path, working_dir)
+        try:
+            subprocess.Popen(
+                [cmd_path], cwd=working_dir,
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+            )
+        except Exception as e:  # noqa: BLE001
+            _log().error("启动桌面 Agent [%s] 失败: %s", name, e)
+        return
+
+    mode = agent.get("launch_mode", "normal")
+    args = build_agent_args(agent, mode)
+    args[0] = cmd_path  # 使用解析后的真实路径
 
     _log().info("启动 Agent [%s] 模式=%s 命令=%s", name, mode, args)
     try:

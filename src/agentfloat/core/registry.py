@@ -9,7 +9,11 @@
 
 launcher:
   terminal — 在 Windows Terminal（wt）中启动命令行 Agent（默认）
-  web      — 以后台服务方式启动并自动打开浏览器（如 DeepSeek Harness `dsh web`）
+  web      — 以后台服务方式启动并自动打开浏览器（如 DeepSeek Harness `dsh web`、`opencode serve`）
+  app      — 直接启动桌面 GUI 应用（如 OpenCode Desktop，无终端窗口）
+
+web 字段（launcher=web 时）：
+  {"command": [...], "port": 端口, "url": "浏览器地址", "log_prefix": "日志名前缀"}
 """
 import copy
 import os
@@ -65,6 +69,60 @@ BUILTIN_PRESETS = [
         "description": "pi.dev 的 Pi Coding Agent — 多模型终端编码智能体（Anthropic/OpenAI/Gemini/DeepSeek），无跳过权限参数，始终使用内置交互确认",
     },
     {
+        "id": "opencode",
+        "name": "OpenCode CLI",
+        "command": "opencode",
+        "args": ["--continue"],
+        "skip_permissions_arg": "--auto",
+        "working_directory": "",
+        "launch_mode": "normal",
+        "icon_color": "#2563EB",
+        "icon_char": "O",
+        "check": "opencode",
+        "primary": False,
+        "builtin": True,
+        "launcher": "terminal",
+        "description": "OpenCode CLI（v2 终端 TUI；默认 --continue 续接上次会话，可在设置中调整参数）",
+    },
+    {
+        "id": "opencode-desktop",
+        "name": "OpenCode Desktop",
+        "command": r"%LOCALAPPDATA%\Programs\@opencodedesktop\OpenCode.exe",
+        "args": [],
+        "skip_permissions_arg": "",
+        "working_directory": "",
+        "launch_mode": "normal",
+        "icon_color": "#0EA5E9",
+        "icon_char": "D",
+        "check": r"%LOCALAPPDATA%\Programs\@opencodedesktop\OpenCode.exe",
+        "primary": False,
+        "builtin": True,
+        "launcher": "app",
+        "description": "OpenCode 桌面版（Electron GUI；在设置 → Agent 管理里可一键设为主 Agent）",
+    },
+    {
+        "id": "opencode-web",
+        "name": "OpenCode Web",
+        "command": "opencode",
+        "args": ["serve", "--port", "4096"],
+        "skip_permissions_arg": "",
+        "working_directory": "",
+        "launch_mode": "normal",
+        "icon_color": "#38BDF8",
+        "icon_char": "W",
+        "check": "opencode",
+        "primary": False,
+        "builtin": True,
+        "launcher": "web",
+        "description": "OpenCode 网页模式（后台运行 opencode serve，自动打开 http://127.0.0.1:4096；可在浮球右键菜单终止）",
+        "web": {
+            "command": ["opencode", "serve", "--port", "4096"],
+            "port": 4096,
+            "url": "http://127.0.0.1:4096",
+            "log_prefix": "opencode_web",
+        },
+    },
+    {
         "id": "dsh",
         "name": "DeepSeek Harness",
         "command": "dsh",
@@ -79,6 +137,12 @@ BUILTIN_PRESETS = [
         "builtin": True,
         "launcher": "web",
         "description": "DeepSeek Harness（dsh）— DeepSeek 官方开源的全栈 AI 智能体（Web UI 模式：后台启动 dsh web 并自动打开浏览器）",
+        "web": {
+            "command": ["dsh", "web"],
+            "port": 3080,
+            "url": "http://127.0.0.1:3080",
+            "log_prefix": "dsh",
+        },
     },
 ]
 
@@ -129,7 +193,7 @@ def normalize_agents(raw):
         if mode not in ("normal", "skip_permissions"):
             mode = "normal"
         launcher = a.get("launcher")
-        if launcher not in ("terminal", "web"):
+        if launcher not in ("terminal", "web", "app"):
             launcher = "terminal"
         item = {
             "id": aid,
@@ -147,6 +211,9 @@ def normalize_agents(raw):
             "launcher": launcher,
             "description": str(a.get("description") or ""),
         }
+        web = a.get("web")
+        if isinstance(web, dict) and web:
+            item["web"] = copy.deepcopy(web)
         out.append(item)
     if not out:
         out = default_agents()
@@ -207,7 +274,7 @@ def resolve_command(agent):
 
     返回 (path_or_None, error_msg)。支持直接路径与 PATH 查找。
     """
-    cmd = (agent.get("command") or "").strip()
+    cmd = os.path.expandvars((agent.get("command") or "").strip())
     if not cmd:
         return None, "未配置命令"
     # 含路径分隔符或明确 .exe → 当作完整路径处理

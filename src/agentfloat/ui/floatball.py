@@ -40,6 +40,7 @@ from agentfloat.services.skills.ai_service import (
     AutoTranslateWorker, LocalAiWorker, _ensure_platform_url, find_new_skills,
 )
 from agentfloat.services.skills.scanner import default_skill_roots
+from agentfloat.services import webagent
 from agentfloat.services.water.reminder import (
     DEFAULT_WATER, WaterTimerManager, is_exempt_process,
 )
@@ -49,6 +50,7 @@ from agentfloat.ui.panels.skills import SkillsPanel
 from agentfloat.ui.panels.water import WaterPanel, WaterReminderPopup
 from agentfloat.core.single_instance import activate_message_id
 from agentfloat.core.qtutil import release_thread_later, track
+from agentfloat.core.sysutil import _open_url
 from agentfloat.ui.interaction import Actions as InteractionActions, BallInteraction
 from agentfloat.ui.motion import Tokens as MotionTokens, motion, spring
 from agentfloat.ui.placement import (
@@ -1797,6 +1799,24 @@ class FloatingWidget(QWidget):
                     continue
                 sub.addAction(a.get("name"), lambda a=a: launch_agent(a, self.config))
         menu.addAction("Skills 辅助窗", self._open_skills_panel)
+
+        # Web Agent 启动/终止（PATCH 3.1.0：浮球右键菜单入口）
+        web_agents = webagent.list_web_agents(self._agents)
+        if web_agents:
+            web_menu = menu.addMenu("Web Agent")
+            for agent, spec in web_agents:
+                st = webagent.status(agent)
+                wname = agent.get("name") or agent.get("id")
+                if st.get("running"):
+                    web_menu.addAction("终止 %s（:%d）" % (wname, spec["port"]),
+                                       lambda a=agent: self._toggle_web_agent(a))
+                    web_menu.addAction("打开 %s 页面" % wname,
+                                       lambda u=spec["url"]: _open_url(u))
+                else:
+                    web_menu.addAction("启动 %s" % wname,
+                                       lambda a=agent: self._toggle_web_agent(a))
+                web_menu.addSeparator()
+
         menu.addSeparator()
         menu.addAction("设置...", self.settings_requested.emit)
         menu.addSeparator()
@@ -1810,6 +1830,17 @@ class FloatingWidget(QWidget):
         menu.addAction("退出", self.quit_requested.emit)
 
         menu.exec_(QCursor.pos())
+
+    def _toggle_web_agent(self, agent):
+        """Web Agent 启动/终止（浮球右键菜单入口，PATCH 3.1.0）"""
+        st = webagent.status(agent)
+        name = (agent or {}).get("name") or (agent or {}).get("id")
+        if st.get("running"):
+            ok = webagent.stop(agent)
+            _log().info("Web Agent 终止请求: %s -> %s", name, ok)
+        else:
+            ok = webagent.start(agent, self.config)
+            _log().info("Web Agent 启动请求: %s -> %s", name, ok)
 
     def closeEvent(self, event):
         self._unregister_hotkey()

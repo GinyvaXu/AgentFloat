@@ -12,7 +12,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 </p>
 
 <p align="center">
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.0.2-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.1.0-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%2010%2F11-8E44AD?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"></a>
@@ -153,6 +153,8 @@ AgentFloat/
 - [x] v3.0 — **P3 测试与瘦身**：pytest 146 项 / onedir 打包（启动 4.3s→1.8s）/ 依赖裁剪（详见 [docs/v3重构方案.md](docs/v3重构方案.md)）
 - [x] v3.0.1 — **稳定性修复**：浮窗位置自愈（越界收敛 / 离屏收回 / 托盘重置）+ 单实例守卫 + 退出链路修复 + 中文路径 Qt 兜底
 - [x] v3.0.2 — **崩溃修复**：修复 QThread 运行中析构导致的 qFatal 崩溃（打开设置后闪退 / 设置无法保存）+ 并存实例提醒 + 线程栈诊断
+- [x] v3.1.0 — **配置安全 + OpenCode 接入**：配置原子写入（根治设置被清空）+ OpenCode CLI/Desktop/Web 预设 + Web Agent 启动/终止（浮球右键菜单）
+- [ ] v3.1.x（进行中）— 扇形菜单交互/视觉重构 + OpenCode Go 余额预设
 - [ ] v3.1+（候选）— pip 版 Qt 构建环境（可再省 ~38MB ICU）/ Web 多标签 / 更多效率工具
 
 > 📚 功能扩展的完整调研与方案对比见 [AI快报与多功能浮窗助手调研报告](docs/AI快报与多功能浮窗助手调研报告.md)。

@@ -80,3 +80,38 @@ def test_windows_apps_path_guard():
     assert reg._is_windows_apps_path("C:\\Program Files\\WindowsApps\\x\\y.exe")
     assert reg._is_windows_apps_path("c:/program files/windowsapps/x")
     assert not reg._is_windows_apps_path("C:\\Tools\\x.exe")
+
+
+# ── PATCH 3.1.0：opencode 预设 / app 启动器 / web 规格 / 环境变量展开 ──
+
+def test_opencode_presets_present():
+    agents = {a["id"]: a for a in reg.default_agents()}
+    assert agents["opencode"]["launcher"] == "terminal"
+    assert agents["opencode"]["args"] == ["--continue"]
+    assert agents["opencode"]["skip_permissions_arg"] == "--auto"
+    assert agents["opencode-desktop"]["launcher"] == "app"
+    assert agents["opencode-desktop"]["command"].startswith("%LOCALAPPDATA%")
+    assert agents["opencode-web"]["launcher"] == "web"
+    assert agents["opencode-web"]["web"]["port"] == 4096
+    assert agents["dsh"]["web"]["port"] == 3080
+
+
+def test_normalize_keeps_app_launcher_and_web_spec():
+    raw = [{
+        "id": "x", "command": "x.exe", "launcher": "weird",
+        "web": {"command": ["x", "serve"], "port": "1234", "url": "http://127.0.0.1:1234"},
+    }]
+    out = reg.normalize_agents(raw)
+    assert out[0]["launcher"] == "terminal", "非法 launcher 收敛为终端"
+    assert out[0]["web"]["port"] == "1234", "web 规格应透传（端口由 webagent 解析）"
+
+    raw2 = [{"id": "y", "command": "y", "launcher": "app"}]
+    assert reg.normalize_agents(raw2)[0]["launcher"] == "app"
+
+
+def test_resolve_command_expands_env_vars(tmp_path, monkeypatch):
+    exe = tmp_path / "afcli2.exe"
+    exe.write_text("x", encoding="utf-8")
+    monkeypatch.setenv("AF_TEST_DIR", str(tmp_path))
+    path, err = reg.resolve_command({"command": r"%AF_TEST_DIR%\afcli2.exe"})
+    assert err is None and path and path.lower().endswith("afcli2.exe")

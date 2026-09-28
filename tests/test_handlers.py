@@ -31,12 +31,20 @@ def test_handlers_config_io(tmp_path, monkeypatch):
     from agentfloat.core import config as cfgmod
     monkeypatch.setattr(cfgmod, "CONFIG_PATH", str(tmp_path / "config.json"))
     from agentfloat.webshell.handlers import WebAppHandlers
-    h = WebAppHandlers(FakeWidget(), WebBridge())
+
+    class W(FakeWidget):
+        def __init__(self):
+            super().__init__()
+            self.config = {"agents": [{"id": "a", "command": "a"}], "theme": "dark"}
+
+    h = WebAppHandlers(W(), WebBridge())
     cfg = h.get_config()
-    assert isinstance(cfg, dict) and cfg["agents"]
+    assert isinstance(cfg, dict) and cfg["agents"], "PATCH 3.1.0：应返回主进程内存配置"
+    assert cfg is not h.widget.config, "必须返回深拷贝"
     cfg["theme"] = "light"
     h.save_config(cfg)
     assert (tmp_path / "config.json").exists()
+    assert h.widget.config["theme"] == "dark", "外部修改不得影响主进程配置"
 
 
 def test_handlers_news_state(tmp_path, monkeypatch):

@@ -22,6 +22,7 @@ def test_core_modules_import():
         "agentfloat.services.api_monitor.config",
         "agentfloat.services.skills.scanner",
         "agentfloat.services.skills.translations",
+        "agentfloat.services.webagent",
     ):
         importlib.import_module(name)
 

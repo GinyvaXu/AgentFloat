@@ -1,9 +1,18 @@
 # -*- coding: utf-8 -*-
-"""AgentFloat — 配置加载/保存（含损坏自愈、旧配置迁移、默认值）"""
+"""AgentFloat — 配置加载/保存（含损坏自愈、旧配置迁移、默认值）
+
+PATCH 3.1.0（配置安全）：
+- 保存改为**原子写入**（同目录临时文件 + os.replace）：读取方永远看到完整文件；
+- 读取失败自动重试（防读到正在写入的文件）；
+- 只有「文件不存在」才算首次启动；解析失败只备份、**绝不覆盖**原文件，
+  避免"保存与读取并发 → 误判损坏 → 用户配置被清空"（v3.0.x 真实事故）；
+- 进程内读写加锁，串行化 Web 线程与 Qt 线程。
+"""
 import copy
 import json
 import os
 import shutil
+import threading
 import time
 
 from agentfloat.core.logging_setup import _log
@@ -17,6 +26,26 @@ from agentfloat.services.api_monitor.config import (
 )
 from agentfloat.services.news.fetcher import DEFAULT_NEWS as _NEWS_DEFAULTS
 from agentfloat.services.water.reminder import DEFAULT_WATER
+
+_LOCK = threading.RLock()          # 同进程读写串行化（Web 线程 / Qt 线程）
+_READ_RETRIES = 3                  # 读取失败重试次数（防写读并发）
+_READ_RETRY_DELAY = 0.06           # 重试间隔（秒）
+
+
+def _read_json(path):
+    """读取 JSON 文件；失败时短暂重试。返回 (data|None, error|"missing"|None)"""
+    last_err = None
+    for _attempt in range(_READ_RETRIES):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f), None
+        except FileNotFoundError:
+            return None, "missing"
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+            last_err = e
+            time.sleep(_READ_RETRY_DELAY)
+    return None, last_err
+
 
 
 def _default_api_monitor():
@@ -51,6 +80,7 @@ def load_config():
         "water": copy.deepcopy(DEFAULT_WATER),
     }
     loaded = {}
+    parse_error = False
 
     # 尝试从当前配置路径加载
     config_sources = [CONFIG_PATH]
@@ -58,15 +88,15 @@ def load_config():
     if os.path.exists(_OLD_CONFIG_PATH) and os.path.abspath(_OLD_CONFIG_PATH) != os.path.abspath(CONFIG_PATH):
         config_sources.insert(0, _OLD_CONFIG_PATH)
 
-    for src in config_sources:
-        try:
-            with open(src, "r", encoding="utf-8") as f:
-                loaded.update(json.load(f))
-            _log().debug("配置加载自: %s", os.path.basename(src))
-        except FileNotFoundError:
-            pass
-        except (json.JSONDecodeError, IOError):
-            _log().warning("配置加载失败: %s", os.path.basename(src))
+    with _LOCK:
+        for src in config_sources:
+            data, err = _read_json(src)
+            if data is not None:
+                loaded.update(data)
+                _log().debug("配置加载自: %s", os.path.basename(src))
+            elif err != "missing":
+                parse_error = True
+                _log().warning("配置解析失败: %s", os.path.basename(src))
 
     defaults.update(loaded)
 
@@ -88,7 +118,7 @@ def load_config():
     else:
         defaults["agents"] = _def_agents
         _migrated = True
-    if _migrated:
+    if _migrated and (loaded or not parse_error):
         save_config(defaults)
         _log().info("内置 Agent 迁移完成：新增 %d 个预设", len(defaults["agents"]))
 
@@ -98,8 +128,9 @@ def load_config():
     defaults["launch_mode"] = defaults["launch_mode"] if defaults["launch_mode"] in ("normal", "skip_permissions") else "normal"
     defaults["theme"] = defaults["theme"] if defaults.get("theme") in ("light", "dark") else "light"
 
-    # 首次启动时检测 Windows 系统主题
+    # 无有效数据时：区分「首次启动（文件缺失）」与「解析失败（文件存在但读不出）」
     if not loaded:
+        # 检测 Windows 系统主题（两种情况都适用）
         try:
             import winreg
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
@@ -112,23 +143,23 @@ def load_config():
         except Exception:
             pass
 
-        # 若文件存在但解析失败，先备份损坏文件，避免覆盖导致数据丢失
-        if os.path.exists(CONFIG_PATH):
+        if not os.path.exists(CONFIG_PATH):
+            # 首次启动：自动生成默认配置文件（含示例端点），新用户开箱即用
+            try:
+                os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+                save_config(defaults)
+                _log().info("首次启动，已生成默认配置: %s", CONFIG_PATH)
+            except (IOError, OSError):
+                pass
+        elif parse_error:
+            # PATCH 3.1.0：解析失败只备份、绝不覆盖原文件（可能只是写读并发/临时故障），
+            # 本次使用默认值跑在内存里，等用户真正修改设置时才会写入
             try:
                 _bak = CONFIG_PATH + ".corrupt_%s.bak" % time.strftime("%Y%m%d_%H%M%S")
                 shutil.copy2(CONFIG_PATH, _bak)
-                _log().warning("检测到损坏配置，已备份到 %s", _bak)
+                _log().warning("配置解析失败，已备份到 %s（保留原文件未覆盖，本次使用默认值）", _bak)
             except (IOError, OSError):
                 pass
-
-        # 首次启动：自动生成默认配置文件（含示例端点），新用户开箱即用
-        try:
-            os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-                json.dump(defaults, f, ensure_ascii=False, indent=2)
-            _log().info("首次启动，已生成默认配置: %s", CONFIG_PATH)
-        except (IOError, OSError):
-            pass
 
     # 如果从旧路径加载了数据，迁移到新路径
     if config_sources[0] == _OLD_CONFIG_PATH and loaded:
@@ -144,10 +175,20 @@ def load_config():
     return defaults
 
 def save_config(config):
-    try:
-        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
-        _log().debug("配置已保存 (%d 键)", len(config))
-    except (IOError, OSError):
-        _log().warning("配置保存失败: %s", CONFIG_PATH)
+    """原子写入配置（PATCH 3.1.0）：同目录临时文件 + os.replace。
+
+    读取方（设置页 / 启动 Agent / 其他线程）永远不会读到"写了一半"的文件，
+    从根上消除「保存与读取并发 → 误判损坏 → 配置被清空」的事故。
+    """
+    with _LOCK:
+        try:
+            os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+            tmp = CONFIG_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, CONFIG_PATH)
+            _log().debug("配置已保存 (%d 键)", len(config))
+        except (IOError, OSError) as e:
+            _log().warning("配置保存失败: %s (%s)", CONFIG_PATH, e)

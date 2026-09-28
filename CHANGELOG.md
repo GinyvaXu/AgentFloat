@@ -1,5 +1,23 @@
 # 更新日志
 
+## [3.1.0] - 2026-09-28
+### Fixed
+- **修复「设置无法保存」事故（配置被误判损坏后清空）**：`save_config` 改为**原子写入**（同目录临时文件 + `os.replace`）；读取失败自动重试；解析失败只备份、**绝不覆盖原文件**；进程内读写加锁；Web 设置页改读主进程内存配置（不再每次读文件）——彻底消除「保存与读取并发 → 误判损坏 → 用户配置被重置为默认」链路（9/28 两次真实事故）
+
+### Added
+- **OpenCode 全系接入**：
+  - `OpenCode CLI`（终端 TUI，默认 `--continue` 续接上次会话；跳过权限参数 `--auto`）
+  - `OpenCode Desktop`（新 **`app` 启动器**：无终端窗口直接拉起；可在「设置 → Agent 管理」一键设为主 Agent，主 Agent 用户自主切换）
+  - `OpenCode Web`（`opencode serve` 后台服务 + 自动开浏览器）
+- **Web Agent 通用化**（`services/webagent.py`）：任意 `launcher=web` 的 Agent 统一「启动 / 状态 / 终止」；终止 = 结束进程树（taskkill /T）+ 按端口兜底清理 + 校验端口已释放（AgentFloat 重启后也能正确停止）
+- **浮球右键菜单新增「Web Agent」子菜单**：按运行状态显示「启动 / 终止 / 打开页面」（DeepSeek Harness、OpenCode Web 等）
+- Web 设置页 Agent 编辑器支持「桌面应用」启动器（含徽标）
+
+### Changed
+- 内置 Agent 预设自动迁移：升级后自动补齐 opencode 三件套（不覆盖用户自定义）
+- `resolve_command` 支持 `%VAR%` 环境变量展开（Desktop 路径跨用户可移植）
+- 新增测试：配置并发读写回归（旧实现必失败）、opencode 预设、web 规格解析等（全量 169 项）
+
 ## [3.0.2] - 2026-09-27（崩溃修复）
 ### Fixed
 - **修复打开设置后崩溃（0xC0000409 / BEX64，故障模块 Qt5Core.dll）**：更新检查线程（QThread）在查询结束的同一瞬间被释放，Qt 触发 qFatal「QThread: Destroyed while thread is still running」→ abort，进程无提示消失、设置页随之中断（表现为「设置无法保存」）。所有 QThread worker（更新检查 / 更新下载 / 本地 AI / 自动翻译 / AI 快报）统一改为「线程真正结束后再释放引用」+ `wait` 兜底

@@ -210,6 +210,7 @@ import {
       if (a.primary) badges.push('<span class="tag blue">主 Agent</span>');
       if (a.builtin) badges.push('<span class="tag gray">内置</span>');
       if ((a.launcher || "terminal") === "web") badges.push('<span class="tag purple">Web UI</span>');
+      if ((a.launcher || "terminal") === "app") badges.push('<span class="tag purple">桌面应用</span>');
       return '<div class="agent-card">' +
         '<div class="agent-ico" style="background:' + esc(a.icon_color || "#5B8DEF") + '">' + esc(a.icon_char || "A") + "</div>" +
         '<div class="agent-info"><div class="agent-name">' + esc(a.name) + " " + badges.join("") + "</div>" +
@@ -234,7 +235,11 @@ import {
       '<div class="f"><label>命令</label><input type="text" id="m-command" value="' + esc(a.command) + '" placeholder="如 claude / codex / pi / dsh / C:\\path\\app.exe"></div>' +
       '<div class="f"><label>附加参数（逗号分隔）</label><input type="text" id="m-args" value="' + esc((a.args || []).join(", ")) + '"></div>' +
       '<div class="f-row">' +
-      '<div class="f"><label>启动器</label><select id="m-launcher"><option value="terminal"' + (a.launcher !== "web" ? " selected" : "") + ">终端（wt）</option><option value=\"web\"" + (a.launcher === "web" ? " selected" : "") + ">Web UI（自动开浏览器）</option></select></div>" +
+      '<div class="f"><label>启动器</label><select id="m-launcher">' +
+        '<option value="terminal"' + ((a.launcher || "terminal") === "terminal" ? " selected" : "") + ">终端（wt）</option>" +
+        '<option value="web"' + (a.launcher === "web" ? " selected" : "") + ">Web UI（自动开浏览器）</option>" +
+        '<option value="app"' + (a.launcher === "app" ? " selected" : "") + ">桌面应用（无终端窗口）</option>" +
+        "</select></div>" +
       '<div class="f"><label>启动模式</label><select id="m-mode"><option value="normal"' + (a.launch_mode !== "skip_permissions" ? " selected" : "") + ">普通</option><option value=\"skip_permissions\"" + (a.launch_mode === "skip_permissions" ? " selected" : "") + ">跳过权限</option></select></div>" +
       "</div>" +
       '<div class="f"><label>跳过权限参数（可留空）</label><input type="text" id="m-skip" value="' + esc(a.skip_permissions_arg) + '"></div>' +

@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 """AgentFloat — Web 壳后端适配层（只读状态 + 命令投递，不直接触碰 Qt）"""
+import copy
+
 from agentfloat.core.autostart import is_auto_start_enabled
 from agentfloat.core.config import load_config, save_config
 from agentfloat.core.sysutil import _open_url
@@ -18,7 +20,9 @@ class WebAppHandlers(object):
         self.version = VERSION
 
     def get_config(self):
-        return load_config()
+        # PATCH 3.1.0：返回主进程内存中的配置（深拷贝），不再每次读文件——
+        # 既避免与保存并发读到半截文件，也保证 Web 页看到最新改动
+        return copy.deepcopy(getattr(self.widget, "config", None) or load_config())
 
     def save_config(self, cfg):
         save_config(cfg)
