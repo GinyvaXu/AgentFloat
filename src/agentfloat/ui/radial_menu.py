@@ -63,6 +63,7 @@ class RadialMenu(QWidget):
         self._hold_active = False
         self._pixmaps = {}         # (i, hovered, dpr) -> QPixmap
         self._cache_dpr = 0.0
+        self._bg_cache = {}        # (theme, dpr, n) -> QPixmap（整环背景/发光/描边预渲染）
 
         # 展开/收拢：弹簧驱动（可打断、速度继承；展开轻过冲，收拢干脆）
         self._progress_state = spring(0.0, MotionTokens.RING_OPEN)
@@ -84,7 +85,7 @@ class RadialMenu(QWidget):
 
         # 光标轮询（仅用于扇区悬停高亮；关闭由宽限计时器决定）
         self._poll = QTimer(self)
-        self._poll.setInterval(60)      # 60ms：磁吸高亮更跟手
+        self._poll.setInterval(20)      # PATCH 3.2.1：60→20ms（高亮跟手；按住时另有零延迟转发）
         self._poll.timeout.connect(self._poll_cursor)
 
         # 关闭宽限计时器
@@ -97,12 +98,14 @@ class RadialMenu(QWidget):
     def set_theme(self, theme):
         self._theme = theme
         self._pixmaps.clear()
+        self._bg_cache.clear()
         if self.isVisible():
             self.update()
 
     def set_items(self, items, radius=None):
         self._items = list(items)
         self._pixmaps.clear()
+        self._bg_cache.clear()
         if radius:
             self._outer = int(radius)
             self._inner = max(28, int(radius * 0.36))
@@ -130,6 +133,23 @@ class RadialMenu(QWidget):
         else:
             self.close_menu()
         return True
+
+    def update_hold_pos(self, global_pos):
+        """按住选环期间由浮球转发鼠标位置：零延迟更新高亮（PATCH 3.2.1）
+
+        顶层窗口 self.pos() 即全局坐标，直接相减得到本地坐标——
+        不用 mapFromGlobal：高分屏下后者可能返回 2 倍偏移坐标（悬停检测偏差根因）。
+        """
+        if not self.isVisible():
+            return
+        idx = self._apply_magnet(global_pos, self._sector_at(global_pos))
+        if idx != self._hover_idx:
+            self._hover_idx = idx
+            self.update()
+
+    def _to_local(self, global_pos):
+        """全局坐标 → 窗口本地坐标（DPI 安全，PATCH 3.2.1）"""
+        return global_pos - self.pos()
 
     def open_at(self, center_global, anchor_rect=None):
         """center_global: 环绕中心（全局坐标）；anchor_rect: 触发浮窗区域，用于保持打开"""
@@ -227,9 +247,9 @@ class RadialMenu(QWidget):
         """返回光标所在扇区下标；不在环带上返回 -1。
         坐标用 mapFromGlobal 转换（高分屏 DPI 安全），命中半径与绘制缩放保持同步。"""
         c = self._center()
-        # 坐标用 mapFromGlobal（高分辨屏 DPI 安全）；
-        # 命中半径随入场/关闭动画缩放同步，避免「灰块悬在按键之间 / 悬停错位」
-        p = self.mapFromGlobal(global_pos)
+        # PATCH 3.2.1：坐标用「全局坐标 - 窗口位置」（不依赖 mapFromGlobal，
+        # 其在部分高分屏环境下返回 2 倍偏移坐标 →「悬停检测有偏差」根因）
+        p = self._to_local(global_pos)
         dx, dy = p.x() - c.x(), p.y() - c.y()
         # 与绘制一致的当前缩放（弹簧展开/收拢，含轻过冲）
         scale = 0.30 + 0.70 * self._progress
@@ -253,7 +273,7 @@ class RadialMenu(QWidget):
         if raw < 0 or prev < 0 or raw == prev or n == 0 or not (0 <= prev < n):
             return raw
         c = self._center()
-        p = self.mapFromGlobal(global_pos)
+        p = self._to_local(global_pos)
         dx, dy = p.x() - c.x(), p.y() - c.y()
         scale = 0.30 + 0.70 * self._progress
         if scale > 0.01:
@@ -273,7 +293,7 @@ class RadialMenu(QWidget):
         idx = self._sector_at(global_pos)
         if idx < 0 and self._hover_idx >= 0:
             c = self._center()
-            p = self.mapFromGlobal(global_pos)
+            p = self._to_local(global_pos)
             dist = math.hypot(p.x() - c.x(), p.y() - c.y())
             scale = max(0.01, 0.30 + 0.70 * self._progress)
             if (self._inner - 14) <= dist / scale <= (self._outer + 14):
@@ -281,8 +301,8 @@ class RadialMenu(QWidget):
         return idx
 
     def _in_menu_rect(self, global_pos):
-        """光标是否落在菜单窗口矩形内（DPI 安全：与浮窗同一坐标空间）"""
-        return self.rect().adjusted(-6, -6, 6, 6).contains(self.mapFromGlobal(global_pos))
+        """光标是否落在菜单窗口矩形内（DPI 安全：全局坐标 - 窗口位置）"""
+        return self.rect().adjusted(-6, -6, 6, 6).contains(self._to_local(global_pos))
 
     def _poll_cursor(self):
         if not self.isVisible():
@@ -376,7 +396,7 @@ class RadialMenu(QWidget):
         if idx < 0:
             # 中心孔区域：视为点击浮窗本身（快捷启动），由主程序处理
             c = self._center()
-            p = self.mapFromGlobal(event.globalPos())
+            p = self._to_local(event.globalPos())
             if math.hypot(p.x() - c.x(), p.y() - c.y()) <= self._inner:
                 self.center_clicked.emit()
             self.close_menu()
@@ -403,6 +423,8 @@ class RadialMenu(QWidget):
 
     # ── 绘制 ────────────────────────────────────
     def paintEvent(self, event):
+        import time as _time
+        t0 = _time.perf_counter()
         painter = QPainter(self)
         try:
             self._render_paint(painter)
@@ -414,6 +436,14 @@ class RadialMenu(QWidget):
                     "环绕菜单绘制异常:\n%s", traceback.format_exc())
         finally:
             painter.end()
+            # PATCH 3.2.1：慢帧诊断（>12ms 记一条 debug 日志，便于真机定位卡顿）
+            dt = (_time.perf_counter() - t0) * 1000.0
+            if dt > 12.0:
+                try:
+                    import logging
+                    logging.getLogger("AgentFloat").debug("环绕菜单慢帧: %.1f ms", dt)
+                except Exception:
+                    pass
 
     def _render_paint(self, painter):
         painter.setRenderHint(QPainter.Antialiasing)
@@ -440,52 +470,13 @@ class RadialMenu(QWidget):
         painter.scale(scale, scale)
         painter.setOpacity(fade)
 
-        # ── 外发光（PATCH 3.2.0：更强渐变发光；悬停扇区时更亮）──
-        glow_c = QColor(brand)
-        glow_c.setAlpha(72 if self._hover_idx >= 0 else 40)
-        glow_r = self._outer + self._pad * 0.85
-        glow = QRadialGradient(QPointF(0, 0), glow_r)
-        glow.setColorAt(0.60, QColor(glow_c.red(), glow_c.green(), glow_c.blue(), 0))
-        glow.setColorAt(0.84, glow_c)
-        glow.setColorAt(1.0, QColor(glow_c.red(), glow_c.green(), glow_c.blue(), 0))
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(glow)
-        painter.drawEllipse(QPointF(0, 0), glow_r, glow_r)
+        # PATCH 3.2.1：整环背景（外发光 + 毛玻璃底 + 品牌描边 + 分隔线）预渲染为单张位图，
+        # 每帧只做一次位图绘制（原先每帧重算多个渐变，真机高分屏下明显掉帧）
+        side = int((self._outer + self._pad) * 2)
+        bg_pm = self._background_pixmap(dpr)
+        painter.drawPixmap(-side // 2, -side // 2, bg_pm)
 
-        # ── 毛玻璃底：径向渐变（更强质感）──
-        bg = QRadialGradient(QPointF(0, 0), float(self._outer))
-        if is_dark:
-            bg.setColorAt(0.0, QColor(40, 40, 48, 246))
-            bg.setColorAt(0.72, QColor(26, 26, 32, 246))
-            bg.setColorAt(1.0, QColor(16, 16, 20, 250))
-        else:
-            bg.setColorAt(0.0, QColor(252, 252, 255, 246))
-            bg.setColorAt(0.72, QColor(244, 244, 249, 246))
-            bg.setColorAt(1.0, QColor(230, 230, 240, 250))
-        ring_border = QColor(255, 255, 255, 70) if is_dark else QColor(0, 0, 0, 42)
-        ring_path = QPainterPath()
-        ring_path.setFillRule(Qt.OddEvenFill)
-        ring_path.addEllipse(QRectF(-self._outer, -self._outer, self._outer * 2, self._outer * 2))
-        ring_path.addEllipse(QRectF(-self._inner, -self._inner, self._inner * 2, self._inner * 2))
-        painter.setPen(QPen(ring_border, 1.2))
-        painter.setBrush(bg)
-        painter.drawPath(ring_path)
-
-        # ── 品牌渐变描边（内/外缘各一圈，更强视觉）──
-        gpen = QPen()
-        gpen.setWidthF(1.8)
-        gpen.setBrush(QBrush(self._brand_conical(brand)))
-        painter.setPen(gpen)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawEllipse(QPointF(0, 0), float(self._outer), float(self._outer))
-        painter.drawEllipse(QPointF(0, 0), float(self._inner), float(self._inner))
-
-        # ── 扇区分隔线（细、低对比）──
         sweep = 360.0 / n
-        painter.setPen(QPen(ring_border, 1))
-        for i in range(1, n):
-            a = -90.0 + i * sweep
-            painter.drawLine(self._polar(a, self._inner), self._polar(a, self._outer))
 
         # ── 悬停/按压扇区：品牌渐变高亮 + 描边发光（PATCH 3.2.0）──
         if 0 <= self._hover_idx < n:
@@ -539,6 +530,81 @@ class RadialMenu(QWidget):
             painter.restore()
 
         painter.restore()
+
+    def _background_pixmap(self, dpr):
+        """整环背景预渲染缓存（外发光 + 毛玻璃底 + 品牌描边 + 分隔线）"""
+        n = len(self._items)
+        hover_active = self._hover_idx >= 0
+        key = (self._theme, round(float(dpr), 2), n, int(self._outer), hover_active)
+        pm = self._bg_cache.get(key)
+        if pm is not None:
+            return pm
+        side = int((self._outer + self._pad) * 2)
+        pm = QPixmap(int(side * dpr), int(side * dpr))
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        try:
+            p.setRenderHint(QPainter.Antialiasing)
+            p.translate(side / 2.0, side / 2.0)
+            self._paint_background(p, n, hover_active)
+        finally:
+            p.end()
+        self._bg_cache[key] = pm
+        return pm
+
+    def _paint_background(self, painter, n, hover_active):
+        c = get_colors(self._theme)
+        is_dark = self._theme == "dark"
+        brand = QColor(*c["ACCENT"])
+
+        # ── 外发光（PATCH 3.2.0：更强渐变发光；悬停扇区时更亮）──
+        glow_c = QColor(brand)
+        glow_c.setAlpha(72 if hover_active else 40)
+        glow_r = self._outer + self._pad * 0.85
+        glow = QRadialGradient(QPointF(0, 0), glow_r)
+        glow.setColorAt(0.60, QColor(glow_c.red(), glow_c.green(), glow_c.blue(), 0))
+        glow.setColorAt(0.84, glow_c)
+        glow.setColorAt(1.0, QColor(glow_c.red(), glow_c.green(), glow_c.blue(), 0))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(glow)
+        painter.drawEllipse(QPointF(0, 0), glow_r, glow_r)
+
+        # ── 毛玻璃底：径向渐变（更强质感）──
+        bg = QRadialGradient(QPointF(0, 0), float(self._outer))
+        if is_dark:
+            bg.setColorAt(0.0, QColor(40, 40, 48, 246))
+            bg.setColorAt(0.72, QColor(26, 26, 32, 246))
+            bg.setColorAt(1.0, QColor(16, 16, 20, 250))
+        else:
+            bg.setColorAt(0.0, QColor(252, 252, 255, 246))
+            bg.setColorAt(0.72, QColor(244, 244, 249, 246))
+            bg.setColorAt(1.0, QColor(230, 230, 240, 250))
+        ring_border = QColor(255, 255, 255, 70) if is_dark else QColor(0, 0, 0, 42)
+        ring_path = QPainterPath()
+        ring_path.setFillRule(Qt.OddEvenFill)
+        ring_path.addEllipse(QRectF(-self._outer, -self._outer, self._outer * 2, self._outer * 2))
+        ring_path.addEllipse(QRectF(-self._inner, -self._inner, self._inner * 2, self._inner * 2))
+        painter.setPen(QPen(ring_border, 1.2))
+        painter.setBrush(bg)
+        painter.drawPath(ring_path)
+
+        # ── 品牌渐变描边（内/外缘各一圈）──
+        gpen = QPen()
+        gpen.setWidthF(1.8)
+        gpen.setBrush(QBrush(self._brand_conical(brand)))
+        painter.setPen(gpen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(QPointF(0, 0), float(self._outer), float(self._outer))
+        painter.drawEllipse(QPointF(0, 0), float(self._inner), float(self._inner))
+
+        # ── 扇区分隔线（细、低对比）──
+        if n > 1:
+            sweep = 360.0 / n
+            painter.setPen(QPen(ring_border, 1))
+            for i in range(1, n):
+                a = -90.0 + i * sweep
+                painter.drawLine(self._polar(a, self._inner), self._polar(a, self._outer))
 
     def _brand_conical(self, brand):
         """品牌色环形渐变（外/内描边共用，PATCH 3.2.0 更强视觉）"""

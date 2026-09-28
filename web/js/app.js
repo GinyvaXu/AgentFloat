@@ -48,7 +48,13 @@ import {
     else if (el.tagName === "SELECT") el.value = v == null ? "" : String(v);
     else el.value = v == null ? "" : String(v);
   }
-  function bindAll(root) { $$("[data-bind]", root).forEach(bindWrite); }
+  function bindAll(root) {
+    $$("[data-bind]", root).forEach((el) => {
+      // PATCH 3.2.1：__ 前缀是虚拟控件（主 Agent / 扇区 / 扇区数量 / 计时器开关），
+      // 不是配置路径；此前会被 getPath(undefined) 刷成空值 →「扇区数量等无法设置」
+      if (!el.dataset.bind.startsWith("__")) bindWrite(el);
+    });
+  }
 
   // ── 主题 / 脏检测 / 预览 ────────────────────────
   function applyTheme() {
@@ -317,7 +323,8 @@ import {
       card("扇区功能映射", "每个扇区可映射为启动某 Agent 或打开某面板；「自动」表示按默认布局（所有 Agent + 固定 4 项）自动填充。", slotRows);
     bindAll(el);
     $$("#settingsContent [data-bind^='__slot_']").forEach((s) => s.addEventListener("change", () => {
-      const i = parseInt(s.dataset.bind.split("_")[1], 10);
+      if (s.dataset.bind === "__slot_count") return;   // 由专用处理器负责
+      const i = parseInt(s.dataset.bind.split("_").pop(), 10);   // PATCH 3.2.1：修复 NaN 下标（槽位映射此前从未保存）
       rm.slots = rm.slots || [];
       rm.slots[i] = s.value;
       refreshDirty();

@@ -59,8 +59,10 @@ def test_interaction_flow(ball, qapp):
     w.mouseReleaseEvent(_mev(QEvent.MouseButtonRelease, (20, 20), gx, gy))
     assert launched == [1]
     w._close_radial_menu()
+    t_close = time.monotonic()
+    # 菜单关闭冷却（用显式参考时刻，避免依赖关闭动画信号何时触发）
+    assert w._interaction.hover_open_allowed(t_close + 0.1) is False
     _pump(qapp, 0.5)
-    assert w._interaction.hover_open_allowed(time.monotonic()) is False  # 菜单关闭冷却
 
     # 拖拽 → 不弹菜单、不触发启动
     w.mousePressEvent(_mev(QEvent.MouseButtonPress, (20, 20), gx, gy))

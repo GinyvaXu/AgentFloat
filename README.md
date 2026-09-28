@@ -12,7 +12,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 </p>
 
 <p align="center">
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.2.0-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.2.1-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%2010%2F11-8E44AD?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"></a>
@@ -156,6 +156,7 @@ AgentFloat/
 - [x] v3.1.0 — **配置安全 + OpenCode 接入**：配置原子写入（根治设置被清空）+ OpenCode CLI/Desktop/Web 预设 + Web Agent 启动/终止（浮球右键菜单）
 - [x] v3.1.1 — **设置保存修复**：开关置脏（无法保存）+ renderPage 报错 + 异步 apply 回读竞态（开关被打回）+ 垃圾键
 - [x] v3.2.0 — **环形菜单全新交互**：按住选环（松手执行）+ 灵敏档 180/300ms + 扇区预渲染 + 品牌渐变发光视觉
+- [x] v3.2.1 — **跟手性与设置修复**：悬停检测 100ms→16ms / 高亮 60ms→20ms / DPI 命中偏差 / 背景预渲染（3.3 倍）/ 扇区数量与映射无法设置
 - [ ] v3.2.x（候选）— OpenCode Go 余额预设（角标滚动剩余%）/ Web 多标签 / 更多效率工具
 - [ ] v3.1.x（进行中）— 扇形菜单交互/视觉重构 + OpenCode Go 余额预设
 - [ ] v3.1+（候选）— pip 版 Qt 构建环境（可再省 ~38MB ICU）/ Web 多标签 / 更多效率工具

@@ -521,7 +521,9 @@ class FloatingWidget(QWidget):
         self._update_mask()
 
         self._hover_timer = QTimer(self)
-        self._hover_timer.setInterval(100)
+        # PATCH 3.2.1：悬停检测 100ms → 16ms（60fps）
+        # 100ms 下「进入/离开」最多迟半拍，是「菜单不跟手/有延迟」的主因之一
+        self._hover_timer.setInterval(16)
         self._hover_timer.timeout.connect(self._check_hover)
         self._hover_timer.start()
 
@@ -1716,6 +1718,9 @@ class FloatingWidget(QWidget):
     def mouseMoveEvent(self, event):
         if self._quitting or not (event.buttons() & Qt.LeftButton):
             return
+        # PATCH 3.2.1：菜单可见（按住选环）时把鼠标位置直接转发给菜单 → 高亮零延迟跟手
+        if self._radial_menu is not None and self._radial_menu.isVisible():
+            self._radial_menu.update_hold_pos(event.globalPos())
         delta = (event.globalPos() - self._drag_origin).manhattanLength()
         acts = self._interaction.move(delta, time.monotonic())
         if InteractionActions.BEGIN_DRAG in acts:
