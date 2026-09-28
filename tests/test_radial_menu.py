@@ -111,3 +111,75 @@ def test_press_glow_progress_default(qapp):
     assert m._press_idx == 1
     m._reset_press()
     assert m._press_idx == 1   # 动画结束后才清除
+
+
+# ── PATCH 3.2.0：按住选环 + 扇区预渲染 ──
+
+def test_hold_select_flow(qapp):
+    m = make_menu(qapp)
+    got = []
+    m.action_triggered.connect(lambda aid: got.append(aid))
+    m.open_at(CENTER, anchor_rect=None)
+    m._poll.stop()
+    m._close_timer.stop()
+    pump(qapp, 1.2)
+    assert m.begin_hold() is True
+    assert m._hold_active is True
+    assert m.end_hold(gp(30)) is True       # 命中扇区 0（顶部）
+    pump(qapp, 0.4)
+    assert got == ["i0"]
+
+
+def test_hold_select_disabled(qapp):
+    m = make_menu(qapp)
+    m.set_hold_mode(False)
+    m.open_at(CENTER, anchor_rect=None)
+    m._poll.stop()
+    m._close_timer.stop()
+    pump(qapp, 1.2)
+    assert m.begin_hold() is False
+    assert m.end_hold(gp(30)) is False       # 未进入选环模式：由点击选择负责
+
+
+def test_hold_select_cancel_at_center(qapp):
+    m = make_menu(qapp)
+    got = []
+    m.action_triggered.connect(lambda aid: got.append(aid))
+    m.open_at(CENTER, anchor_rect=None)
+    m._poll.stop()
+    m._close_timer.stop()
+    pump(qapp, 1.2)
+    m.begin_hold()
+    assert m.end_hold(QPoint(CENTER.x(), CENTER.y())) is True
+    pump(qapp, 0.4)
+    assert got == [], "中心孔松手应取消，不触发任何扇区"
+
+
+def test_sector_pixmap_cache(qapp):
+    m = make_menu(qapp)
+    pm1 = m._sector_pixmap(0, False, 1.0)
+    pm2 = m._sector_pixmap(0, False, 1.0)
+    assert pm1 is pm2, "同键应命中预渲染缓存"
+    assert not pm1.isNull()
+    hover = m._sector_pixmap(0, True, 1.0)
+    assert hover is not pm1
+    m.set_items([RadialMenuItem("x", "X")])
+    assert m._pixmaps == {}, "set_items 应清空预渲染缓存"
+
+
+def test_render_with_pixmaps(qapp):
+    """预渲染绘制冒烟：展开后能正常出图（含悬停高亮与配色切换）"""
+    m = make_menu(qapp)
+    m.open_at(CENTER, anchor_rect=None)
+    m._poll.stop()
+    m._close_timer.stop()
+    pump(qapp, 1.2)
+    m._hover_idx = 2
+    m.update()
+    pump(qapp, 0.2)
+    grab = m.grab()
+    assert not grab.isNull() and grab.width() > 0, "预渲染绘制应能正常出图"
+    m.set_theme("dark")
+    m.update()
+    pump(qapp, 0.2)
+    assert not m.grab().isNull()

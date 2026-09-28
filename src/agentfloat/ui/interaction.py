@@ -20,9 +20,10 @@
 from __future__ import annotations
 
 CLICK_MOVE_PX = 4.0          # 位移超过该值判定为拖拽（同时长按失效）
-REVEAL_SUPPRESS_S = 0.6      # ① 贴边唤出后：悬停展开抑制窗口
-DRAG_SUPPRESS_S = 0.4        # ② 拖拽结束后：悬停展开抑制窗口
-MENU_SUPPRESS_S = 0.5        # ③ 菜单关闭后：悬停展开抑制窗口
+# PATCH 3.2.0（菜单手感）：冷却窗口整体缩短，弹过的浮球更快恢复悬停响应
+REVEAL_SUPPRESS_S = 0.35     # ① 贴边唤出后：悬停展开抑制窗口
+DRAG_SUPPRESS_S = 0.25       # ② 拖拽结束后：悬停展开抑制窗口
+MENU_SUPPRESS_S = 0.30       # ③ 菜单关闭后：悬停展开抑制窗口
 
 
 class Actions(object):
@@ -52,18 +53,20 @@ class BallInteraction(object):
         self._t_drag_end = -1e9
         self._t_menu_closed = -1e9
         self._enabled = True
-        self._hover_ms = 400.0
-        self._long_press_ms = 500.0
+        self._hover_ms = 180.0
+        self._long_press_ms = 300.0
         self._trigger_mode = "both"
+        self._hold_select = True
         return self
 
     def configure(self, radial_cfg=None):
         cfg = radial_cfg or {}
         self._enabled = bool(cfg.get("enabled", True))
-        self._hover_ms = float(cfg.get("hover_delay_ms", 400))
-        self._long_press_ms = float(cfg.get("long_press_delay_ms", 500))
+        self._hover_ms = float(cfg.get("hover_delay_ms", 180))
+        self._long_press_ms = float(cfg.get("long_press_delay_ms", 300))
         mode = cfg.get("trigger_mode", "both")
         self._trigger_mode = mode if mode in ("hover", "long_press", "both") else "both"
+        self._hold_select = bool(cfg.get("hold_select", True))
         return self
 
     # ── 只读属性 ──────────────────────────────────
@@ -90,6 +93,11 @@ class BallInteraction(object):
     @property
     def long_press_delay_ms(self):
         return int(self._long_press_ms)
+
+    @property
+    def hold_select(self):
+        """按住选环：长按弹出后不松手，滑到扇区松手即执行（PATCH 3.2.0）"""
+        return bool(self._hold_select)
 
     # ── 外部通知 ──────────────────────────────────
     def notify_reveal(self, t):

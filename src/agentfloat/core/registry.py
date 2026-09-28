@@ -149,8 +149,9 @@ BUILTIN_PRESETS = [
 DEFAULT_RADIAL_MENU = {
     "enabled": True,
     "trigger_mode": "both",          # hover / long_press / both
-    "hover_delay_ms": 400,
-    "long_press_delay_ms": 500,
+    "hold_select": True,             # PATCH 3.2.0：按住选环（长按弹出后滑到扇区松手即执行）
+    "hover_delay_ms": 180,           # PATCH 3.2.0：灵敏档（原 400）
+    "long_press_delay_ms": 300,      # PATCH 3.2.0：灵敏档（原 500）
     "radius": 120,
     # 扇区功能模块化：每个元素是一个动作 id（可用：
     #   agent:<id> 启动某 Agent / skills / api / settings / news / quit）

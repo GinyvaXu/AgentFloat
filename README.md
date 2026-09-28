@@ -12,7 +12,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 </p>
 
 <p align="center">
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.1.1-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.2.0-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%2010%2F11-8E44AD?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"></a>
@@ -26,7 +26,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 | | |
 |---|---|
 | 🪟 **深色玻璃浮球** | 品牌渐变描边（`#0a84ff→#af52de`）+ 内部光晕 + 白色旋涡（P2 方案 C）；弹簧驱动悬停/按压/退出动效；拖拽不误弹、贴边唤出顺滑（交互状态机） |
-| 🌀 **双通道环绕菜单** | 悬停 400ms 或长按 500ms 唤出环形菜单（通道可在设置中调整），整环统一配色、灰显按压触感、向心收拢关闭动画 |
+| 🌀 **双通道环绕菜单** | 悬停 180ms 或长按 300ms 唤出环形菜单（可在设置调整）；**按住选环**：弹出后滑到扇区松手即执行；品牌渐变描边 + 外发光 + 预渲染扇区（60fps）；整环统一配色、向心收拢关闭动画 |
 | 🎛️ **扇区功能模块化** | 轮盘 4 / 6 / 8 扇区任选，每个扇区可自由分配：启动某 Agent、Skills 辅助窗、API 余额、设置、AI 快报、剪贴板历史、命令面板、退出 |
 | 🧩 **通用多 Agent 启动** | 点击浮窗即启动 Claude Code / Codex CLI / Pi Coding Agent / 自定义命令，右键或托盘可快速切换主 Agent，实时状态指示灯 |
 | 🧠 **Skills 辅助窗** | 无边框窗口扫描本机已安装 skills，分类树浏览 + 中英对照切换 + 触发指令一键复制（右侧完整展示，溢出自动滚动） |
@@ -47,7 +47,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 | 操作 | 效果 |
 |---|---|
 | **单击** | 启动主 Agent（默认 Claude Code） |
-| **悬停 400ms / 长按 500ms** | 唤出环绕菜单 |
+| **悬停 180ms / 长按 300ms** | 唤出环绕菜单（滑到扇区松手即执行） |
 | **右键** | 打开设置 / Agent 切换 |
 | **拖动** | 任意摆放，靠近屏幕边缘自动吸附 |
 | **托盘图标双击** | 重新显示浮窗 |
@@ -155,6 +155,8 @@ AgentFloat/
 - [x] v3.0.2 — **崩溃修复**：修复 QThread 运行中析构导致的 qFatal 崩溃（打开设置后闪退 / 设置无法保存）+ 并存实例提醒 + 线程栈诊断
 - [x] v3.1.0 — **配置安全 + OpenCode 接入**：配置原子写入（根治设置被清空）+ OpenCode CLI/Desktop/Web 预设 + Web Agent 启动/终止（浮球右键菜单）
 - [x] v3.1.1 — **设置保存修复**：开关置脏（无法保存）+ renderPage 报错 + 异步 apply 回读竞态（开关被打回）+ 垃圾键
+- [x] v3.2.0 — **环形菜单全新交互**：按住选环（松手执行）+ 灵敏档 180/300ms + 扇区预渲染 + 品牌渐变发光视觉
+- [ ] v3.2.x（候选）— OpenCode Go 余额预设（角标滚动剩余%）/ Web 多标签 / 更多效率工具
 - [ ] v3.1.x（进行中）— 扇形菜单交互/视觉重构 + OpenCode Go 余额预设
 - [ ] v3.1+（候选）— pip 版 Qt 构建环境（可再省 ~38MB ICU）/ Web 多标签 / 更多效率工具
 

@@ -1120,9 +1120,13 @@ class FloatingWidget(QWidget):
                 center = self.geometry().center()
         self._interaction.menu_opened(time.monotonic())
         # 顶层窗口 geometry() 即全局坐标，直接作为菜单圆心（避免 mapToGlobal 高分屏偏移）
+        self._radial_menu.set_hold_mode(self._interaction.hold_select)
         self._radial_menu.open_at(
             center,
             anchor_rect=QRect(self.pos(), self.size()))
+        if source == "long_press":
+            # PATCH 3.2.0：按住选环——弹出后不松手，滑到扇区松手即执行
+            self._radial_menu.begin_hold()
         # 环绕菜单打开时隐藏余额角标，避免重叠遮挡
         if self._api_badge:
             self._api_badge.hide()
@@ -1731,6 +1735,16 @@ class FloatingWidget(QWidget):
         if self._quitting:
             return
         if event.button() == Qt.LeftButton:
+            if (self._interaction.state == "menu_held"
+                    and self._radial_menu is not None and self._radial_menu.isVisible()):
+                # PATCH 3.2.0：按住选环松手 → 命中扇区执行，空白/中心取消
+                self._radial_menu.end_hold(event.globalPos())
+                self._interaction.release(time.monotonic())   # 退出 menu_held，不触发 CLICK
+                self._drag_active = False
+                self.is_pressed = False
+                self._sync_api_panel_position()
+                self._animate_scale(HOVER_SCALE if self.is_hovered else 1.0, MotionTokens.PRESS)
+                return
             acts = self._interaction.release(time.monotonic())
             if InteractionActions.END_DRAG in acts:
                 # 拖拽结束 → 保存位置（球体坐标）+ 检测吸附（状态机已启动 400ms 悬停冷却）

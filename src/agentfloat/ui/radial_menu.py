@@ -14,7 +14,9 @@
 import math
 from PyQt5.QtCore import (Qt, QPointF, QRectF, QTimer, QVariantAnimation,
                           QEasingCurve, pyqtSignal)
-from PyQt5.QtGui import QPainter, QColor, QPen, QFont, QPainterPath, QCursor
+from PyQt5.QtGui import (QPainter, QColor, QPen, QFont, QPainterPath, QCursor,
+                         QPixmap, QBrush, QRadialGradient, QLinearGradient,
+                         QConicalGradient)
 from PyQt5.QtWidgets import QWidget, QApplication
 
 from agentfloat.core.theme import get_colors
@@ -56,6 +58,12 @@ class RadialMenu(QWidget):
         self._anchor_rect = None
         self._sector_cache = []    # (id, start_angle, sweep_angle)
 
+        # PATCH 3.2.0：按住选环 + 扇区内容预渲染（更强渐变发光视觉）
+        self._hold_select = True
+        self._hold_active = False
+        self._pixmaps = {}         # (i, hovered, dpr) -> QPixmap
+        self._cache_dpr = 0.0
+
         # 展开/收拢：弹簧驱动（可打断、速度继承；展开轻过冲，收拢干脆）
         self._progress_state = spring(0.0, MotionTokens.RING_OPEN)
         self._motion_cancel = None
@@ -88,14 +96,40 @@ class RadialMenu(QWidget):
     # ── 公开接口 ─────────────────────────────────
     def set_theme(self, theme):
         self._theme = theme
+        self._pixmaps.clear()
         if self.isVisible():
             self.update()
 
     def set_items(self, items, radius=None):
         self._items = list(items)
+        self._pixmaps.clear()
         if radius:
             self._outer = int(radius)
             self._inner = max(28, int(radius * 0.36))
+
+    # ── 按住选环（PATCH 3.2.0）────────────────────
+    def set_hold_mode(self, enabled):
+        """是否启用「按住选环」：长按弹出后不松手，滑到扇区松手即执行"""
+        self._hold_select = bool(enabled)
+
+    def begin_hold(self):
+        """长按弹出菜单、按键仍按住 → 进入选环模式"""
+        self._hold_active = bool(self._hold_select)
+        return self._hold_active
+
+    def end_hold(self, global_pos):
+        """按住选环松手：命中扇区则执行，否则取消关闭。返回是否处理了本次松手"""
+        if not self._hold_active:
+            return False
+        self._hold_active = False
+        idx = self._click_index(global_pos)
+        if 0 <= idx < len(self._items):
+            item = self._items[idx]
+            self.close_menu()
+            self.action_triggered.emit(item.id)
+        else:
+            self.close_menu()
+        return True
 
     def open_at(self, center_global, anchor_rect=None):
         """center_global: 环绕中心（全局坐标）；anchor_rect: 触发浮窗区域，用于保持打开"""
@@ -385,13 +419,17 @@ class RadialMenu(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         c = get_colors(self._theme)
         is_dark = self._theme == "dark"
-        ring_bg = QColor(30, 30, 34, 240) if is_dark else QColor(250, 250, 252, 242)
-        ring_border = QColor(255, 255, 255, 70) if is_dark else QColor(0, 0, 0, 42)
-        text_c = QColor(*c["TEXT"])
+        brand = QColor(*c["ACCENT"])
         center_pt = self._center()
         n = len(self._items)
         if n == 0:
             return
+
+        # PATCH 3.2.0：DPI 变化时重建扇区预渲染缓存（跨屏/缩放安全）
+        dpr = self.devicePixelRatioF() or 1.0
+        if abs(dpr - self._cache_dpr) > 0.01:
+            self._pixmaps.clear()
+            self._cache_dpr = dpr
 
         # 弹簧展开/收拢：整体缩放 + 淡入淡出（progress 含轻微过冲）
         scale = 0.30 + 0.70 * self._progress
@@ -402,21 +440,45 @@ class RadialMenu(QWidget):
         painter.scale(scale, scale)
         painter.setOpacity(fade)
 
-        # ── 毛玻璃阴影（Apple 材质深度：柔和多层）──
-        for off, alpha in [(0, 26), (3, 14), (6, 7)]:
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(0, 0, 0, alpha))
-            painter.drawEllipse(QRectF(-self._outer + off, -self._outer + off,
-                                       self._outer * 2, self._outer * 2))
+        # ── 外发光（PATCH 3.2.0：更强渐变发光；悬停扇区时更亮）──
+        glow_c = QColor(brand)
+        glow_c.setAlpha(72 if self._hover_idx >= 0 else 40)
+        glow_r = self._outer + self._pad * 0.85
+        glow = QRadialGradient(QPointF(0, 0), glow_r)
+        glow.setColorAt(0.60, QColor(glow_c.red(), glow_c.green(), glow_c.blue(), 0))
+        glow.setColorAt(0.84, glow_c)
+        glow.setColorAt(1.0, QColor(glow_c.red(), glow_c.green(), glow_c.blue(), 0))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(glow)
+        painter.drawEllipse(QPointF(0, 0), glow_r, glow_r)
 
-        # ── 整环一次性绘制（单一底色，杜绝扇区重叠错误）──
+        # ── 毛玻璃底：径向渐变（更强质感）──
+        bg = QRadialGradient(QPointF(0, 0), float(self._outer))
+        if is_dark:
+            bg.setColorAt(0.0, QColor(40, 40, 48, 246))
+            bg.setColorAt(0.72, QColor(26, 26, 32, 246))
+            bg.setColorAt(1.0, QColor(16, 16, 20, 250))
+        else:
+            bg.setColorAt(0.0, QColor(252, 252, 255, 246))
+            bg.setColorAt(0.72, QColor(244, 244, 249, 246))
+            bg.setColorAt(1.0, QColor(230, 230, 240, 250))
+        ring_border = QColor(255, 255, 255, 70) if is_dark else QColor(0, 0, 0, 42)
         ring_path = QPainterPath()
         ring_path.setFillRule(Qt.OddEvenFill)
         ring_path.addEllipse(QRectF(-self._outer, -self._outer, self._outer * 2, self._outer * 2))
         ring_path.addEllipse(QRectF(-self._inner, -self._inner, self._inner * 2, self._inner * 2))
         painter.setPen(QPen(ring_border, 1.2))
-        painter.setBrush(ring_bg)
+        painter.setBrush(bg)
         painter.drawPath(ring_path)
+
+        # ── 品牌渐变描边（内/外缘各一圈，更强视觉）──
+        gpen = QPen()
+        gpen.setWidthF(1.8)
+        gpen.setBrush(QBrush(self._brand_conical(brand)))
+        painter.setPen(gpen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(QPointF(0, 0), float(self._outer), float(self._outer))
+        painter.drawEllipse(QPointF(0, 0), float(self._inner), float(self._inner))
 
         # ── 扇区分隔线（细、低对比）──
         sweep = 360.0 / n
@@ -425,24 +487,26 @@ class RadialMenu(QWidget):
             a = -90.0 + i * sweep
             painter.drawLine(self._polar(a, self._inner), self._polar(a, self._outer))
 
-        # ── 悬停/按压扇区：中性灰高亮 + 按压品牌色微光（P2 三件套）──
+        # ── 悬停/按压扇区：品牌渐变高亮 + 描边发光（PATCH 3.2.0）──
         if 0 <= self._hover_idx < n:
             hp = self._sector_path(self._hover_idx)
+            item_c = QColor(self._items[self._hover_idx].color)
             press = self._press_progress if self._press_idx == self._hover_idx else 0.0
-            if is_dark:
-                fill = QColor(255, 255, 255, int(26 + 26 * press))
-            else:
-                fill = QColor(0, 0, 0, int(24 + 28 * press))
+            a0 = -90.0 + self._hover_idx * sweep
+            grad = QLinearGradient(self._polar(a0, self._outer), self._polar(a0 + sweep, self._inner))
+            base_a = 92 if is_dark else 74
+            grad.setColorAt(0.0, QColor(item_c.red(), item_c.green(), item_c.blue(),
+                                        int(base_a + 60 * press)))
+            grad.setColorAt(1.0, QColor(brand.red(), brand.green(), brand.blue(),
+                                        int(max(0, base_a - 24) + 50 * press)))
             painter.setPen(Qt.NoPen)
-            painter.setBrush(fill)
+            painter.setBrush(grad)
             painter.drawPath(hp)
-            if press > 0.01:
-                glow = QColor(self._items[self._hover_idx].color)
-                glow.setAlpha(int(72 * press))
-                painter.setBrush(glow)
-                painter.drawPath(hp)
+            painter.setPen(QPen(QColor(item_c.red(), item_c.green(), item_c.blue(), 160), 1.4))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPath(hp)
 
-        # ── 图标字符 + 标签 + 品牌圆点（展开时按序错峰浮现）──
+        # ── 图标字符 + 标签（预渲染 pixmap + 错峰浮现 + 悬停放大）──
         self._sector_cache = []
         for i, item in enumerate(self._items):
             self._sector_cache.append((item.id, -90.0 + i * sweep, sweep))
@@ -451,51 +515,89 @@ class RadialMenu(QWidget):
             rad = self._outer * (0.60 if n >= 8 else 0.68)
             pt = self._polar(mid, rad)
             hovered = (i == self._hover_idx)
+            if sector_p <= 0.02:
+                continue
 
-            # 品牌色小圆点（外缘，仅做微辨识；悬停时轻微变淡）
+            # 品牌色小圆点（外缘；悬停时轻微变淡）
             dot_pt = self._polar(mid, self._outer - 10)
             painter.setPen(Qt.NoPen)
             dot_c = QColor(item.color)
             dot_c.setAlpha(int((150 if hovered else 255) * sector_p))
             painter.setBrush(dot_c)
-            if sector_p > 0.02:
-                painter.drawEllipse(QRectF(dot_pt.x() - 3.0, dot_pt.y() - 3.0, 6, 6))
+            painter.drawEllipse(QRectF(dot_pt.x() - 3.0, dot_pt.y() - 3.0, 6, 6))
 
-            # 按压扇区：内容向中心轻微缩小（按下去的触感）；错峰浮现
+            # 按压缩小 / 悬停放大（1.06）
             content_scale = (1.0 - 0.07 * self._press_progress) * (0.70 + 0.30 * sector_p)
+            if hovered:
+                content_scale *= 1.06
+            pm = self._sector_pixmap(i, hovered, dpr)
             painter.save()
             painter.translate(pt)
             painter.scale(content_scale, content_scale)
-            painter.translate(-pt)
-
-            # 主字符（内圈）+ 标签（外圈）：随扇区数量自适应，杜绝相邻重叠
-            if n >= 8:
-                char_font = QFont("Segoe UI", 12, QFont.Bold)
-                label_font = QFont("Microsoft YaHei", 7)
-                char_rect = QRectF(pt.x() - 18, pt.y() - 28, 36, 22)
-                label_rect = QRectF(pt.x() - 50, pt.y() + 0, 100, 16)
-            else:
-                char_font = QFont("Segoe UI", 15, QFont.Bold)
-                label_font = QFont("Microsoft YaHei", 8)
-                char_rect = QRectF(pt.x() - 30, pt.y() - 36, 60, 26)
-                label_rect = QRectF(pt.x() - 52, pt.y() - 10, 104, 18)
-            if sector_p > 0.02:
-                painter.setPen(QColor(255, 255, 255, int(255 * sector_p)) if hovered
-                               else QColor(text_c.red(), text_c.green(), text_c.blue(),
-                                           int(235 * sector_p)))
-                painter.setFont(char_font)
-                painter.drawText(char_rect, Qt.AlignCenter, item.char)
-
-                # 标签
-                painter.setFont(label_font)
-                painter.setPen(QColor(255, 255, 255, int(235 * sector_p)) if hovered else
-                               QColor(text_c.red(), text_c.green(), text_c.blue(),
-                                      int(150 * sector_p)))
-                painter.drawText(label_rect, Qt.AlignCenter, item.label)
-
+            painter.setOpacity(fade * sector_p)
+            painter.drawPixmap(int(-pm.width() / 2.0 / dpr), int(-pm.height() / 2.0 / dpr), pm)
             painter.restore()
 
         painter.restore()
+
+    def _brand_conical(self, brand):
+        """品牌色环形渐变（外/内描边共用，PATCH 3.2.0 更强视觉）"""
+        g = QConicalGradient(QPointF(0, 0), -90.0)
+        purple = QColor(0xAF, 0x52, 0xDE)
+        g.setColorAt(0.0, brand)
+        g.setColorAt(0.35, purple)
+        g.setColorAt(0.7, brand)
+        g.setColorAt(1.0, purple)
+        return g
+
+    def _sector_pixmap(self, idx, hovered, dpr):
+        """扇区内容（图标 + 标签 + 悬停光晕）预渲染缓存（PATCH 3.2.0）"""
+        key = (idx, bool(hovered), round(float(dpr), 2))
+        pm = self._pixmaps.get(key)
+        if pm is not None:
+            return pm
+        item = self._items[idx]
+        n = len(self._items)
+        if n >= 8:
+            w, h, char_h = 108, 48, 24
+            char_font = QFont("Segoe UI", 12, QFont.Bold)
+            label_font = QFont("Microsoft YaHei", 7)
+        else:
+            w, h, char_h = 120, 56, 30
+            char_font = QFont("Segoe UI", 15, QFont.Bold)
+            label_font = QFont("Microsoft YaHei", 8)
+        pm = QPixmap(int(w * dpr), int(h * dpr))
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        try:
+            p.setRenderHint(QPainter.Antialiasing)
+            c = get_colors(self._theme)
+            text_c = QColor(*c["TEXT"])
+            if hovered:
+                gc = QColor(item.color)
+                gc.setAlpha(96)
+                glow = QRadialGradient(QPointF(w / 2.0, h / 2.0), w / 2.0)
+                glow.setColorAt(0.0, gc)
+                glow.setColorAt(1.0, QColor(gc.red(), gc.green(), gc.blue(), 0))
+                p.setPen(Qt.NoPen)
+                p.setBrush(glow)
+                p.drawEllipse(QRectF(0, 0, w, h))
+                p.setPen(QColor(255, 255, 255, 255))
+            else:
+                p.setPen(QColor(text_c.red(), text_c.green(), text_c.blue(), 235))
+            p.setFont(char_font)
+            p.drawText(QRectF(0, 0, w, char_h), Qt.AlignCenter, item.char)
+            p.setFont(label_font)
+            if hovered:
+                p.setPen(QColor(255, 255, 255, 238))
+            else:
+                p.setPen(QColor(text_c.red(), text_c.green(), text_c.blue(), 150))
+            p.drawText(QRectF(0, char_h, w, h - char_h), Qt.AlignCenter, item.label)
+        finally:
+            p.end()
+        self._pixmaps[key] = pm
+        return pm
 
     def _sector_path(self, idx):
         """返回扇区 idx 的填充路径（数学角度约定，与命中测试/图标一致）。

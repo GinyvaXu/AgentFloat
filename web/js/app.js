@@ -309,8 +309,9 @@ import {
       card("环绕菜单", "鼠标悬停 / 长按浮窗唤出环绕菜单；扇区功能可自由映射，未来扩展功能在此预留。",
         row("启用环绕菜单", "", switchCtl("radial_menu.enabled", rm.enabled)) +
         row("触发方式", "", selectCtl("radial_menu.trigger_mode", rm.trigger_mode || "both", [["both", "悬停 + 长按"], ["hover", "仅悬停"], ["long_press", "仅长按"]])) +
-        row("悬停延迟 (ms)", "", numCtl("radial_menu.hover_delay_ms", rm.hover_delay_ms || 400, { min: 100, max: 2000 })) +
-        row("长按延迟 (ms)", "", numCtl("radial_menu.long_press_delay_ms", rm.long_press_delay_ms || 500, { min: 100, max: 2000 })) +
+        row("按住选环", "长按弹出后不松手：滑到目标扇区松开即执行（PATCH 3.2.0）", switchCtl("radial_menu.hold_select", rm.hold_select !== false)) +
+        row("悬停延迟 (ms)", "越小越灵敏（默认 180）", numCtl("radial_menu.hover_delay_ms", rm.hover_delay_ms || 180, { min: 100, max: 2000 })) +
+        row("长按延迟 (ms)", "越小越灵敏（默认 300）", numCtl("radial_menu.long_press_delay_ms", rm.long_press_delay_ms || 300, { min: 100, max: 2000 })) +
         row("半径 (px)", "", numCtl("radial_menu.radius", rm.radius || 120, { min: 80, max: 260 })) +
         row("扇区数量", "", selectCtl("__slot_count", rm.slot_count || 6, [[4, "4 扇区"], [6, "6 扇区"], [8, "8 扇区"]], true))) +
       card("扇区功能映射", "每个扇区可映射为启动某 Agent 或打开某面板；「自动」表示按默认布局（所有 Agent + 固定 4 项）自动填充。", slotRows);

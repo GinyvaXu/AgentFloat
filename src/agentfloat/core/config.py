@@ -118,9 +118,31 @@ def load_config():
     else:
         defaults["agents"] = _def_agents
         _migrated = True
+
+    # ── 环绕菜单手感迁移（PATCH 3.2.0）：旧默认时延 → 灵敏档 + 按住选环 ──
+    _rm = defaults.get("radial_menu")
+    if isinstance(_rm, dict):
+        try:
+            if int(_rm.get("hover_delay_ms") or 0) == 400:       # 旧默认 → 新默认
+                _rm["hover_delay_ms"] = 180
+                _migrated = True
+            if int(_rm.get("long_press_delay_ms") or 0) == 500:
+                _rm["long_press_delay_ms"] = 300
+                _migrated = True
+        except (TypeError, ValueError):
+            _rm["hover_delay_ms"] = 180
+            _rm["long_press_delay_ms"] = 300
+            _migrated = True
+        if "hold_select" not in _rm:
+            _rm["hold_select"] = True
+            _migrated = True
+
     if _migrated and (loaded or not parse_error):
         save_config(defaults)
-        _log().info("内置 Agent 迁移完成：新增 %d 个预设", len(defaults["agents"]))
+        _log().info("配置迁移完成：内置 Agent %d 个 / 菜单时延 %s+%sms（hold_select=%s）",
+                    len(defaults["agents"]), (defaults.get("radial_menu") or {}).get("hover_delay_ms"),
+                    (defaults.get("radial_menu") or {}).get("long_press_delay_ms"),
+                    (defaults.get("radial_menu") or {}).get("hold_select"))
 
     # ── 值校验：防止损坏的配置导致不可恢复状态 ──
     defaults["widget_size"] = max(30, min(200, int(defaults.get("widget_size", DEFAULT_SIZE))))
