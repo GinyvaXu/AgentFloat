@@ -101,3 +101,68 @@ def test_badge_update_balance_compat(qapp):
     badge.update_balance("20.00元", value=20.0)
     assert badge._is_low is False
     badge.deleteLater()
+
+
+# ── PATCH 3.5.4：显示框大小 / 不透明度 ──────────────────────
+
+def test_badge_scale_and_opacity(qapp):
+    from PyQt5.QtWidgets import QWidget
+    from agentfloat.services.api_monitor.badge import ApiBalanceBadge
+    pf = QWidget()
+    pf.setGeometry(500, 400, 52, 52)
+    badge = ApiBalanceBadge(parent_float=pf)
+    badge.set_rows([("5h", "92%"), ("周", "14.0%")])
+    base_h = badge.height()
+    badge.set_scale(1.5)
+    assert badge.height() > base_h
+    assert abs(badge.scale() - 1.5) < 1e-6
+    badge.set_scale(99)
+    assert abs(badge.scale() - badge.MAX_SCALE) < 1e-6
+    badge.set_scale(0.01)
+    assert abs(badge.scale() - badge.MIN_SCALE) < 1e-6
+    badge.set_opacity(0.5)
+    assert abs(badge.opacity() - 0.5) < 1e-6
+    badge.set_opacity(0.01)
+    assert badge.opacity() >= 0.25
+    badge.set_scale(1.0)
+    badge.set_position_mode("top")
+    badge.sync_position()
+    assert badge.y() < pf.y()
+    badge.deleteLater()
+
+
+def test_badge_style_callback(qapp):
+    from agentfloat.services.api_monitor.badge import ApiBalanceBadge
+    seen = []
+    badge = ApiBalanceBadge(parent_float=None, on_style_changed=lambda s, o: seen.append((s, o)))
+    badge.set_scale(1.2, persist=True)
+    badge.set_opacity(0.7, persist=True)
+    assert seen and seen[0][0] == 1.2
+    assert seen[-1][1] == 0.7
+    badge.deleteLater()
+
+
+def test_process_panel_opacity_css():
+    from agentfloat.ui.process_panel import panel_css
+    full = panel_css("dark", 1.0)
+    half = panel_css("dark", 0.5)
+    assert "0.720" in full
+    assert "0.360" in half
+    assert panel_css("light", 0.5) != panel_css("light", 1.0)
+
+
+def test_process_panel_set_opacity(qapp):
+    from agentfloat.ui.process_panel import ProcessPanel
+    p = ProcessPanel(lambda: [], theme="dark", opacity=0.6)
+    assert abs(p._opacity - 0.6) < 1e-6
+    p.set_opacity(0.45)
+    assert abs(p._opacity - 0.45) < 1e-6
+    p.set_opacity("bogus")
+    assert abs(p._opacity - 1.0) < 1e-6
+    p.hide_panel()
+
+
+def test_new_size_opacity_defaults():
+    from agentfloat.services.api_monitor.config import DEFAULTS
+    assert DEFAULTS["badge_scale"] == 1.0
+    assert DEFAULTS["badge_opacity"] == 0.88

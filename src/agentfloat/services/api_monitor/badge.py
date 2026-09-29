@@ -36,19 +36,24 @@ BADGE_THEMES = {
 
 
 class ApiBalanceBadge(QWidget):
-    """余额显示框：支持多行（标题 值）与拖动调整位置"""
+    """余额显示框：支持多行（标题 值）与拖动调整位置/大小/不透明度"""
 
     MARGIN = 6        # 与浮球间距
-    H_PAD = 10        # 内边距-水平
-    V_PAD = 5         # 内边距-垂直
-    RADIUS = 12       # 圆角（与浮球同款观感）
-    LINE_GAP = 3      # 行间距
-    TITLE_GAP = 6     # 标题与数值间距
+    H_PAD = 10        # 内边距-水平（随缩放）
+    V_PAD = 5         # 内边距-垂直（随缩放）
+    RADIUS = 12       # 圆角（与浮球同款观感，随缩放）
+    LINE_GAP = 3      # 行间距（随缩放）
+    TITLE_GAP = 6     # 标题与数值间距（随缩放）
+    BASE_PT = 9.0     # 基准字号
+    MIN_SCALE = 0.7
+    MAX_SCALE = 2.0
+    RESIZE_ZONE = 18  # 右下角缩放热区（像素）
 
-    def __init__(self, parent_float=None, on_offset_changed=None):
+    def __init__(self, parent_float=None, on_offset_changed=None, on_style_changed=None):
         super().__init__()
         self._parent_float = parent_float
         self._on_offset_changed = on_offset_changed
+        self._on_style_changed = on_style_changed
         self._theme = "light"
         self._rows = []                  # [(title, value)]
         self._is_low = False
@@ -57,7 +62,10 @@ class ApiBalanceBadge(QWidget):
         self._pos_mode = "top"           # top | bottom
         self._dx = 0                     # 相对默认位置的偏移（可拖动调整）
         self._dy = 0
+        self._scale = 1.0                # PATCH 3.5.4：大小（字号/内边距同步缩放）
+        self._opacity = 0.88             # PATCH 3.5.4：背景不透明度（文字保持清晰）
         self._dragging = False
+        self._resizing = False
         self._drag_start = None
         self._drag_base = None
 
@@ -66,8 +74,13 @@ class ApiBalanceBadge(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
-        self.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
+        self._apply_font()
         self.setCursor(Qt.SizeAllCursor)
+
+    def _apply_font(self):
+        font = QFont(FONT_FAMILY, int(self.BASE_PT), QFont.Bold)
+        font.setPointSizeF(max(6.0, self.BASE_PT * self._scale))
+        self.setFont(font)
 
     # ── 配置 ─────────────────────────────────────
     def set_theme(self, theme: str):
@@ -93,6 +106,36 @@ class ApiBalanceBadge(QWidget):
 
     def offset(self):
         return self._dx, self._dy
+
+    # PATCH 3.5.4：大小 / 不透明度
+    def set_scale(self, scale, persist=False):
+        try:
+            value = float(scale)
+        except (TypeError, ValueError):
+            value = 1.0
+        self._scale = max(self.MIN_SCALE, min(self.MAX_SCALE, value))
+        self._apply_font()
+        self._sync_size()
+        self.sync_position()
+        self.update()
+        if persist and self._on_style_changed:
+            self._on_style_changed(self._scale, self._opacity)
+
+    def scale(self):
+        return self._scale
+
+    def set_opacity(self, opacity, persist=False):
+        try:
+            value = float(opacity)
+        except (TypeError, ValueError):
+            value = 0.88
+        self._opacity = max(0.25, min(1.0, value))
+        self.update()
+        if persist and self._on_style_changed:
+            self._on_style_changed(self._scale, self._opacity)
+
+    def opacity(self):
+        return self._opacity
 
     # ── 内容 ─────────────────────────────────────
     def set_rows(self, rows, is_low=None, is_error=False):
@@ -126,20 +169,24 @@ class ApiBalanceBadge(QWidget):
         for title, value in self._rows:
             lw = fm.horizontalAdvance(value)
             if title:
-                lw += fm.horizontalAdvance(title) + self.TITLE_GAP
+                lw += fm.horizontalAdvance(title) + int(self.TITLE_GAP * self._scale)
             w = max(w, lw)
-        h = len(self._rows) * fm.height() + max(0, len(self._rows) - 1) * self.LINE_GAP
-        self.setFixedSize(max(w + self.H_PAD * 2, 34), h + self.V_PAD * 2)
+        gap = int(self.LINE_GAP * self._scale)
+        h = len(self._rows) * fm.height() + max(0, len(self._rows) - 1) * gap
+        h_pad = int(self.H_PAD * self._scale)
+        v_pad = int(self.V_PAD * self._scale)
+        self.setFixedSize(max(w + h_pad * 2, int(34 * self._scale)), h + v_pad * 2)
 
     def sync_position(self):
         pf = self._parent_float
         if pf is None:
             return
+        margin = int(self.MARGIN * self._scale)
         x = pf.x() + (pf.width() - self.width()) // 2 + self._dx
         if self._pos_mode == "bottom":
-            y = pf.y() + pf.height() + self.MARGIN + self._dy
+            y = pf.y() + pf.height() + margin + self._dy
         else:
-            y = pf.y() - self.height() - self.MARGIN + self._dy
+            y = pf.y() - self.height() - margin + self._dy
         # 屏幕内钳制：保证小框与文字完整可见
         try:
             screen = QApplication.screenAt(pf.geometry().center()) or QApplication.primaryScreen()
@@ -150,30 +197,49 @@ class ApiBalanceBadge(QWidget):
             pass
         self.move(int(x), int(y))
 
-    # ── 拖动自由调整 ──────────────────────────────
+    # ── 拖动移动 / 右下角缩放 / 滚轮调整 ──────────────
+    def _in_resize_zone(self, pos):
+        return pos.x() >= self.width() - self.RESIZE_ZONE and pos.y() >= self.height() - self.RESIZE_ZONE
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self._dragging = True
             self._drag_start = event.globalPos()
             self._drag_base = QPoint(self.x(), self.y())
+            self._resize_start_scale = self._scale
+            if self._in_resize_zone(event.pos()):
+                self._resizing = True
+                self._dragging = False
+            else:
+                self._dragging = True
+                self._resizing = False
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self._dragging and self._drag_start is not None:
+        if self._resizing and self._drag_start is not None:
+            delta = max(event.globalPos().x() - self._drag_start.x(),
+                        event.globalPos().y() - self._drag_start.y())
+            self.set_scale(self._resize_start_scale + delta / 45.0)
+        elif self._dragging and self._drag_start is not None:
             delta = event.globalPos() - self._drag_start
             self.move(self._drag_base + delta)
+        else:
+            self.setCursor(Qt.SizeFDiagCursor if self._in_resize_zone(event.pos()) else Qt.SizeAllCursor)
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if self._dragging and event.button() == Qt.LeftButton:
+        if event.button() == Qt.LeftButton and (self._dragging or self._resizing):
+            was_resize = self._resizing
             self._dragging = False
-            pf = self._parent_float
-            if pf is not None:
+            self._resizing = False
+            if was_resize:
+                self.set_scale(self._scale, persist=True)
+            elif self._parent_float is not None:
+                pf = self._parent_float
                 base_x = pf.x() + (pf.width() - self.width()) // 2
                 if self._pos_mode == "bottom":
-                    base_y = pf.y() + pf.height() + self.MARGIN
+                    base_y = pf.y() + pf.height() + int(self.MARGIN * self._scale)
                 else:
-                    base_y = pf.y() - self.height() - self.MARGIN
+                    base_y = pf.y() - self.height() - int(self.MARGIN * self._scale)
                 self._dx = int(self.x() - base_x)
                 self._dy = int((self._drag_base.y() + (event.globalPos().y() - self._drag_start.y())) - base_y)
                 if self._on_offset_changed:
@@ -184,6 +250,16 @@ class ApiBalanceBadge(QWidget):
             self.sync_position()
         super().mouseReleaseEvent(event)
 
+    def wheelEvent(self, event):
+        """滚轮 = 调整大小；Ctrl+滚轮 = 调整背景不透明度"""
+        step = event.angleDelta().y() / 120.0
+        if step:
+            if event.modifiers() & Qt.ControlModifier:
+                self.set_opacity(self._opacity + step * 0.05, persist=True)
+            else:
+                self.set_scale(self._scale + step * 0.05, persist=True)
+        event.accept()
+
     # ── 绘制 ─────────────────────────────────────
     def paintEvent(self, event):
         if not self._rows:
@@ -193,21 +269,27 @@ class ApiBalanceBadge(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.TextAntialiasing)
         rect = self.rect().adjusted(0, 0, -1, -1)
-        p.setPen(QPen(QColor(*t["border"]), 1))
-        p.setBrush(QColor(*t["bg"]))
-        p.drawRoundedRect(rect, self.RADIUS, self.RADIUS)
+        bg, border = t["bg"], t["border"]
+        radius = int(self.RADIUS * self._scale)
+        p.setPen(QPen(QColor(border[0], border[1], border[2], int(border[3] * self._opacity)), 1))
+        p.setBrush(QColor(bg[0], bg[1], bg[2], int(bg[3] * self._opacity)))
+        p.drawRoundedRect(rect, radius, radius)
 
         fm = QFontMetrics(self.font())
         v_color = QColor(*(t["warn"] if (self._is_low or self._is_error) else t["text"]))
         t_color = QColor(*t["dim"])
         line_h = fm.height()
-        y = self.V_PAD
+        h_pad = int(self.H_PAD * self._scale)
+        v_pad = int(self.V_PAD * self._scale)
+        title_gap = int(self.TITLE_GAP * self._scale)
+        line_gap = int(self.LINE_GAP * self._scale)
+        y = v_pad
         for title, value in self._rows:
-            x = self.H_PAD
+            x = h_pad
             if title:
                 p.setPen(t_color)
                 p.drawText(x, y + fm.ascent(), title)
-                x += fm.horizontalAdvance(title) + self.TITLE_GAP
+                x += fm.horizontalAdvance(title) + title_gap
             p.setPen(v_color)
             p.drawText(x, y + fm.ascent(), value)
-            y += line_h + self.LINE_GAP
+            y += line_h + line_gap

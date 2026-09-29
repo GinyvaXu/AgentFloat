@@ -207,7 +207,10 @@ import {
         row("Agent 进程面板", "悬停浮球显示在线 Agent 进程与操作（中断 / 继续任务）",
           switchCtl("process_panel.enabled", (cfg.process_panel || {}).enabled !== false)) +
         row("面板悬停延迟 (ms)", "", numCtl("process_panel.hover_delay_ms",
-          (cfg.process_panel || {}).hover_delay_ms || 250, { min: 100, max: 1000 })));
+          (cfg.process_panel || {}).hover_delay_ms || 250, { min: 100, max: 1000 })) +
+        row("面板不透明度", "只影响面板背景，文字保持清晰",
+          rangeCtl("process_panel.opacity", (cfg.process_panel || {}).opacity != null ? cfg.process_panel.opacity : 1, 0.35, 1, 0.05, "ppLabel") +
+          '<span id="ppLabel" class="val-tag">' + Math.round(((cfg.process_panel || {}).opacity != null ? cfg.process_panel.opacity : 1) * 100) + "%</span>"));
       el.innerHTML = inner;
       bindAll(el);
       $$("#settingsContent [name='launch_mode']").forEach((r) => r.addEventListener("change", () => {
@@ -603,6 +606,12 @@ import {
         selectCtl("api_monitor.badge_position", cfgApi.badge_position || "top",
           [["top", "浮球上方"], ["bottom", "浮球下方"]]) +
         '<button class="btn sm" style="margin-left:8px" onclick="App.resetBadgePos()">重置拖动偏移</button>') +
+      row("大小", "也可在浮球旁的小框上滚动滚轮 / 拖右下角缩放",
+        rangeCtl("api_monitor.badge_scale", cfgApi.badge_scale || 1.0, 0.7, 2, 0.05, "bsLabel") +
+        '<span id="bsLabel" class="val-tag">' + num(cfgApi.badge_scale, 1.0).toFixed(2) + "×</span>") +
+      row("不透明度", "只影响背景，文字保持清晰；小框上 Ctrl+滚轮 可调",
+        rangeCtl("api_monitor.badge_opacity", cfgApi.badge_opacity != null ? cfgApi.badge_opacity : 0.88, 0.25, 1, 0.05, "boLabel") +
+        '<span id="boLabel" class="val-tag">' + Math.round(num(cfgApi.badge_opacity != null ? cfgApi.badge_opacity : 0.88, 0.88) * 100) + "%</span>") +
       row("单行模式", "未配置「显示行」时生效；端点可单独覆盖（如 OpenCode Go 预设为剩余%）",
         selectCtl("api_monitor.badge_mode", cfgApi.badge_mode || "balance",
           [["balance", "余额金额"], ["remaining", "剩余百分比"], ["used", "已用百分比"]])) +
@@ -943,7 +952,13 @@ import {
 
   window.App = {
     save: save, goPage: goPage, goSub: goSub,
-    rangeLabel: (el, id) => { const t = $("#" + id); if (t) t.textContent = el.value + (id === "opLabel" ? "%" : "px"); },
+    rangeLabel: (el, id) => {
+      const t = $("#" + id);
+      if (!t) return;
+      const unit = (id === "opLabel" || id === "boLabel" || id === "ppLabel") ? "%"
+        : (id === "bsLabel" ? "×" : "px");
+      t.textContent = el.value + unit;
+    },
     resetDir: () => { cfg.working_directory = ""; refreshDirty(); renderPage(); },
     setPrimary: (i) => { (cfg.agents || []).forEach((a, j) => { a.primary = (i === j); }); refreshDirty(); renderAgents($("#settingsContent")); },
     addAgent: () => agentModal(null),

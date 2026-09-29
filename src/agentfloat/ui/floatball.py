@@ -337,11 +337,14 @@ class FloatingWidget(QWidget):
             return
 
         self._api_badge = ApiBalanceBadge(parent_float=self,
-                                          on_offset_changed=self._on_badge_moved)
+                                          on_offset_changed=self._on_badge_moved,
+                                          on_style_changed=self._on_badge_style)
         self._api_badge.set_theme(self.theme)
         self._api_badge.set_warn_threshold(am_config.get("low_balance_warn", 5.0))
         self._api_badge.set_position_mode(am_config.get("badge_position", "top"))
         self._api_badge.set_offset(am_config.get("badge_dx", 0), am_config.get("badge_dy", 0))
+        self._api_badge.set_scale(am_config.get("badge_scale", 1.0))
+        self._api_badge.set_opacity(am_config.get("badge_opacity", 0.88))
         self._api_badge.update_balance("--")
         if self.isVisible():
             self._api_badge.show()
@@ -509,6 +512,20 @@ class FloatingWidget(QWidget):
         am["badge_dy"] = int(dy)
         save_config(self.config)
         _log().info("[API] 余额显示框位置已保存: dx=%s dy=%s", dx, dy)
+
+    def _on_badge_style(self, scale, opacity):
+        """PATCH 3.5.4：显示框大小/不透明度变化（滚轮连续触发 → 去抖保存）"""
+        am = self.config.setdefault("api_monitor", {})
+        am["badge_scale"] = round(float(scale), 3)
+        am["badge_opacity"] = round(float(opacity), 3)
+        timer = getattr(self, "_badge_style_timer", None)
+        if timer is None:
+            from PyQt5.QtCore import QTimer as _QTimer
+            timer = self._badge_style_timer = _QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(lambda: save_config(self.config))
+        timer.start(500)
+        _log().debug("[API] 显示框样式: scale=%.2f opacity=%.2f", scale, opacity)
 
     def _sync_api_panel_position(self):
         """同步余额角标位置"""
@@ -1223,10 +1240,16 @@ class FloatingWidget(QWidget):
         if self._radial_menu is not None and self._radial_menu.isVisible():
             return
         try:
+            panel_opacity = float(self._proc_panel_cfg().get("opacity", 1.0))
+        except (TypeError, ValueError):
+            panel_opacity = 1.0
+        try:
             if self._proc_panel is None:
                 from agentfloat.ui.process_panel import ProcessPanel
                 self._proc_panel = ProcessPanel(lambda: self._agents, theme=self.theme,
-                                                parent=self)
+                                                parent=self, opacity=panel_opacity)
+            else:
+                self._proc_panel.set_opacity(panel_opacity)
             self._proc_panel.show_for(self)
         except Exception:  # noqa: BLE001
             _log().warning("进程面板显示失败", exc_info=True)
@@ -2237,11 +2260,13 @@ class FloatingWidget(QWidget):
             if new_api_config is not None:
                 old_api_config = self.config.get("api_monitor", API_MONITOR_DEFAULTS)
                 self.config["api_monitor"] = new_api_config
-                # PATCH 3.5.1：同步余额显示框位置（上/下 + 拖动偏移）
+                # PATCH 3.5.1：同步余额显示框位置（上/下 + 拖动偏移）；3.5.4：大小与不透明度
                 if self._api_badge is not None:
                     self._api_badge.set_position_mode(new_api_config.get("badge_position", "top"))
                     self._api_badge.set_offset(new_api_config.get("badge_dx", 0),
                                                new_api_config.get("badge_dy", 0))
+                    self._api_badge.set_scale(new_api_config.get("badge_scale", 1.0))
+                    self._api_badge.set_opacity(new_api_config.get("badge_opacity", 0.88))
                 if new_api_config != old_api_config:
                     _log().info("API 监控配置已变更，重启监控")
                     self._restart_api_monitor()

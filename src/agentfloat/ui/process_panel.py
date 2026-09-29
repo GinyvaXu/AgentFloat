@@ -27,27 +27,35 @@ REFRESH_MS = 2000
 HIDE_GRACE_MS = 400
 
 
-def panel_css(theme):
-    """半透明玻璃样式（与浮球同款观感；深浅色自适应）"""
+def panel_css(theme, opacity=1.0):
+    """半透明玻璃样式（与浮球同款观感；深浅色自适应；opacity 只缩放背景/描边）"""
     dark = theme != "light"
+    try:
+        op = max(0.35, min(1.0, float(opacity)))
+    except (TypeError, ValueError):
+        op = 1.0
+
+    def rgba(r, g, b, a):
+        return "rgba(%d, %d, %d, %.3f)" % (r, g, b, min(1.0, a * op))
+
     if dark:
-        bg = "rgba(28, 28, 32, 0.72)"
-        border = "rgba(255, 255, 255, 0.16)"
-        card = "rgba(255, 255, 255, 0.075)"
-        card_b = "rgba(255, 255, 255, 0.12)"
+        bg = rgba(28, 28, 32, 0.72)
+        border = rgba(255, 255, 255, 0.16)
+        card = rgba(255, 255, 255, 0.075)
+        card_b = rgba(255, 255, 255, 0.12)
         text = "#F2F2F7"
         dim = "#9A9AA0"
-        btn_bg = "rgba(255, 255, 255, 0.10)"
-        btn_hover = "rgba(255, 255, 255, 0.18)"
+        btn_bg = rgba(255, 255, 255, 0.10)
+        btn_hover = rgba(255, 255, 255, 0.18)
     else:
-        bg = "rgba(250, 250, 252, 0.78)"
-        border = "rgba(0, 0, 0, 0.10)"
-        card = "rgba(0, 0, 0, 0.04)"
-        card_b = "rgba(0, 0, 0, 0.07)"
+        bg = rgba(250, 250, 252, 0.78)
+        border = rgba(0, 0, 0, 0.10)
+        card = rgba(0, 0, 0, 0.04)
+        card_b = rgba(0, 0, 0, 0.07)
         text = "#1C1C1E"
         dim = "#6E6E73"
-        btn_bg = "rgba(0, 0, 0, 0.05)"
-        btn_hover = "rgba(0, 0, 0, 0.10)"
+        btn_bg = rgba(0, 0, 0, 0.05)
+        btn_hover = rgba(0, 0, 0, 0.10)
     return """
     QDialog { background: transparent; }
     #panelRoot {
@@ -83,11 +91,15 @@ def panel_css(theme):
 class ProcessPanel(QDialog):
     """Agent 进程面板（非模态、非激活，悬停驱动）"""
 
-    def __init__(self, agents_getter, theme="dark", parent=None, on_hide=None):
+    def __init__(self, agents_getter, theme="dark", parent=None, on_hide=None, opacity=1.0):
         super().__init__(parent)
         self._agents_getter = agents_getter
         self._theme = theme
         self._on_hide = on_hide
+        try:
+            self._opacity = max(0.35, min(1.0, float(opacity)))
+        except (TypeError, ValueError):
+            self._opacity = 1.0
         self._interrupted = {}          # agent_id -> {"ts": 中断时间, "hard": bool}
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
@@ -119,11 +131,19 @@ class ProcessPanel(QDialog):
         self._hint = QLabel("悬停浮球查看 · 离开自动收起")
         self._hint.setObjectName("hint")
         box.addWidget(self._hint)
-        self.setStyleSheet(panel_css(theme))
+        self.setStyleSheet(panel_css(theme, self._opacity))
 
     def set_theme(self, theme):
         self._theme = theme
-        self.setStyleSheet(panel_css(theme))
+        self.setStyleSheet(panel_css(theme, self._opacity))
+
+    # PATCH 3.5.4：不透明度（只影响背景/描边，文字保持清晰）
+    def set_opacity(self, opacity):
+        try:
+            self._opacity = max(0.35, min(1.0, float(opacity)))
+        except (TypeError, ValueError):
+            self._opacity = 1.0
+        self.setStyleSheet(panel_css(self._theme, self._opacity))
 
     # ── 位置与显隐 ────────────────────────────────
     def show_for(self, anchor, side="auto"):

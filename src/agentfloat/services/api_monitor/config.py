@@ -17,6 +17,9 @@ DEFAULTS = {
     "badge_dx": 0,               # 拖动自由偏移（相对默认位置）
     "badge_dy": 0,
     "badge_rows": [],            # 非空时按行渲染（覆盖 badge_mode）
+    # PATCH 3.5.4：显示框大小与不透明度（可拖动右下角/滚轮调整）
+    "badge_scale": 1.0,          # 0.7 – 2.0
+    "badge_opacity": 0.88,       # 0.25 – 1.0（仅背景/描边，文字保持清晰）
     "endpoints": [],
 }
 
