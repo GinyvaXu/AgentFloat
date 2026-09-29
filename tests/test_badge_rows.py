@@ -166,3 +166,55 @@ def test_new_size_opacity_defaults():
     from agentfloat.services.api_monitor.config import DEFAULTS
     assert DEFAULTS["badge_scale"] == 1.0
     assert DEFAULTS["badge_opacity"] == 0.88
+
+
+# ── PATCH 3.6.1：进程面板大小 + 下拉不被打断 ─────────────────
+
+def test_process_panel_scale_css_and_persist(qapp):
+    from agentfloat.ui.process_panel import ProcessPanel, panel_css
+    small = panel_css("dark", 1.0, 0.8)
+    big = panel_css("dark", 1.0, 1.6)
+    assert small != big
+    assert "font-size: 18px" in big            # 11 * 1.6 ≈ 18
+    assert "font-size: 9px" in small           # 11 * 0.8 ≈ 9
+    seen = []
+    p = ProcessPanel(lambda: [], theme="dark", scale=1.0,
+                     on_style_changed=lambda s, o: seen.append((s, o)))
+    p.set_scale(1.5, persist=True)
+    assert abs(p._scale - 1.5) < 1e-6
+    assert seen and abs(seen[-1][0] - 1.5) < 1e-6
+    assert p.minimumWidth() > 300              # 最小宽度随缩放
+    p.hide_panel()
+
+
+def test_process_panel_popup_guard(qapp):
+    from agentfloat.ui.process_panel import ProcessPanel
+    p = ProcessPanel(lambda: [], theme="dark")
+    p.move(5000, 5000)                          # 远离鼠标，确保「鼠标不在面板上」
+    assert p._hide_timer.isActive() is False
+    p._set_popup(True)                          # 下拉打开
+    p.hide_soon()
+    assert p._hide_timer.isActive() is False    # 暂停自动收起
+    assert p.hide_panel() is None and p.isVisible() is False
+    p._set_popup(False)                         # 下拉关闭且鼠标不在面板上 → 延迟收起
+    assert p._hide_timer.isActive() is True
+    p.cancel_hide()
+    assert p._hide_timer.isActive() is False
+
+
+def test_process_panel_interrupt_menu_wiring(qapp):
+    from PyQt5.QtWidgets import QPushButton
+    from agentfloat.ui.process_panel import ProcessPanel
+    p = ProcessPanel(lambda: [], theme="dark")
+    card = p._card({"id": "x", "name": "X", "command": "x"},
+                   {"pids": [1], "runtime_s": 65, "agent": {}})
+    stop = [b for b in card.findChildren(QPushButton) if b.text() == "中断"]
+    assert stop and stop[0].menu() is not None
+    menu = stop[0].menu()
+    assert [a.text() for a in menu.actions()][0].startswith("软中断")
+    menu.aboutToShow.emit()
+    assert p._popup_open is True
+    menu.aboutToHide.emit()
+    assert p._popup_open is False
+    p.cancel_hide()
+    p.hide_panel()

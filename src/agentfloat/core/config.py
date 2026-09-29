@@ -77,7 +77,7 @@ def load_config():
         "news": copy.deepcopy(_NEWS_DEFAULTS),
         "water": copy.deepcopy(DEFAULT_WATER),
         # PATCH 3.5.0：Agent 进程面板（悬停浮球弹出）
-        "process_panel": {"enabled": True, "hover_delay_ms": 250, "opacity": 1.0},
+        "process_panel": {"enabled": True, "hover_delay_ms": 250, "opacity": 1.0, "scale": 1.0},
     }
     loaded = {}
     parse_error = False
@@ -142,14 +142,15 @@ def load_config():
                 _rm[_k] = _v
                 _migrated = True
 
-    # PATCH 3.5.1：进程面板配置补齐；PATCH 3.5.4：不透明度
+    # PATCH 3.5.1：进程面板配置补齐；PATCH 3.5.4/3.6.1：不透明度与大小
     if not isinstance(defaults.get("process_panel"), dict):
-        defaults["process_panel"] = {"enabled": True, "hover_delay_ms": 250, "opacity": 1.0}
+        defaults["process_panel"] = {"enabled": True, "hover_delay_ms": 250, "opacity": 1.0, "scale": 1.0}
         _migrated = True
     else:
         defaults["process_panel"].setdefault("enabled", True)
         defaults["process_panel"].setdefault("hover_delay_ms", 250)
         defaults["process_panel"].setdefault("opacity", 1.0)
+        defaults["process_panel"].setdefault("scale", 1.0)
 
     # PATCH 3.5.1：退出 AgentFloat 不再结束 Agent 进程（历史配置统一关闭，可在设置中重新开启）
     if defaults.get("cleanup_on_quit"):

@@ -518,14 +518,25 @@ class FloatingWidget(QWidget):
         am = self.config.setdefault("api_monitor", {})
         am["badge_scale"] = round(float(scale), 3)
         am["badge_opacity"] = round(float(opacity), 3)
-        timer = getattr(self, "_badge_style_timer", None)
+        self._debounced_save("显示框样式 scale=%.2f opacity=%.2f" % (scale, opacity))
+
+    def _on_panel_style(self, scale, opacity):
+        """PATCH 3.6.1：进程面板大小/不透明度变化（去抖保存）"""
+        pp = self.config.setdefault("process_panel", {})
+        pp["scale"] = round(float(scale), 3)
+        pp["opacity"] = round(float(opacity), 3)
+        self._debounced_save("面板样式 scale=%.2f opacity=%.2f" % (scale, opacity))
+
+    def _debounced_save(self, note=""):
+        """连续调整（滚轮）时延迟落盘，避免频繁写文件"""
+        timer = getattr(self, "_style_save_timer", None)
         if timer is None:
             from PyQt5.QtCore import QTimer as _QTimer
-            timer = self._badge_style_timer = _QTimer(self)
+            timer = self._style_save_timer = _QTimer(self)
             timer.setSingleShot(True)
             timer.timeout.connect(lambda: save_config(self.config))
         timer.start(500)
-        _log().debug("[API] 显示框样式: scale=%.2f opacity=%.2f", scale, opacity)
+        _log().debug("[样式] %s", note)
 
     def _sync_api_panel_position(self):
         """同步余额角标位置"""
@@ -1244,12 +1255,19 @@ class FloatingWidget(QWidget):
         except (TypeError, ValueError):
             panel_opacity = 1.0
         try:
+            panel_scale = float(self._proc_panel_cfg().get("scale", 1.0))
+        except (TypeError, ValueError):
+            panel_scale = 1.0
+        try:
             if self._proc_panel is None:
                 from agentfloat.ui.process_panel import ProcessPanel
                 self._proc_panel = ProcessPanel(lambda: self._agents, theme=self.theme,
-                                                parent=self, opacity=panel_opacity)
+                                                parent=self, opacity=panel_opacity,
+                                                scale=panel_scale,
+                                                on_style_changed=self._on_panel_style)
             else:
                 self._proc_panel.set_opacity(panel_opacity)
+                self._proc_panel.set_scale(panel_scale)
             self._proc_panel.show_for(self)
         except Exception:  # noqa: BLE001
             _log().warning("进程面板显示失败", exc_info=True)
@@ -2270,6 +2288,18 @@ class FloatingWidget(QWidget):
                 if new_api_config != old_api_config:
                     _log().info("API 监控配置已变更，重启监控")
                     self._restart_api_monitor()
+
+            # PATCH 3.6.1：进程面板配置（开关/悬停延迟/不透明度/大小）
+            # 此前未合并 → 收尾 save_config 会把面板设置写回旧值（表现为「改了存不住」）
+            new_panel_cfg = new_cfg.get("process_panel")
+            if new_panel_cfg is not None:
+                self.config["process_panel"] = new_panel_cfg
+                if self._proc_panel is not None:
+                    try:
+                        self._proc_panel.set_opacity(new_panel_cfg.get("opacity", 1.0))
+                        self._proc_panel.set_scale(new_panel_cfg.get("scale", 1.0))
+                    except Exception:  # noqa: BLE001
+                        _log().debug("同步进程面板样式失败", exc_info=True)
 
             # PATCH 3.1.1：补齐此前被忽略的顶层键——它们不在上面任何分支里，
             # 收尾 save_config(self.config) 会把它们写回旧值（表现为「改了存不住」）

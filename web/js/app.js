@@ -210,6 +210,9 @@ import {
           switchCtl("process_panel.enabled", (cfg.process_panel || {}).enabled !== false)) +
         row("面板悬停延迟 (ms)", "", numCtl("process_panel.hover_delay_ms",
           (cfg.process_panel || {}).hover_delay_ms || 250, { min: 100, max: 1000 })) +
+        row("面板大小", "也可在面板上滚动滚轮调整（Ctrl+滚轮调不透明度）",
+          rangeCtl("process_panel.scale", (cfg.process_panel || {}).scale != null ? cfg.process_panel.scale : 1, 0.8, 1.8, 0.05, "psLabel") +
+          '<span id="psLabel" class="val-tag">' + num((cfg.process_panel || {}).scale != null ? cfg.process_panel.scale : 1, 1).toFixed(2) + "×</span>") +
         row("面板不透明度", "只影响面板背景，文字保持清晰",
           rangeCtl("process_panel.opacity", (cfg.process_panel || {}).opacity != null ? cfg.process_panel.opacity : 1, 0.35, 1, 0.05, "ppLabel") +
           '<span id="ppLabel" class="val-tag">' + Math.round(((cfg.process_panel || {}).opacity != null ? cfg.process_panel.opacity : 1) * 100) + "%</span>"));
@@ -491,7 +494,7 @@ import {
     } else {
       const options = accounts.map((a) => [a.name, a.name + (a.has_keys ? "（含密钥）" : "")]);
       inner += card("密钥保险箱", "本地多账户：口令加密保存 API Key；登录后启动 Agent 会自动注入为环境变量。",
-        row("账户", accounts.length ? selectCtl("__vault_name", v.active || (accounts[0] || {}).name, options)
+        row("账户", "", accounts.length ? selectCtl("__vault_name", v.active || (accounts[0] || {}).name, options)
           : '<input id="vaultName" type="text" placeholder="账户名（如 zhenl）" style="width:180px">') +
         row("口令", "至少 6 位；仅本机校验（PBKDF2 600k 次）", '<input id="vaultPw" type="password" placeholder="口令" style="width:180px">') +
         row("快速登录", "本机免口令解锁（DPAPI 绑定当前 Windows 用户，可随时禁用）",
@@ -1056,7 +1059,7 @@ import {
       const t = $("#" + id);
       if (!t) return;
       const unit = (id === "opLabel" || id === "boLabel" || id === "ppLabel") ? "%"
-        : (id === "bsLabel" ? "×" : "px");
+        : ((id === "bsLabel" || id === "psLabel") ? "×" : "px");
       t.textContent = el.value + unit;
     },
     resetDir: () => { cfg.working_directory = ""; refreshDirty(); renderPage(); },

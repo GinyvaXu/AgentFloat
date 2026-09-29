@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Agent 进程面板（PATCH 3.5.1）
+"""Agent 进程面板（PATCH 3.5.1 / 3.6.1）
 
 鼠标悬停浮球 ~250ms 侧边弹出；**只显示正在运行的 Agent 进程**：
 - 运行中：状态点 / PID / 运行时长 / 最近活动 + 「中断」（软中断 Esc / 结束进程树）
@@ -8,7 +8,9 @@
   - 已结束进程：按 Agent 的 resume_args 重新启动并续接上次会话
 - 没有任何运行/中断的 Agent 时显示「没有正在进行的 Agent 进程」
 
-视觉：半透明玻璃（与浮球同款圆角/描边），侧向滑入渐入；靠边自动选侧 + 屏幕内钳制。
+v3.6.1：
+- **大小可调**：面板上滚轮缩放、Ctrl+滚轮调不透明度（也可在设置中调），自动保存
+- **下拉不被打断**：打开中断下拉/确认框时暂停「鼠标离开自动收起」，选完再按需收起
 """
 import subprocess
 import time
@@ -17,7 +19,7 @@ from PyQt5.QtCore import Qt, QTimer, QPoint, QPropertyAnimation, QParallelAnimat
     QEasingCurve
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                              QFrame, QMenu, QMessageBox)
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QCursor
 
 from agentfloat.core.launcher import launch_agent
 from agentfloat.core.logging_setup import _log
@@ -25,15 +27,24 @@ from agentfloat.services import agent_control, agents_monitor
 
 REFRESH_MS = 2000
 HIDE_GRACE_MS = 400
+MIN_SCALE = 0.8
+MAX_SCALE = 1.8
 
 
-def panel_css(theme, opacity=1.0):
-    """半透明玻璃样式（与浮球同款观感；深浅色自适应；opacity 只缩放背景/描边）"""
+def panel_css(theme, opacity=1.0, scale=1.0):
+    """半透明玻璃样式（与浮球同款观感；opacity/scale 可调，文字始终不透明）"""
     dark = theme != "light"
     try:
         op = max(0.35, min(1.0, float(opacity)))
     except (TypeError, ValueError):
         op = 1.0
+    try:
+        sc = max(MIN_SCALE, min(MAX_SCALE, float(scale)))
+    except (TypeError, ValueError):
+        sc = 1.0
+
+    def px(v):
+        return int(round(v * sc))
 
     def rgba(r, g, b, a):
         return "rgba(%d, %d, %d, %.3f)" % (r, g, b, min(1.0, a * op))
@@ -61,46 +72,52 @@ def panel_css(theme, opacity=1.0):
     #panelRoot {
         background: %(bg)s;
         border: 1px solid %(border)s;
-        border-radius: 16px;
+        border-radius: %(root_radius)dpx;
     }
-    QLabel { color: %(text)s; background: transparent; }
-    QLabel#title { font-size: 13px; font-weight: 600; }
-    QLabel#hint, QLabel#dim { color: %(dim)s; font-size: 11px; }
+    QLabel { color: %(text)s; background: transparent; font-size: %(body_fs)dpx; }
+    QLabel#title { font-size: %(title_fs)dpx; font-weight: 600; }
+    QLabel#hint, QLabel#dim { color: %(dim)s; font-size: %(dim_fs)dpx; }
     QFrame#card {
         background: %(card)s;
         border: 1px solid %(card_b)s;
-        border-radius: 12px;
+        border-radius: %(card_radius)dpx;
     }
     QPushButton {
         color: %(text)s;
         background: %(btn_bg)s;
         border: 1px solid %(card_b)s;
-        border-radius: 8px;
-        padding: 4px 10px;
-        font-size: 11px;
+        border-radius: %(btn_radius)dpx;
+        padding: %(btn_py)dpx %(btn_px)dpx;
+        font-size: %(btn_fs)dpx;
     }
     QPushButton:hover { background: %(btn_hover)s; }
     QPushButton:disabled { color: %(dim)s; background: rgba(128,128,128,0.10); }
     QMenu { background: %(bg)s; border: 1px solid %(border)s; }
-    QMenu::item { color: %(text)s; padding: 6px 18px; }
+    QMenu::item { color: %(text)s; padding: %(menu_py)dpx %(menu_px)dpx; font-size: %(btn_fs)dpx; }
     QMenu::item:selected { background: %(btn_hover)s; }
-    """ % {"bg": bg, "border": border, "card": card, "card_b": card_b,
-           "text": text, "dim": dim, "btn_bg": btn_bg, "btn_hover": btn_hover}
+    """ % {
+        "bg": bg, "border": border, "card": card, "card_b": card_b,
+        "text": text, "dim": dim, "btn_bg": btn_bg, "btn_hover": btn_hover,
+        "root_radius": px(16), "card_radius": px(12), "btn_radius": px(8),
+        "body_fs": px(12), "title_fs": px(13), "dim_fs": px(11), "btn_fs": px(11),
+        "btn_py": px(4), "btn_px": px(10), "menu_py": px(6), "menu_px": px(18),
+    }
 
 
 class ProcessPanel(QDialog):
-    """Agent 进程面板（非模态、非激活，悬停驱动）"""
+    """Agent 进程面板（非模态、非激活，悬停驱动；可缩放/调透明度）"""
 
-    def __init__(self, agents_getter, theme="dark", parent=None, on_hide=None, opacity=1.0):
+    def __init__(self, agents_getter, theme="dark", parent=None, on_hide=None,
+                 opacity=1.0, scale=1.0, on_style_changed=None):
         super().__init__(parent)
         self._agents_getter = agents_getter
         self._theme = theme
         self._on_hide = on_hide
-        try:
-            self._opacity = max(0.35, min(1.0, float(opacity)))
-        except (TypeError, ValueError):
-            self._opacity = 1.0
+        self._on_style_changed = on_style_changed
+        self._opacity = self._clamp_opacity(opacity)
+        self._scale = self._clamp_scale(scale)
         self._interrupted = {}          # agent_id -> {"ts": 中断时间, "hard": bool}
+        self._popup_open = False        # 下拉/确认框打开时暂停自动收起
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.timeout.connect(self.hide_panel)
@@ -112,38 +129,75 @@ class ProcessPanel(QDialog):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
-        self.setMinimumWidth(300)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        root = QFrame(self)
-        root.setObjectName("panelRoot")
-        outer.addWidget(root)
-        box = QVBoxLayout(root)
-        box.setContentsMargins(14, 12, 14, 12)
-        box.setSpacing(8)
+        self._root = QFrame(self)
+        self._root.setObjectName("panelRoot")
+        outer.addWidget(self._root)
+        self._box = QVBoxLayout(self._root)
         self._title = QLabel("Agent 进程")
         self._title.setObjectName("title")
-        box.addWidget(self._title)
+        self._box.addWidget(self._title)
         self._body = QVBoxLayout()
-        self._body.setSpacing(6)
-        box.addLayout(self._body)
-        self._hint = QLabel("悬停浮球查看 · 离开自动收起")
+        self._box.addLayout(self._body)
+        self._hint = QLabel("")
         self._hint.setObjectName("hint")
-        box.addWidget(self._hint)
-        self.setStyleSheet(panel_css(theme, self._opacity))
+        self._box.addWidget(self._hint)
+        self._apply_style()
+
+    # ── 样式（大小/不透明度）────────────────────────
+    @staticmethod
+    def _clamp_opacity(value):
+        try:
+            return max(0.35, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            return 1.0
+
+    @staticmethod
+    def _clamp_scale(value):
+        try:
+            return max(MIN_SCALE, min(MAX_SCALE, float(value)))
+        except (TypeError, ValueError):
+            return 1.0
+
+    def _apply_style(self):
+        self.setStyleSheet(panel_css(self._theme, self._opacity, self._scale))
+        pad = int(round(14 * self._scale))
+        vpad = int(round(12 * self._scale))
+        self._box.setContentsMargins(pad, vpad, pad, vpad)
+        self._box.setSpacing(int(round(8 * self._scale)))
+        self._body.setSpacing(int(round(6 * self._scale)))
+        self.setMinimumWidth(int(round(300 * self._scale)))
+        self._hint.setText("滚轮调大小 · Ctrl+滚轮调不透明度 · 离开自动收起")
 
     def set_theme(self, theme):
         self._theme = theme
-        self.setStyleSheet(panel_css(theme, self._opacity))
+        self._apply_style()
 
-    # PATCH 3.5.4：不透明度（只影响背景/描边，文字保持清晰）
-    def set_opacity(self, opacity):
-        try:
-            self._opacity = max(0.35, min(1.0, float(opacity)))
-        except (TypeError, ValueError):
-            self._opacity = 1.0
-        self.setStyleSheet(panel_css(self._theme, self._opacity))
+    def set_opacity(self, opacity, persist=False):
+        self._opacity = self._clamp_opacity(opacity)
+        self._apply_style()
+        if persist and self._on_style_changed:
+            self._on_style_changed(self._scale, self._opacity)
+
+    def set_scale(self, scale, persist=False):
+        self._scale = self._clamp_scale(scale)
+        self._apply_style()
+        self.refresh()
+        self.adjustSize()
+        if persist and self._on_style_changed:
+            self._on_style_changed(self._scale, self._opacity)
+
+    def wheelEvent(self, event):
+        """滚轮 = 调大小；Ctrl+滚轮 = 调不透明度"""
+        step = event.angleDelta().y() / 120.0
+        if step:
+            if event.modifiers() & Qt.ControlModifier:
+                self.set_opacity(self._opacity + step * 0.05, persist=True)
+            else:
+                self.set_scale(self._scale + step * 0.05, persist=True)
+        event.accept()
 
     # ── 位置与显隐 ────────────────────────────────
     def show_for(self, anchor, side="auto"):
@@ -159,7 +213,7 @@ class ProcessPanel(QDialog):
         from agentfloat.ui.placement import screen_index_for
         idx = screen_index_for(ag.center().x(), ag.center().y(), screens)
         l, t, r, b = screens[idx] if idx >= 0 else (0, 0, 1920, 1080)
-        pw, ph = max(300, self.width()), self.height()
+        pw, ph = max(int(300 * self._scale), self.width()), self.height()
         gap = 12
         if side == "auto":
             side = "right" if (r - ag.right()) >= (pw + gap) else "left"
@@ -189,13 +243,28 @@ class ProcessPanel(QDialog):
         group.start()
         self._refresh_timer.start()
 
+    def _set_popup(self, is_open):
+        """下拉/确认框开关：打开时暂停自动收起，关闭后按鼠标位置决定是否收起"""
+        self._popup_open = bool(is_open)
+        if not self._popup_open:
+            try:
+                inside = self.rect().contains(self.mapFromGlobal(QCursor.pos()))
+            except Exception:  # noqa: BLE001
+                inside = False
+            if not inside:
+                self.hide_soon(600)
+
     def hide_soon(self, delay_ms=HIDE_GRACE_MS):
+        if self._popup_open:
+            return
         self._hide_timer.start(int(delay_ms))
 
     def cancel_hide(self):
         self._hide_timer.stop()
 
     def hide_panel(self):
+        if self._popup_open:
+            return
         self._refresh_timer.stop()
         self._hide_timer.stop()
         if not self.isVisible():
@@ -246,16 +315,18 @@ class ProcessPanel(QDialog):
         aid = str(agent.get("id"))
         run = match is not None
         marked = aid in self._interrupted
+        sc = self._scale
         card = QFrame()
         card.setObjectName("card")
         v = QVBoxLayout(card)
-        v.setContentsMargins(10, 8, 10, 8)
-        v.setSpacing(4)
+        pad = int(round(10 * sc))
+        v.setContentsMargins(pad, int(round(8 * sc)), pad, int(round(8 * sc)))
+        v.setSpacing(int(round(4 * sc)))
         head = QHBoxLayout()
         dot = QLabel("●")
-        dot.setStyleSheet("color: %s; font-size: 11px;" % ("#FF9F0A" if marked else "#34C759"))
+        dot.setStyleSheet("color: %s; font-size: %dpx;" % ("#FF9F0A" if marked else "#34C759", int(round(11 * sc))))
         name = QLabel(str(agent.get("name") or aid))
-        name.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
+        name.setFont(QFont("Microsoft YaHei", max(8, int(round(10 * sc))), QFont.Bold))
         head.addWidget(dot)
         head.addWidget(name)
         if marked:
@@ -285,7 +356,7 @@ class ProcessPanel(QDialog):
             v.addWidget(lbl)
 
         row = QHBoxLayout()
-        row.setSpacing(6)
+        row.setSpacing(int(round(6 * sc)))
         if run:
             btn_stop = QPushButton("中断")
             menu = QMenu(btn_stop)
@@ -293,6 +364,8 @@ class ProcessPanel(QDialog):
                            lambda a=agent, m=match: self._soft_interrupt(a, m))
             menu.addAction("结束进程…（终止进程树）",
                            lambda a=agent, m=match: self._hard_kill(a, m))
+            menu.aboutToShow.connect(lambda: self._set_popup(True))
+            menu.aboutToHide.connect(lambda: self._set_popup(False))
             btn_stop.setMenu(menu)
             row.addWidget(btn_stop)
             if marked:
@@ -333,9 +406,13 @@ class ProcessPanel(QDialog):
 
     def _hard_kill(self, agent, match):
         name = str(agent.get("name"))
-        ret = QMessageBox.question(
-            self, "结束进程", "确定结束「%s」的进程树吗？\n（会话可能丢失；之后可用「继续任务」自动续接）" % name,
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        self._set_popup(True)
+        try:
+            ret = QMessageBox.question(
+                self, "结束进程", "确定结束「%s」的进程树吗？\n（会话可能丢失；之后可用「继续任务」自动续接）" % name,
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        finally:
+            self._set_popup(False)
         if ret != QMessageBox.Yes:
             return
         for pid in match["pids"]:
