@@ -117,8 +117,16 @@ def start(agent, config=None):
     _log().info("启动 Web Agent: %s 命令=%s 日志=%s", name, " ".join(args), log_path)
     try:
         logf = open(log_path, "a", encoding="utf-8", errors="replace")
+        env = None
+        try:  # v3.6.0：注入密钥保险箱环境变量（未解锁则为 None → 继承当前环境）
+            from agentfloat.services.vault.accounts import get_store
+            store = get_store()
+            if store.unlocked():
+                env = store.env_for_launch()
+        except Exception:  # noqa: BLE001
+            env = None
         proc = subprocess.Popen(
-            args, stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+            args, stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env,
             creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
             cwd=os.environ.get("USERPROFILE") or config_dir())
     except Exception as e:  # noqa: BLE001

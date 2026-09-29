@@ -179,6 +179,8 @@ import {
   // ══════════════════ 设置页 ══════════════════
   function renderSettings() {
     const el = $("#settingsContent");
+    if (!el) return;
+    if (!cfg) return;      // v3.6.0：配置尚未加载完成时（过早点击子页）直接跳过，避免空引用
     const agents = cfg.agents || [];
     const primary = agents.find((a) => a.primary) || agents[0] || {};
     if (sub === "general") {
@@ -227,6 +229,7 @@ import {
     else if (sub === "radial") renderRadial(el);
     else if (sub === "skills") renderSkills(el);
     else if (sub === "water") renderWater(el);
+    else if (sub === "vault") { renderVault(el); loadVault(); }
     else if (sub === "about") renderAbout(el);
   }
 
@@ -435,6 +438,103 @@ import {
         '<div class="row"><div class="lbl">个人网站</div><div class="ctl"><a class="btn" href="https://ginyva.cn" target="_blank">打开</a></div></div>') +
       card("提示", "设置保存在本地 config.json；DeepSeek Harness（dsh）通过 Web UI 模式启动（后台服务 + 自动打开浏览器）。");
   }
+  // ══════════════════ 账户与密钥（v3.6.0）══════════════
+  let vaultState = { accounts: [], unlocked: false, active: "", has_quick: false, crypto: true,
+                     keys: [], importB64: null, importPreview: null };
+
+  function vaultNameValue() {
+    const sel = $("select[data-bind='__vault_name']");
+    if (sel) return sel.value;
+    const inp = $("#vaultName");
+    return inp ? inp.value.trim() : "";
+  }
+
+  function readFileB64(file) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => {
+        const s = String(fr.result || "");
+        const i = s.indexOf(",");
+        resolve(i >= 0 ? s.slice(i + 1) : s);
+      };
+      fr.onerror = () => reject(new Error("文件读取失败"));
+      fr.readAsDataURL(file);
+    });
+  }
+
+  async function loadVault() {
+    try {
+      const st = await API.api("/api/vault_state");
+      vaultState = Object.assign(vaultState, st);
+      vaultState.keys = st.unlocked ? ((await API.api("/api/vault/keys")).keys || []) : [];
+    } catch (e) { toast("账户状态读取失败：" + e.message, "err"); }
+    if (page === "settings" && sub === "vault") renderVault($("#settingsContent"));
+  }
+
+  function renderVault(el) {
+    const v = vaultState;
+    if (!v.crypto) {
+      el.innerHTML = card("密钥保险箱", "当前构建缺少 cryptography 组件，账户与密钥功能不可用。");
+      bindAll(el);
+      return;
+    }
+    const accounts = v.accounts || [];
+    let inner = "";
+    if (v.unlocked) {
+      inner += card("密钥保险箱", "已解锁：启动 Agent 时自动把这些密钥注入为环境变量；密钥在本机以 AES-256-GCM 加密保存。",
+        row("当前账户", "", "<b>" + esc(v.active || "") + '</b><button class="btn sm" style="margin-left:10px" onclick="App.vaultLogout()">登出</button>') +
+        row("密钥数量", "", esc((v.keys || []).length) + " 个 · 修改后自动重新加密保存") +
+        (accounts.length > 1 ? row("切换账户", "各账户密钥独立加密；切换后需用该账户口令登录",
+          accounts.filter((a) => !a.active).map((a) =>
+            '<button class="btn sm" style="margin-right:6px" onclick="App.vaultSwitch(\'' + esc(a.id) + '\')">' + esc(a.name) + "</button>").join("")) : "") +
+        row("修改口令", "将重新加密保险箱并清除本机快速登录", '<button class="btn sm" onclick="App.vaultChangePw()">修改口令</button>'));
+    } else {
+      const options = accounts.map((a) => [a.name, a.name + (a.has_keys ? "（含密钥）" : "")]);
+      inner += card("密钥保险箱", "本地多账户：口令加密保存 API Key；登录后启动 Agent 会自动注入为环境变量。",
+        row("账户", accounts.length ? selectCtl("__vault_name", v.active || (accounts[0] || {}).name, options)
+          : '<input id="vaultName" type="text" placeholder="账户名（如 zhenl）" style="width:180px">') +
+        row("口令", "至少 6 位；仅本机校验（PBKDF2 600k 次）", '<input id="vaultPw" type="password" placeholder="口令" style="width:180px">') +
+        row("快速登录", "本机免口令解锁（DPAPI 绑定当前 Windows 用户，可随时禁用）",
+          '<label class="tag-row"><input type="checkbox" id="vaultQuick" checked> 在此设备记住</label>') +
+        row("", "", (accounts.length ? '<button class="btn" onclick="App.vaultLogin()">登录</button>' : "") +
+          '<button class="btn primary" style="margin-left:8px" onclick="App.vaultCreate()">新建账户</button>' +
+          (v.has_quick ? '<button class="btn" style="margin-left:8px" onclick="App.vaultQuickLogin()">快速登录</button>' : "")));
+    }
+    if (v.unlocked) {
+      const rowsHtml = (v.keys || []).map((k) => '<div class="mini-row">' +
+        '<span class="grow"><b>' + esc(k.name) + "</b>" +
+        (k.note ? ' <span style="color:var(--hint)">' + esc(k.note) + "</span>" : "") +
+        '<br><span style="font-family:monospace;font-size:11px;color:var(--text2)">' + esc(k.value) + "</span></span>" +
+        '<button class="btn sm" onclick="App.keyReveal(\'' + esc(k.name) + '\')">显示</button>' +
+        '<button class="btn sm" onclick="App.keyEdit(\'' + esc(k.name) + '\')">编辑</button>' +
+        '<button class="btn sm danger" onclick="App.keyDelete(\'' + esc(k.name) + '\')">删除</button></div>').join("");
+      const quickNames = ["OPENCODE_GO_API_KEY", "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "SILICONFLOW_API_KEY", "OPENROUTER_API_KEY"];
+      inner += card("API Key 管理", "密钥名即环境变量名（如 OPENCODE_GO_API_KEY）；界面默认掩码，可点「显示」查看。",
+        (rowsHtml || '<div class="ep-empty">还没有保存的密钥：点下方按钮添加，或直接从常用名称开始</div>') +
+        '<div class="ep-add"><button class="btn primary" onclick="App.keyEdit(null)">＋ 添加密钥</button>' +
+        quickNames.map((n) => '<button class="btn sm" onclick="App.keyEdit(\'' + n + '\')">＋ ' + n + "</button>").join("") + "</div>");
+    }
+    inner += card("配置导出 / 导入", "导出为单个 .afpack 文件（口令保护，AES-256-GCM）；在新设备输入同一口令即可导入。",
+      row("导出密码", "至少 6 位；新设备导入时需输入", '<input id="expPw" type="password" style="width:130px" placeholder="密码">' +
+        '<input id="expPw2" type="password" style="width:130px;margin-left:6px" placeholder="确认密码">') +
+      row("包含 API Key", v.unlocked ? "密钥将一起加密写入文件" : "未登录：仅导出配置（登录后可含密钥）",
+        '<label class="tag-row"><input type="checkbox" id="expKeys"' + (v.unlocked ? " checked" : " disabled") + "> 包含密钥</label>") +
+      row("导出", "默认保存到桌面（文件名带日期时间）", '<button class="btn primary" onclick="App.exportBundle()">导出 .afpack</button>') +
+      row("导入文件", "选择 .afpack 后输入密码 → 预览 → 确认导入",
+        '<input type="file" id="impFile" accept=".afpack,.bin" style="max-width:210px">') +
+      row("导入密码", "", '<input id="impPw" type="password" style="width:130px" placeholder="密码">' +
+        '<button class="btn" style="margin-left:6px" onclick="App.importPreview()">预览</button>') +
+      (v.importPreview ? row("导入预览", "确认后将合并配置（保留本机窗口位置）并写入密钥（同名覆盖）",
+        '<span style="font-size:12px">账户 ' + esc(v.importPreview.account || "-") +
+          " · v" + esc(v.importPreview.app_version || "?") +
+          " · Agent " + esc(v.importPreview.agents) +
+          " · 端点 " + esc(v.importPreview.endpoints) +
+          " · 密钥 " + ((v.importPreview.keys || []).length) + " 个</span>" +
+        '<button class="btn primary" style="margin-left:10px" onclick="App.importApply()">确认导入</button>') : ""));
+    el.innerHTML = inner;
+    bindAll(el);
+  }
+
   // ══════════════════ API 用量页 ══════════════════
   async function loadApiPage() {
     const el = $("#apiContent");
@@ -1078,6 +1178,158 @@ import {
         renderApiCached();
         toast("已添加「" + p.name + "」显示行（保存后生效）", "ok");
       } catch (e) { toast("添加失败：" + e.message, "err"); }
+    },
+    vaultLogin: async () => {
+      const name = vaultNameValue();
+      const pw = ($("#vaultPw") || {}).value || "";
+      const quick = $("#vaultQuick") ? $("#vaultQuick").checked : true;
+      if (!name || !pw) { toast("请选择账户并输入口令", "err"); return; }
+      try {
+        await API.api("/api/vault/login", { method: "POST", body: { name: name, password: pw, quick: quick } });
+        toast("已登录：" + name, "ok");
+        await loadVault();
+      } catch (e) { toast("登录失败：" + e.message, "err"); }
+    },
+    vaultCreate: async () => {
+      const name = vaultNameValue();
+      const pw = ($("#vaultPw") || {}).value || "";
+      const quick = $("#vaultQuick") ? $("#vaultQuick").checked : true;
+      if (!name) { toast("请输入账户名", "err"); return; }
+      if (String(pw).length < 6) { toast("口令至少 6 位", "err"); return; }
+      try {
+        await API.api("/api/vault/create", { method: "POST", body: { name: name, password: pw, quick: quick } });
+        toast("账户已创建并登录：" + name, "ok");
+        await loadVault();
+      } catch (e) { toast("创建失败：" + e.message, "err"); }
+    },
+    vaultQuickLogin: async () => {
+      try {
+        const r = await API.api("/api/vault/quick_login", { method: "POST" });
+        toast(r.ok ? "快速登录成功" : "快速登录不可用（令牌已过期或换机）", r.ok ? "ok" : "err");
+        await loadVault();
+      } catch (e) { toast("快速登录失败：" + e.message, "err"); }
+    },
+    vaultLogout: async () => {
+      try {
+        await API.api("/api/vault/logout", { method: "POST" });
+        toast("已登出（密钥已锁定，启动 Agent 时不再注入）", "ok");
+        await loadVault();
+      } catch (e) { toast("登出失败：" + e.message, "err"); }
+    },
+    vaultSwitch: async (id) => {
+      try {
+        const r = await API.api("/api/vault/active", { method: "POST", body: { id: id } });
+        toast("已切换到「" + r.active + "」，请输入该账户口令登录", "ok");
+        await loadVault();
+      } catch (e) { toast("切换失败：" + e.message, "err"); }
+    },
+    vaultChangePw: () => {
+      openModal("<h3>修改口令</h3>" +
+        '<div class="f"><label>原口令</label><input type="password" id="cpw-old"></div>' +
+        '<div class="f"><label>新口令（≥6 位）</label><input type="password" id="cpw-new"></div>' +
+        '<div class="modal-actions"><button class="btn" data-close>取消</button><button class="btn primary" data-save>确定</button></div>');
+      $("#modalBox [data-close]").addEventListener("click", closeModal);
+      $("#modalBox [data-save]").addEventListener("click", async () => {
+        try {
+          await API.api("/api/vault/change_password", { method: "POST", body: {
+            name: vaultState.active, old_password: $("#cpw-old").value, new_password: $("#cpw-new").value } });
+          closeModal();
+          toast("口令已修改（快速登录已清除）", "ok");
+          await loadVault();
+        } catch (e) { toast("修改失败：" + e.message, "err"); }
+      });
+    },
+    keyEdit: (name) => {
+      const cur = (vaultState.keys || []).find((k) => k.name === name) ||
+        { name: name || "", value: "", note: "" };
+      const editing = (vaultState.keys || []).some((k) => k.name === name);
+      openModal("<h3>" + (editing ? "编辑密钥" : "添加密钥") + "</h3>" +
+        '<div class="f"><label>名称（环境变量名）</label><input type="text" id="k-name" value="' + esc(cur.name) + '"' +
+        (editing ? " readonly" : ' placeholder="OPENCODE_GO_API_KEY"') + "></div>" +
+        '<div class="f"><label>值</label><input type="password" id="k-value" value="' + esc(editing ? "" : "") + '" placeholder="' +
+        (editing ? "留空则不修改" : "sk-…") + '"></div>' +
+        '<div class="f"><label>备注（可选）</label><input type="text" id="k-note" value="' + esc(cur.note || "") + '"></div>' +
+        '<div class="modal-actions"><button class="btn" data-close>取消</button><button class="btn primary" data-save>保存</button></div>');
+      $("#modalBox [data-close]").addEventListener("click", closeModal);
+      $("#modalBox [data-save]").addEventListener("click", async () => {
+        const n = $("#k-name").value.trim();
+        const val = $("#k-value").value;
+        if (!n) { toast("名称不能为空", "err"); return; }
+        try {
+          let value = val;
+          if (editing && !val) {
+            const r = await API.api("/api/vault/keys?reveal=1");
+            const old = (r.keys || []).find((k) => k.name === n);
+            value = old ? old.value : "";
+          }
+          await API.api("/api/vault/keys/set", { method: "POST", body: { name: n, value: value, note: $("#k-note").value.trim() } });
+          closeModal();
+          toast("已保存：" + n, "ok");
+          await loadVault();
+        } catch (e) { toast("保存失败：" + e.message, "err"); }
+      });
+    },
+    keyDelete: async (name) => {
+      if (!confirm("确定删除密钥「" + name + "」？")) return;
+      try {
+        await API.api("/api/vault/keys/delete", { method: "POST", body: { name: name } });
+        toast("已删除：" + name, "ok");
+        await loadVault();
+      } catch (e) { toast("删除失败：" + e.message, "err"); }
+    },
+    keyReveal: async (name) => {
+      try {
+        const r = await API.api("/api/vault/keys?reveal=1");
+        const k = (r.keys || []).find((x) => x.name === name);
+        openModal("<h3>" + esc(name) + "</h3>" +
+          '<div class="f"><label>值</label><div style="font-family:monospace;word-break:break-all;font-size:12px">' +
+          esc(k ? k.value : "（未找到）") + "</div></div>" +
+          '<div class="modal-actions"><button class="btn primary" data-close>关闭</button></div>');
+        $("#modalBox [data-close]").addEventListener("click", closeModal);
+      } catch (e) { toast("读取失败：" + e.message, "err"); }
+    },
+    exportBundle: async () => {
+      const pw = ($("#expPw") || {}).value || "";
+      const pw2 = ($("#expPw2") || {}).value || "";
+      if (String(pw).length < 6) { toast("导出密码至少 6 位", "err"); return; }
+      if (pw !== pw2) { toast("两次输入的密码不一致", "err"); return; }
+      const includeKeys = $("#expKeys") ? $("#expKeys").checked : false;
+      try {
+        const r = await API.api("/api/vault/export", { method: "POST", body: { password: pw, include_secrets: includeKeys } });
+        toast("已导出：" + r.path + "（" + Math.round(r.bytes / 1024) + " KB，含 " + (r.keys || []).length + " 个密钥）", "ok");
+      } catch (e) { toast("导出失败：" + e.message, "err"); }
+    },
+    importPreview: async () => {
+      const f = $("#impFile") && $("#impFile").files && $("#impFile").files[0];
+      const pw = ($("#impPw") || {}).value || "";
+      if (!f) { toast("请先选择 .afpack 文件", "err"); return; }
+      if (!pw) { toast("请输入导入密码", "err"); return; }
+      try {
+        const b64 = await readFileB64(f);
+        vaultState.importB64 = b64;
+        const r = await API.api("/api/vault/import", { method: "POST", body: { data_b64: b64, password: pw, dry_run: true } });
+        vaultState.importPreview = r.preview;
+        toast("预览成功，确认后可导入", "ok");
+        renderVault($("#settingsContent"));
+      } catch (e) { toast("预览失败：" + e.message, "err"); }
+    },
+    importApply: async () => {
+      const pw = ($("#impPw") || {}).value || "";
+      if (!vaultState.importB64) { toast("请先预览要导入的文件", "err"); return; }
+      try {
+        const r = await API.api("/api/vault/import", { method: "POST", body: {
+          data_b64: vaultState.importB64, password: pw, dry_run: false, apply_config: true, import_keys: true } });
+        vaultState.importPreview = null;
+        vaultState.importB64 = null;
+        const resp = await API.api("/api/config");
+        cfg = resp.config;
+        baseStr = JSON.stringify(cfg);
+        applyTheme();
+        refreshDirty();
+        toast("导入完成：配置 " + (r.applied.config ? "已应用" : "未应用") + " · 密钥 " + r.applied.keys + " 个", "ok");
+        await loadVault();
+        renderPage();
+      } catch (e) { toast("导入失败：" + e.message, "err"); }
     },
     testEndpoint: async (i) => {
       const ep = cfg.api_monitor.endpoints[i];

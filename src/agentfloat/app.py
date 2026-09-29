@@ -235,6 +235,20 @@ def _main():
 
     config = load_config()
 
+    # v3.6.0：启动时尝试「快速登录」（DPAPI 令牌，免输口令解锁密钥保险箱）
+    try:
+        from agentfloat.services.vault import crypto as _vc
+        from agentfloat.services.vault.accounts import get_store as _vault_store
+        if not _vc.HAVE_CRYPTO:
+            _log().warning("密钥保险箱：缺少 cryptography 组件，账户功能不可用（将使用降级行为）")
+        store = _vault_store()
+        if store.has_quick_login() and store.quick_login():
+            _log().info("密钥保险箱：快速登录成功")
+        elif store.list_accounts():
+            _log().info("密钥保险箱：已存在账户（未快速登录，需在设置中登录）")
+    except Exception:  # noqa: BLE001
+        _log().debug("密钥保险箱初始化跳过", exc_info=True)
+
     # 退出时清理：默认关闭（PATCH 3.5.1：关闭 AgentFloat 不再结束 Agent 进程）；
     # 即使开启，也只结束「由本应用启动」的进程（不再按进程名批量结束）
     def _cleanup_on_quit():

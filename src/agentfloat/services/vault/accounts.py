@@ -390,3 +390,22 @@ class AccountStore(object):
         self._encrypt_secrets(acc, key, payload)
         self.save()
         return len(payload["keys"])
+
+
+# ── 进程内单例（Web 层/启动器共用同一实例，避免反复读文件）─────
+_STORE = None
+
+
+def get_store(path=None):
+    """获取全局账户存储实例（首次调用创建）"""
+    global _STORE
+    if _STORE is None:
+        _STORE = AccountStore(path=path)
+    return _STORE
+
+
+def reset_store():
+    """测试用：清空单例"""
+    global _STORE
+    _STORE = None
+

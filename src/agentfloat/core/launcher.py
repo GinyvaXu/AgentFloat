@@ -16,6 +16,20 @@ from agentfloat.services.webagent import start as start_web_agent
 LAUNCHED_PIDS = []
 
 
+def _launch_env():
+    """v3.6.0：启动 Agent 时注入密钥保险箱环境变量（未解锁则继承当前环境）"""
+    try:
+        from agentfloat.services.vault.accounts import get_store
+        store = get_store()
+        if store.unlocked():
+            env = store.env_for_launch()
+            _log().info("启动环境：已注入 %d 个保险箱密钥", len(store.list_keys()))
+            return env
+    except Exception:  # noqa: BLE001
+        _log().debug("保险箱环境注入跳过", exc_info=True)
+    return None
+
+
 def launch_agent(agent, config=None):
     """通用 Agent 启动器：终端 / Web / 桌面应用 三通道
 
@@ -61,7 +75,7 @@ def launch_agent(agent, config=None):
         _log().info("启动桌面 Agent [%s] 命令=%s 工作目录=%s", name, cmd_path, working_dir)
         try:
             proc = subprocess.Popen(
-                [cmd_path], cwd=working_dir,
+                [cmd_path], cwd=working_dir, env=_launch_env(),
                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
             )
             LAUNCHED_PIDS.append(proc.pid)     # PATCH 3.5.1：仅记录本应用启动的 PID
@@ -75,16 +89,17 @@ def launch_agent(agent, config=None):
 
     _log().info("启动 Agent [%s] 模式=%s 命令=%s", name, mode, args)
     try:
-        subprocess.Popen(
-            ["wt", "-d", working_dir, "--"] + args,
+        proc = subprocess.Popen(
+            ["wt", "-d", working_dir, "--"] + args, env=_launch_env(),
             creationflags=subprocess.CREATE_NO_WINDOW
         )
+        LAUNCHED_PIDS.append(proc.pid)
     except Exception:
         _log().info("wt 不可用，使用 cmd start fallback")
         try:
             subprocess.Popen(
-                ["cmd", "/c", "start", name] + args,
-                cwd=working_dir, creationflags=subprocess.CREATE_NO_WINDOW
+                ["cmd", "/c", "start", name] + args, cwd=working_dir, env=_launch_env(),
+                creationflags=subprocess.CREATE_NO_WINDOW
             )
         except Exception as e:
             _log().error("启动 Agent [%s] 失败: %s", name, e)

@@ -21,6 +21,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from agentfloat.services.vault.accounts import VaultError
+
 WEB_PORT = 3087
 
 
@@ -158,6 +160,76 @@ def create_app(bridge, handlers):
         """PATCH 3.5.2：手动立即拉取一次（用于首次配置后立刻看到余额）"""
         bridge.command("refresh_api_monitor")
         return {"ok": True}
+
+    # ── v3.6.0：账户与密钥保险箱 ────────────────────────
+    def _vault_call(fn, *args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except VaultError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({"error": "内部错误：%s" % exc}, status_code=500)
+
+    @api.get("/vault_state")
+    def vault_state():
+        return _vault_call(handlers.get_vault_state)
+
+    @api.post("/vault/create")
+    def vault_create(body: dict):
+        return _vault_call(handlers.vault_create, body.get("name"), body.get("password"),
+                           body.get("quick", True))
+
+    @api.post("/vault/login")
+    def vault_login(body: dict):
+        return _vault_call(handlers.vault_login, body.get("name"), body.get("password"),
+                           body.get("quick", True))
+
+    @api.post("/vault/quick_login")
+    def vault_quick_login():
+        return _vault_call(handlers.vault_quick_login)
+
+    @api.post("/vault/logout")
+    def vault_logout():
+        return _vault_call(handlers.vault_logout)
+
+    @api.post("/vault/active")
+    def vault_active(body: dict):
+        return _vault_call(handlers.vault_set_active, body.get("id"))
+
+    @api.post("/vault/delete")
+    def vault_delete(body: dict):
+        return _vault_call(handlers.vault_delete_account, body.get("name"), body.get("password"))
+
+    @api.post("/vault/change_password")
+    def vault_change_password(body: dict):
+        return _vault_call(handlers.vault_change_password, body.get("name"),
+                           body.get("old_password"), body.get("new_password"))
+
+    @api.get("/vault/keys")
+    def vault_keys(reveal: int = 0):
+        return _vault_call(handlers.vault_list_keys, bool(reveal))
+
+    @api.post("/vault/keys/set")
+    def vault_key_set(body: dict):
+        return _vault_call(handlers.vault_set_key, body.get("name"), body.get("value"),
+                           body.get("note", ""))
+
+    @api.post("/vault/keys/delete")
+    def vault_key_delete(body: dict):
+        return _vault_call(handlers.vault_delete_key, body.get("name"))
+
+    @api.post("/vault/export")
+    def vault_export(body: dict):
+        return _vault_call(handlers.vault_export, body.get("password"),
+                           body.get("include_secrets", True), body.get("path"))
+
+    @api.post("/vault/import")
+    def vault_import(body: dict):
+        return _vault_call(handlers.vault_import, body.get("data_b64"), body.get("path"),
+                           body.get("password", ""), body.get("dry_run", True),
+                           body.get("apply_config", True), body.get("import_keys", True))
 
     @api.post("/api_monitor/test")
     def api_monitor_test(body: dict):
