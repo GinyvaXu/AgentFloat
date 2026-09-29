@@ -336,9 +336,12 @@ class FloatingWidget(QWidget):
         if not am_config.get("enabled") or not am_config.get("endpoints"):
             return
 
-        self._api_badge = ApiBalanceBadge(parent_float=self)
+        self._api_badge = ApiBalanceBadge(parent_float=self,
+                                          on_offset_changed=self._on_badge_moved)
         self._api_badge.set_theme(self.theme)
         self._api_badge.set_warn_threshold(am_config.get("low_balance_warn", 5.0))
+        self._api_badge.set_position_mode(am_config.get("badge_position", "top"))
+        self._api_badge.set_offset(am_config.get("badge_dx", 0), am_config.get("badge_dy", 0))
         self._api_badge.update_balance("--")
         if self.isVisible():
             self._api_badge.show()
@@ -368,6 +371,18 @@ class FloatingWidget(QWidget):
         """重启 API 用量监控（配置变更后调用）"""
         self._stop_api_monitor()
         self._init_api_monitor()
+
+    def refresh_api_monitor(self):
+        """PATCH 3.5.2：手动立即拉取一次（未启动时按当前配置启动）"""
+        w = getattr(self, "_api_worker", None)
+        if w is None or not w.isRunning():
+            self._restart_api_monitor()
+            w = getattr(self, "_api_worker", None)
+        if w is None:
+            _log().info("[API] 手动拉取失败：监控未启用或未配置端点")
+            return False
+        w.request_refresh()
+        return True
 
     # ── 本地 AI 服务（手动：API 余额配置 / Skills 翻译）──────────
     def _release_worker_attr(self, attr):
@@ -481,44 +496,19 @@ class FloatingWidget(QWidget):
         # 监控启用时保持角标常显（数据就绪即补显，避免时有时无）
         if self.isVisible() and not self._api_badge.isVisible():
             self._api_badge.show()
-        r = results[0]
-        if not r.fields:
-            return
-
-        # worker 请求失败时产生错误伪字段
-        first = r.fields[0]
-        if first.get("label") == "错误":
-            self._api_badge.update_balance("查询失败", is_error=True)
-            return
-
-        # PATCH 3.4.0：角标显示模式（金额 / 剩余% / 已用%）——端点可覆盖全局
-        from agentfloat.services.api_monitor.presets import badge_mode_for
+        # PATCH 3.5.1：模块化显示行（设置中自定义行数与每行内容/显示方式）
+        from agentfloat.services.api_monitor.badge_rows import build_badge_rows
         api_cfg = self.config.get("api_monitor") or {}
-        mode = badge_mode_for(getattr(r, "endpoint_name", None), api_cfg)
-        if mode in ("remaining", "used") and getattr(r, "progress", None):
-            prog = r.progress
-            pct = float(prog.get("remain" if mode == "remaining" else "pct") or 0.0)
-            self._api_badge.update_balance(
-                "%d%%" % round(pct),
-                is_low=bool(mode == "remaining" and pct < 20.0))
-            return
+        rows, is_low, is_error = build_badge_rows(results, api_cfg)
+        self._api_badge.set_rows(rows, is_low=is_low, is_error=is_error)
 
-        # 优先按标签匹配剩余额度，否则取第一个字段
-        field = next((f for f in r.fields if f.get("label") == "剩余额度"), first)
-        val, unit = field.get("value"), field.get("unit", "")
-        if val is None:
-            _log().warning("[API] 字段 ""%s"" 返回 None，原始响应前200字符: %s",
-                           field.get("label", "?"), r.raw_response[:200])
-            self._api_badge.update_balance("N/A", is_error=True)
-            return
-        try:
-            num = float(val)
-            text = f"{num:.2f}{unit}"
-        except (TypeError, ValueError):
-            _log().warning("[API] 字段 ""%s"" 值无法转为数字: %s", field.get("label", "?"), val)
-            self._api_badge.update_balance(str(val)[:20] + (unit if unit else ""), num=None)
-            return
-        self._api_badge.update_balance(text, num)
+    def _on_badge_moved(self, dx, dy):
+        """余额显示框被拖动 → 保存自由偏移（api_monitor.badge_dx / badge_dy）"""
+        am = self.config.setdefault("api_monitor", {})
+        am["badge_dx"] = int(dx)
+        am["badge_dy"] = int(dy)
+        save_config(self.config)
+        _log().info("[API] 余额显示框位置已保存: dx=%s dy=%s", dx, dy)
 
     def _sync_api_panel_position(self):
         """同步余额角标位置"""
@@ -697,8 +687,7 @@ class FloatingWidget(QWidget):
         # PATCH 3.5.0：同步进程面板主题
         if self._proc_panel is not None:
             try:
-                from agentfloat.ui.panel_style import panel_css
-                self._proc_panel.setStyleSheet(panel_css(theme))
+                self._proc_panel.set_theme(theme)
             except Exception:  # noqa: BLE001
                 pass
         _log().info("主题切换为: %s", theme)
@@ -2248,6 +2237,11 @@ class FloatingWidget(QWidget):
             if new_api_config is not None:
                 old_api_config = self.config.get("api_monitor", API_MONITOR_DEFAULTS)
                 self.config["api_monitor"] = new_api_config
+                # PATCH 3.5.1：同步余额显示框位置（上/下 + 拖动偏移）
+                if self._api_badge is not None:
+                    self._api_badge.set_position_mode(new_api_config.get("badge_position", "top"))
+                    self._api_badge.set_offset(new_api_config.get("badge_dx", 0),
+                                               new_api_config.get("badge_dy", 0))
                 if new_api_config != old_api_config:
                     _log().info("API 监控配置已变更，重启监控")
                     self._restart_api_monitor()

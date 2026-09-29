@@ -149,9 +149,15 @@ def create_app(bridge, handlers):
 
     @api.get("/api_monitor/presets")
     def get_api_monitor_presets():
-        """内置端点预设（PATCH 3.4.0：OpenCode Go 等一键添加）"""
-        from agentfloat.services.api_monitor.presets import PRESETS
-        return {"presets": PRESETS}
+        """内置端点预设 + 余额显示行预设（PATCH 3.4.0 / 3.5.2）"""
+        from agentfloat.services.api_monitor.presets import PRESETS, ROW_PRESETS
+        return {"presets": PRESETS, "row_presets": ROW_PRESETS}
+
+    @api.post("/api_monitor/refresh")
+    def api_monitor_refresh():
+        """PATCH 3.5.2：手动立即拉取一次（用于首次配置后立刻看到余额）"""
+        bridge.command("refresh_api_monitor")
+        return {"ok": True}
 
     @api.post("/api_monitor/test")
     def api_monitor_test(body: dict):

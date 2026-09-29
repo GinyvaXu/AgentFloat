@@ -12,6 +12,11 @@ DEFAULTS = {
     "poll_interval_seconds": 60,
     "low_balance_warn": 5.0,
     "badge_mode": "balance",     # PATCH 3.4.0：角标显示模式（balance/remaining/used）
+    # PATCH 3.5.1：余额显示框（半透明小框，可多行模块化 + 上下位置 + 拖动偏移）
+    "badge_position": "top",     # top（浮球上方）/ bottom（浮球下方）
+    "badge_dx": 0,               # 拖动自由偏移（相对默认位置）
+    "badge_dy": 0,
+    "badge_rows": [],            # 非空时按行渲染（覆盖 badge_mode）
     "endpoints": [],
 }
 

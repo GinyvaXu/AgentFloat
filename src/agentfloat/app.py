@@ -235,18 +235,26 @@ def _main():
 
     config = load_config()
 
-    # 退出时清理孤儿 Claude 进程（可配置，默认不清理）
+    # 退出时清理：默认关闭（PATCH 3.5.1：关闭 AgentFloat 不再结束 Agent 进程）；
+    # 即使开启，也只结束「由本应用启动」的进程（不再按进程名批量结束）
     def _cleanup_on_quit():
-        if config.get("cleanup_on_quit", False):
-            primary = get_primary_agent(config.get("agents", default_agents()))
-            cmd = (primary or {}).get("command", "")
-            if cmd:
-                base = os.path.basename(cmd)
-                if not base.lower().endswith(".exe"):
-                    base += ".exe"
-                _log().info("退出清理: taskkill /f /im %s", base)
-                subprocess.run(["taskkill", "/f", "/im", base],
-                               capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        if not config.get("cleanup_on_quit", False):
+            return
+        pids = set()
+        try:
+            from agentfloat.services import webagent
+            pids.update(int(v["pid"]) for v in webagent._LAST.values() if v.get("pid"))
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from agentfloat.core import launcher as _launcher
+            pids.update(int(p) for p in getattr(_launcher, "LAUNCHED_PIDS", []))
+        except Exception:  # noqa: BLE001
+            pass
+        for pid in pids:
+            _log().info("退出清理（仅本应用启动的进程）: taskkill /f /t /pid %s", pid)
+            subprocess.run(["taskkill", "/f", "/t", "/pid", str(pid)],
+                           capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
     app.aboutToQuit.connect(_cleanup_on_quit)
 
     def _shutdown():
@@ -469,6 +477,8 @@ def _main():
             stop_dsh()
         elif kind == "restart_api_monitor":
             widget._restart_api_monitor()
+        elif kind == "refresh_api_monitor":
+            widget.refresh_api_monitor()
 
     def _dispatch_web_commands():
         for kind, payload in bridge.drain_commands():

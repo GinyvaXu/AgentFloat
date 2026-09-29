@@ -12,6 +12,9 @@ from agentfloat.core.registry import (
 )
 from agentfloat.services.webagent import start as start_web_agent
 
+# PATCH 3.5.1：记录「由本应用启动」的进程 PID（退出清理只针对这些进程）
+LAUNCHED_PIDS = []
+
 
 def launch_agent(agent, config=None):
     """通用 Agent 启动器：终端 / Web / 桌面应用 三通道
@@ -57,10 +60,11 @@ def launch_agent(agent, config=None):
     if launcher == "app":
         _log().info("启动桌面 Agent [%s] 命令=%s 工作目录=%s", name, cmd_path, working_dir)
         try:
-            subprocess.Popen(
+            proc = subprocess.Popen(
                 [cmd_path], cwd=working_dir,
                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
             )
+            LAUNCHED_PIDS.append(proc.pid)     # PATCH 3.5.1：仅记录本应用启动的 PID
         except Exception as e:  # noqa: BLE001
             _log().error("启动桌面 Agent [%s] 失败: %s", name, e)
         return

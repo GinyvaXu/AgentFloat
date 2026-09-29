@@ -444,9 +444,18 @@ import {
       el.innerHTML = '<div class="card">加载失败：' + esc(e.message) + "</div>";
     }
   }
+  async function loadApiPresets(force) {
+    if (apiState.presets && !force) return;
+    try {
+      const r = await API.api("/api/api_monitor/presets");
+      apiState.presets = r.presets || [];
+      apiState.rowPresets = r.row_presets || [];
+    } catch (e) { /* ignore */ }
+  }
   async function loadApiState() {
     if (page !== "api") return;
     try {
+      await loadApiPresets();
       const st = await API.api("/api/api_state");
       apiState.results = st.results || [];
       renderApi($("#apiContent"), st);
@@ -460,14 +469,29 @@ import {
       row("启用监控", "", switchCtl("api_monitor.enabled", cfgApi.enabled)) +
       row("轮询间隔（秒）", "", numCtl("api_monitor.poll_interval_seconds", cfgApi.poll_interval_seconds || 60, { min: 10, max: 3600 })) +
       row("低余额警告阈值", "低于该值端点标红并触发浮窗角标变色", '<input type="number" data-bind="api_monitor.low_balance_warn" step="0.1" min="0" value="' + esc(warnTh) + '">') +
-      row("角标显示", "浮窗旁余额角标的显示方式（端点可单独覆盖，如 OpenCode Go 默认显示剩余%）",
+      row("角标显示（单行模式）", "未配置下方「自定义显示行」时生效；端点可单独覆盖（如 OpenCode Go 默认剩余%）",
         selectCtl("api_monitor.badge_mode", cfgApi.badge_mode || "balance", [["balance", "余额金额（默认）"], ["remaining", "剩余百分比"], ["used", "已用百分比"]])) +
-      row("快速添加预设", "一键添加常用平台端点（OpenCode Go 订阅用量等）",
-        '<button class="btn primary" onclick="App.addApiPreset(\'opencode-go\')">＋ OpenCode Go</button>') +
-      '<div class="row"><div class="lbl">测试与保存</div><div class="ctl"><button class="btn primary" onclick="App.save()">保存设置</button></div></div>');
+      row("快速添加预设", "一键添加常用平台端点（OpenCode Go / DeepSeek / Kimi / SiliconFlow / OpenRouter）",
+        (apiState.presets && apiState.presets.length ? apiState.presets : [{ id: "opencode-go", name: "OpenCode Go" }]).map((p) =>
+          '<button class="btn sm" style="margin:0 6px 4px 0" onclick="App.addApiPreset(\'' + p.id + '\')">＋ ' + esc(p.name) + "</button>").join("")) +
+      '<div class="row"><div class="lbl">手动拉取</div><div class="ctl">' +
+        '<button class="btn" onclick="App.refreshApi()">立即拉取</button>' +
+        '<span style="margin-left:8px;font-size:11px;color:var(--dim)">不等轮询，马上刷新余额显示框</span>' +
+        '<button class="btn primary" style="margin-left:12px" onclick="App.save()">保存设置</button></div></div>');
+    inner += card("余额显示框（模块化）",
+      "半透明小框，默认位于浮球上方或下方；按住小框可直接拖动到任意位置（自动保存偏移）。",
+      row("显示位置", "", selectCtl("api_monitor.badge_position", cfgApi.badge_position || "top",
+        [["top", "浮球上方"], ["bottom", "浮球下方"]]) +
+        '<button class="btn sm" style="margin-left:8px" onclick="App.resetBadgePos()">重置拖动偏移</button>') +
+      row("行预设（一键添加）", "按平台预设显示行（OpenCode Go 的 5h/周/月剩余%；DeepSeek / Kimi / SiliconFlow 余额；OpenRouter 余额 + 已用%）",
+        (apiState.rowPresets || []).map((p) =>
+          '<button class="btn sm" style="margin:0 6px 4px 0" onclick="App.addBadgeRowPreset(\'' + p.id + '\')">＋ ' + esc(p.name) + "</button>").join("") || "加载中…") +
+      row("自定义显示行", "每行 = 标题 + 数据源（余额 / 剩余% / 已用% / 已用量 / 总量 / 自定义字段 / 字段剩余%）。未配置时按上方单行模式显示。",
+        badgeRowsEditor()));
     let epCards = "";
     eps.forEach((ep, i) => {
       const res = apiState.results[i];
+      const pending = !res;                       // 尚未拉取（如刚添加端点）→ 等待，不显示错误
       const ok = res && !res.error;
       const fields = (res && res.fields && res.fields.length) ? res.fields : (ep.fields || []).map((f) => ({ label: f.label, value: "--", unit: f.unit || "" }));
       const fieldHtml = fields.map((f) => {
@@ -477,7 +501,7 @@ import {
         return '<div class="ep-field' + (warn ? " warn" : "") + '"><div class="k">' + esc(f.label) + "</div><div class=\"v\">" + esc(v) + esc(f.unit || "") + "</div></div>";
       }).join("");
       epCards += '<div class="ep-card">' +
-        '<div class="ep-head"><span class="ep-status"><span class="dot ' + (ok ? "ok" : "err") + '"></span>' + (ok ? "正常" : "错误") + "</span>" +
+        '<div class="ep-head"><span class="ep-status"><span class="dot ' + (pending ? "wait" : (ok ? "ok" : "err")) + '"></span>' + (pending ? "等待首次拉取" : (ok ? "正常" : "错误")) + "</span>" +
         '<span class="ep-name">' + esc(ep.name || "未命名端点") + '</span><span class="tag gray">' + esc((ep.method || "GET").toUpperCase()) + "</span>" +
         '<div style="flex:1"></div>' +
         (ep.platform_url ? '<button class="btn sm" onclick="App.openPlatform(' + i + ')">打开平台</button>' : "") +
@@ -494,6 +518,53 @@ import {
     inner += card("模板变量说明", "URL / Headers / Body 支持模板：<code>{{env:KEY}}</code> 读取环境变量（如 <code>{{env:DEEPSEEK_API_KEY}}</code>）、<code>{{today}}</code> 今日日期、<code>{{yesterday}}</code> 昨日日期。JSONPath 示例：<code>$.balance_infos[0].total_balance</code>。");
     el.innerHTML = inner;
     bindAll(el);
+    // PATCH 3.5.1：余额显示框「自定义显示行」编辑（输入即写入配置，保存后生效）
+    $$("#badgeRows [data-brow]").forEach((rowEl) => {
+      const i = Number(rowEl.getAttribute("data-brow"));
+      const collect = () => {
+        const rows = cfg.api_monitor.badge_rows = cfg.api_monitor.badge_rows || [];
+        const sel = rowEl.querySelector(".brow-src");
+        let src = sel.value;
+        if (src === "field:" || src === "field_remain:") {
+          src = src + (rowEl.querySelector(".brow-field").value.trim() || "剩余额度");
+        }
+        const decRaw = rowEl.querySelector(".brow-dec").value.trim();
+        const item = { title: rowEl.querySelector(".brow-title").value.trim(), source: src };
+        if (decRaw !== "") item.decimals = Number(decRaw);
+        const suf = rowEl.querySelector(".brow-suffix").value;
+        if (suf !== "") item.suffix = suf;
+        rows[i] = item;
+        refreshDirty();
+      };
+      rowEl.querySelectorAll("input, select").forEach((c) => c.addEventListener("input", collect));
+      const sel = rowEl.querySelector(".brow-src");
+      sel.addEventListener("change", () => {
+        rowEl.querySelector(".brow-field").disabled = (sel.value !== "field:" && sel.value !== "field_remain:");
+        collect();
+      });
+    });
+  }
+
+  function badgeRowsEditor() {
+    const rows = (cfg.api_monitor || {}).badge_rows || [];
+    const opts = [["balance", "余额字段"], ["progress:remain_pct", "剩余百分比"], ["progress:used_pct", "已用百分比"], ["progress:used", "已用量"], ["progress:total", "总量"], ["progress:remain_value", "剩余额度(数值)"], ["field:", "自定义字段"], ["field_remain:", "字段剩余%"]];
+    let html = "";
+    rows.forEach((r, i) => {
+      const src = String(r.source || "balance");
+      const custom = src.indexOf("field_remain:") === 0 || src.indexOf("field:") === 0;
+      const fnPrefix = src.indexOf("field_remain:") === 0 ? "field_remain:" : "field:";
+      html += '<div class="mini-row" data-brow="' + i + '">' +
+        '<input class="brow-title" style="width:60px" placeholder="标题" value="' + esc(r.title || "") + '">' +
+        '<select class="brow-src">' + opts.map(([v, l]) =>
+          '<option value="' + v + '"' + (v === (custom ? fnPrefix : src) ? " selected" : "") + ">" + l + "</option>").join("") + "</select>" +
+        '<input class="brow-field" style="width:82px" placeholder="字段标签" value="' + esc(custom ? src.slice(fnPrefix.length) : "") + '"' + (custom ? "" : " disabled") + ">" +
+        '<input class="brow-dec" type="number" style="width:50px" placeholder="小数" value="' + esc(r.decimals != null ? r.decimals : "") + '">' +
+        '<input class="brow-suffix" style="width:44px" placeholder="后缀" value="' + esc(r.suffix != null ? r.suffix : "") + '">' +
+        '<button class="btn sm danger" onclick="App.delBadgeRow(' + i + ')">删</button></div>';
+    });
+    return '<div id="badgeRows">' + (html || '<div class="mini-row"><span class="grow">未配置（按单行模式显示）</span></div>') + "</div>" +
+      '<div style="margin-top:6px"><button class="btn sm" onclick="App.addBadgeRow()">＋ 添加行</button>' +
+      '<span style="margin-left:8px;font-size:11px;color:var(--dim)">示例：标题「5h」+ 剩余百分比 → 显示「5h 92%」</span></div>';
   }
 
   function endpointModal(idx) {
@@ -790,6 +861,49 @@ import {
     },
     editEndpoint: (i) => endpointModal(i),
     delEndpoint: (i) => { if (confirm("确定删除端点？")) { cfg.api_monitor.endpoints.splice(i, 1); refreshDirty(); renderApi($("#apiContent"), { results: apiState.results }); } },
+    addBadgeRow: () => {
+      cfg.api_monitor = cfg.api_monitor || {};
+      cfg.api_monitor.badge_rows = (cfg.api_monitor.badge_rows || []).concat([
+        { title: "", source: "progress:remain_pct", decimals: 0, suffix: "%" }]);
+      refreshDirty();
+      renderApi($("#apiContent"), { results: apiState.results });
+    },
+    delBadgeRow: (i) => {
+      (cfg.api_monitor.badge_rows || []).splice(i, 1);
+      refreshDirty();
+      renderApi($("#apiContent"), { results: apiState.results });
+    },
+    resetBadgePos: () => {
+      cfg.api_monitor = cfg.api_monitor || {};
+      cfg.api_monitor.badge_dx = 0;
+      cfg.api_monitor.badge_dy = 0;
+      refreshDirty();
+      toast("已重置拖动偏移（保存后生效）", "ok");
+    },
+    refreshApi: async () => {
+      try {
+        await API.api("/api/api_monitor/refresh", { method: "POST" });
+        toast("已请求立即拉取…", "ok");
+        setTimeout(() => { loadApiState(); }, 1500);
+      } catch (e) { toast("拉取失败：" + e.message, "err"); }
+    },
+    addBadgeRowPreset: async (id) => {
+      try {
+        await loadApiPresets();
+        const p = (apiState.rowPresets || []).find((x) => x.id === id);
+        if (!p) { toast("行预设不存在：" + id, "err"); return; }
+        cfg.api_monitor = cfg.api_monitor || {};
+        const rows = cfg.api_monitor.badge_rows = cfg.api_monitor.badge_rows || [];
+        (p.rows || []).forEach((r) => {
+          const item = deep(r);
+          if (p.endpoint) item.endpoint = p.endpoint;
+          rows.push(item);
+        });
+        refreshDirty();
+        renderApi($("#apiContent"), { results: apiState.results });
+        toast("已添加「" + p.name + "」显示行（保存后生效）", "ok");
+      } catch (e) { toast("添加失败：" + e.message, "err"); }
+    },
     testEndpoint: async (i) => {
       const ep = cfg.api_monitor.endpoints[i];
       apiState.testing[i] = true;

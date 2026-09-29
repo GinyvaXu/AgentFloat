@@ -12,7 +12,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 </p>
 
 <p align="center">
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.5.0-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.5.2-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%2010%2F11-8E44AD?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"></a>
@@ -163,7 +163,9 @@ AgentFloat/
 - [x] v3.3.1 — **交互精简 + 关闭动效**：取消悬停唤出；选中后确认脉冲 + 丝滑收合再执行；面板深度打磨（渐变标题栏 / Esc 关闭 / 统一主按钮）
 - [x] v3.4.0 — **OpenCode Go 余额 + 贴边轮盘 + 跨屏 DPI**：预设一键接入与角标显示模式（剩余%/已用%/金额）；贴边让位回弹后开环；跨屏重建位图；吸附阈值 36px
 - [x] v3.5.0 — **Agent 进程面板**：悬停弹出（靠边自动选侧）/ 运行时长与最近活动 / 分级中断（软中断 Esc · 结束进程树）/ 继续任务（聚焦注入 continue）
-- [ ] v3.5.x（进行中）— 进程任务精确监控（Agent hooks 上报）+ 账户/Key 保险箱/配置导出导入（v3.6.0）
+- [x] v3.5.1 — **面板与余额显示重做**：面板半透明且只显示运行中（无则提示）；中断后保留「已中断」+ 继续任务（注入 continue / 按 resume_args 续接会话）；余额显示框半透明多行模块化（自定义行/拖动位置/自适应不裁切）；退出不再结束 Agent 进程
+- [x] v3.5.2 — **手动拉取 + 多平台预设**：API 页「立即拉取」不等轮询即刻刷新；端点预设新增 DeepSeek / Kimi / SiliconFlow / OpenRouter；余额显示行预设一键添加（OpenCode Go 5h/周/月剩余%、余额行、余额+已用%）
+- [ ] v3.6.0（下一批）— 多本地账户 + API Key 保险箱（解禁 cryptography）+ 配置单文件导出导入（口令保护）
 - [ ] v3.3.x（进行中）— 各子页面逐页深度重构（Skills/快报/剪贴板/命令/喝水）+ 剩余动效打磨
 - [ ] v3.3.x（候选）— OpenCode Go 余额预设（角标滚动剩余%）/ Web 多标签 / 更多效率工具
 

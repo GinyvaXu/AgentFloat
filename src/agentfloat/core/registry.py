@@ -25,6 +25,7 @@ BUILTIN_PRESETS = [
         "proc_names": ["claude.exe"],
         "cmd_tokens": ["claude"],
         "continue_text": "continue",
+        "resume_args": ["--continue"],
         "name": "Claude Code",
         "command": "claude",
         "args": [],
@@ -44,6 +45,7 @@ BUILTIN_PRESETS = [
         "proc_names": ["codex.exe"],
         "cmd_tokens": ["codex"],
         "continue_text": "continue",
+        "resume_args": ["resume", "--last"],
         "name": "Codex CLI",
         "command": "codex",
         "args": [],
@@ -240,7 +242,7 @@ def normalize_agents(raw):
         if isinstance(web, dict) and web:
             item["web"] = copy.deepcopy(web)
         # PATCH 3.5.0：进程匹配与「继续任务」注入文本
-        for _k in ("proc_names", "cmd_tokens"):
+        for _k in ("proc_names", "cmd_tokens", "resume_args"):
             _v = a.get(_k)
             if isinstance(_v, list) and _v:
                 item[_k] = [str(x) for x in _v]

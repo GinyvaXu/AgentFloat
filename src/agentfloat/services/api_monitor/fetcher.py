@@ -104,7 +104,9 @@ def fetch_endpoint(endpoint: dict, verify_ssl: bool = True) -> FetchResult:
 
         value = jsonpath_get(parsed, jp)
         if display == "percent" and isinstance(value, (int, float)):
+            # PATCH 3.5.1：值已含 %，单位置空（避免界面显示 "8.0%%"）
             value = f"{value:.1f}%"
+            unit = ""
         elif display == "number" and isinstance(value, float):
             value = round(value, 2)
 

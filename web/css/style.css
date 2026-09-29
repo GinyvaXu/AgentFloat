@@ -236,6 +236,7 @@ input[type="color"] { width: 40px; height: 26px; border: 1px solid var(--input-b
 .ep-status { font-size: 11px; display: flex; align-items: center; gap: 5px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .dot.ok { background: var(--ok); }
+.dot.wait { background: #8E8E93; }
 .dot.err { background: var(--warn); }
 .dot.na { background: var(--hint); }
 

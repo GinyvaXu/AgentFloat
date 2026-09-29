@@ -23,6 +23,12 @@ class ApiMonitorWorker(QThread):
         self._interval_ms = interval_seconds * 1000
         self._verify_ssl = verify_ssl
         self._running = False
+        self._refresh_now = False     # PATCH 3.5.2：手动立即拉取标记
+
+    def request_refresh(self):
+        """PATCH 3.5.2：请求立即轮询一次（唤醒分段睡眠）"""
+        self._refresh_now = True
+        _logger.info("API 监控：收到手动立即拉取请求")
 
     def update_config(self, endpoints: list, interval_seconds: int = None, verify_ssl: bool = True):
         """运行时更新配置"""
@@ -58,11 +64,12 @@ class ApiMonitorWorker(QThread):
 
             self.data_ready.emit(results)
 
-            # 分段睡眠，以便能及时响应 stop
+            # 分段睡眠，以便能及时响应 stop / 手动立即拉取
             slept = 0
-            while self._running and slept < self._interval_ms:
-                time.sleep(1)
-                slept += 1000
+            while self._running and slept < self._interval_ms and not self._refresh_now:
+                time.sleep(0.5)
+                slept += 500
+            self._refresh_now = False
 
         _logger.info("API 监控线程已停止")
 

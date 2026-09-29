@@ -52,6 +52,16 @@ def test_presets_carry_process_fields():
     assert by_id["claude"]["continue_text"] == "continue"
     assert by_id["opencode"]["cmd_tokens"]
     assert "proc_names" in by_id["opencode-desktop"]
+    # PATCH 3.5.1：中断后恢复会话参数
+    assert by_id["claude"]["resume_args"] == ["--continue"]
+    assert by_id["codex"]["resume_args"] == ["resume", "--last"]
+
+
+def test_api_monitor_defaults_have_badge_box():
+    from agentfloat.services.api_monitor.config import DEFAULTS
+    assert DEFAULTS["badge_position"] == "top"
+    assert DEFAULTS["badge_dx"] == 0 and DEFAULTS["badge_dy"] == 0
+    assert DEFAULTS["badge_rows"] == []
 
 
 def test_normalize_keeps_process_fields():
@@ -70,4 +80,35 @@ def test_process_panel_construct_and_refresh(qapp):
     p = ProcessPanel(lambda: [], theme="dark")
     p.refresh()                                # 无 Agent：不应抛异常
     assert p.layout() is not None
+    p.hide_panel()
+
+
+def test_process_panel_empty_state_text(qapp):
+    from agentfloat.ui.process_panel import ProcessPanel
+    p = ProcessPanel(lambda: [], theme="dark")
+    p.refresh()
+    texts = []
+    for i in range(p._body.count()):
+        w = p._body.itemAt(i).widget()
+        if w is not None and hasattr(w, "text"):
+            texts.append(w.text())
+    assert any("没有正在进行" in t for t in texts)
+    p.hide_panel()
+
+
+def test_process_panel_interrupted_has_continue_no_start(qapp):
+    from PyQt5.QtWidgets import QPushButton
+    from agentfloat.ui.process_panel import ProcessPanel
+    agents = [{"id": "claude", "name": "Claude Code", "command": "claude",
+               "proc_names": ["claude.exe"], "resume_args": ["--continue"]}]
+    p = ProcessPanel(lambda: agents, theme="dark")
+    p._interrupted["claude"] = {"ts": 0, "hard": True}
+    p.refresh()
+    labels = []
+    for i in range(p._body.count()):
+        w = p._body.itemAt(i).widget()
+        if w is not None:
+            labels += [b.text() for b in w.findChildren(QPushButton)]
+    assert "继续任务" in labels
+    assert "启动" not in labels
     p.hide_panel()

@@ -130,6 +130,16 @@ def test_fetch_endpoint_success(local_server):
     assert res.progress == {"used": 80.0, "total": 200.0, "pct": 40.0, "remain": 60.0}
 
 
+def test_fetch_endpoint_percent_unit_cleared(local_server):
+    ep = {
+        "name": "pct", "url": local_server + "/usage", "method": "GET",
+        "fields": [{"label": "已用", "jsonpath": "$.usage.used", "unit": "%", "display": "percent"}],
+    }
+    res = fetch_endpoint(ep)
+    assert res.fields[0]["value"].endswith("%")
+    assert res.fields[0]["unit"] == ""       # PATCH 3.5.1：值已含 %，单位置空（避免 "8.0%%"）
+
+
 def test_fetch_endpoint_http_error(local_server):
     with pytest.raises(FetchError) as ei:
         fetch_endpoint({"name": "e", "url": local_server + "/bad", "fields": []})
