@@ -18,7 +18,7 @@ import {
   let page = "settings";
   let sub = "general";
   let version = "";
-  let apiState = { results: [], testing: {}, error: "" };
+  let apiState = { results: [], testing: {}, error: "", presets: null, rowPresets: null, badgePreview: [], fetchedAt: null };
   let newsState = { report: null, dates: [], generating: false, phase: "" };
 
   // ── 配置绑定 ────────────────────────────────────
@@ -437,8 +437,11 @@ import {
     const el = $("#apiContent");
     el.innerHTML = '<div class="card">加载中…</div>';
     try {
+      await loadApiPresets();
       const st = await API.api("/api/api_state");
       apiState.results = st.results || [];
+      apiState.badgePreview = st.badge_preview || [];
+      apiState.fetchedAt = new Date();
       renderApi(el, st);
     } catch (e) {
       el.innerHTML = '<div class="card">加载失败：' + esc(e.message) + "</div>";
@@ -458,64 +461,168 @@ import {
       await loadApiPresets();
       const st = await API.api("/api/api_state");
       apiState.results = st.results || [];
+      apiState.badgePreview = st.badge_preview || [];
+      apiState.fetchedAt = new Date();
       renderApi($("#apiContent"), st);
     } catch (e) { /* ignore */ }
   }
+  // 局部重绘（本地编辑后不重新请求，使用缓存预览）
+  function renderApiCached() {
+    if (page !== "api") return;
+    renderApi($("#apiContent"), { results: apiState.results, badge_preview: apiState.badgePreview });
+  }
+  // ══════════════════ API 用量页 ══════════════════
+  const EP_BADGE_LABEL = { balance: "角标 · 余额", remaining: "角标 · 剩余%", used: "角标 · 已用%" };
+
+  function epErrorHint(err) {
+    const s = String(err || "");
+    if (s.indexOf("401") >= 0 || s.indexOf("403") >= 0) return "鉴权失败：检查环境变量或 Headers 中的 Key 是否正确";
+    if (s.indexOf("404") >= 0) return "地址不存在：检查请求 URL";
+    if (s.indexOf("closed") >= 0 || s.indexOf("超时") >= 0 || s.indexOf("timed out") >= 0) return "网络异常：检查网络 / 代理";
+    if (s.indexOf("JSON") >= 0) return "响应不是 JSON：检查 URL 是否指向接口";
+    return "";
+  }
+
   function renderApi(el, st) {
     const cfgApi = cfg.api_monitor || {};
     const eps = cfgApi.endpoints || [];
     const warnTh = num(cfgApi.low_balance_warn, 5);
-    let inner = card("监控设置", "通用 JSONPath 框架，可监控任意 API 用量/余额端点；余额角标实时显示在浮窗旁。",
-      row("启用监控", "", switchCtl("api_monitor.enabled", cfgApi.enabled)) +
-      row("轮询间隔（秒）", "", numCtl("api_monitor.poll_interval_seconds", cfgApi.poll_interval_seconds || 60, { min: 10, max: 3600 })) +
-      row("低余额警告阈值", "低于该值端点标红并触发浮窗角标变色", '<input type="number" data-bind="api_monitor.low_balance_warn" step="0.1" min="0" value="' + esc(warnTh) + '">') +
-      row("角标显示（单行模式）", "未配置下方「自定义显示行」时生效；端点可单独覆盖（如 OpenCode Go 默认剩余%）",
-        selectCtl("api_monitor.badge_mode", cfgApi.badge_mode || "balance", [["balance", "余额金额（默认）"], ["remaining", "剩余百分比"], ["used", "已用百分比"]])) +
-      row("快速添加预设", "一键添加常用平台端点（OpenCode Go / DeepSeek / Kimi / SiliconFlow / OpenRouter）",
-        (apiState.presets && apiState.presets.length ? apiState.presets : [{ id: "opencode-go", name: "OpenCode Go" }]).map((p) =>
-          '<button class="btn sm" style="margin:0 6px 4px 0" onclick="App.addApiPreset(\'' + p.id + '\')">＋ ' + esc(p.name) + "</button>").join("")) +
-      '<div class="row"><div class="lbl">手动拉取</div><div class="ctl">' +
-        '<button class="btn" onclick="App.refreshApi()">立即拉取</button>' +
-        '<span style="margin-left:8px;font-size:11px;color:var(--dim)">不等轮询，马上刷新余额显示框</span>' +
-        '<button class="btn primary" style="margin-left:12px" onclick="App.save()">保存设置</button></div></div>');
-    inner += card("余额显示框（模块化）",
-      "半透明小框，默认位于浮球上方或下方；按住小框可直接拖动到任意位置（自动保存偏移）。",
-      row("显示位置", "", selectCtl("api_monitor.badge_position", cfgApi.badge_position || "top",
-        [["top", "浮球上方"], ["bottom", "浮球下方"]]) +
-        '<button class="btn sm" style="margin-left:8px" onclick="App.resetBadgePos()">重置拖动偏移</button>') +
-      row("行预设（一键添加）", "按平台预设显示行（OpenCode Go 的 5h/周/月剩余%；DeepSeek / Kimi / SiliconFlow 余额；OpenRouter 余额 + 已用%）",
-        (apiState.rowPresets || []).map((p) =>
-          '<button class="btn sm" style="margin:0 6px 4px 0" onclick="App.addBadgeRowPreset(\'' + p.id + '\')">＋ ' + esc(p.name) + "</button>").join("") || "加载中…") +
-      row("自定义显示行", "每行 = 标题 + 数据源（余额 / 剩余% / 已用% / 已用量 / 总量 / 自定义字段 / 字段剩余%）。未配置时按上方单行模式显示。",
-        badgeRowsEditor()));
-    let epCards = "";
-    eps.forEach((ep, i) => {
-      const res = apiState.results[i];
-      const pending = !res;                       // 尚未拉取（如刚添加端点）→ 等待，不显示错误
-      const ok = res && !res.error;
-      const fields = (res && res.fields && res.fields.length) ? res.fields : (ep.fields || []).map((f) => ({ label: f.label, value: "--", unit: f.unit || "" }));
+    const results = (st && st.results) || apiState.results || [];
+    const byName = {};
+    results.forEach((r) => {
+      const n = r && (r.name || r.endpoint_name);
+      if (n && byName[n] === undefined) byName[n] = r;
+    });
+    // 结果按「端点名称」对齐（修复增删端点后按下标错位显示的问题）
+    const resOf = (ep, i) => {
+      const n = String(ep.name || "");
+      if (n && byName[n] !== undefined) return byName[n];
+      return results[i];
+    };
+    const pendingCount = eps.filter((ep, i) => !resOf(ep, i)).length;
+    const errCount = eps.filter((ep, i) => { const r = resOf(ep, i); return r && r.error; }).length;
+    const okCount = eps.length - pendingCount - errCount;
+    const updated = apiState.fetchedAt ? "更新于 " + apiState.fetchedAt.toLocaleTimeString() : "尚未拉取";
+
+    let inner =
+      '<div class="api-hero">' +
+        '<span class="dot ' + (cfgApi.enabled ? "ok" : "wait") + '"></span>' +
+        '<div><div class="ah-title">' + (cfgApi.enabled ? "监控已开启" : "监控已关闭") + "</div>" +
+        '<div class="ah-sub">共 ' + eps.length + " 个端点" +
+          (okCount ? " · 正常 " + okCount : "") +
+          (errCount ? " · 异常 " + errCount : "") +
+          (pendingCount ? " · 等待 " + pendingCount : "") +
+          " · 轮询 " + num(cfgApi.poll_interval_seconds, 60) + "s · " + esc(updated) + "</div></div>" +
+        '<div class="ah-right">' + switchCtl("api_monitor.enabled", cfgApi.enabled) +
+          '<button class="btn" onclick="App.refreshApi()">立即拉取</button>' +
+          '<button class="btn primary" onclick="App.save()">保存设置</button></div>' +
+      "</div>" +
+      '<div class="ah-note">流程：添加端点 → 保存 → 立即拉取；余额显示框与端点卡片会即刻更新。显示框内容在下方「余额显示框」中自定义。</div>';
+
+    // ── 端点卡片 ──
+    const urls = {};
+    let dupeCount = 0;
+    let placeholderCount = 0;
+    eps.forEach((e) => {
+      const u = String(e.url || "").trim();
+      if (u.indexOf("api.example.com") >= 0) placeholderCount++;
+      if (u) { if (urls[u]) dupeCount++; urls[u] = true; }
+    });
+    let warnBar = "";
+    if (dupeCount || placeholderCount) {
+      const parts = [];
+      if (placeholderCount) parts.push(placeholderCount + " 个示例占位端点（api.example.com）");
+      if (dupeCount) parts.push(dupeCount + " 个重复端点（相同 URL）");
+      warnBar = '<div class="ep-warn"><span>⚠ 检测到 ' + parts.join("、") +
+        "，建议先整理（整理后记得保存）。</span>" +
+        '<button class="btn sm" onclick="App.cleanupEndpoints()">一键整理</button></div>';
+    }
+    const cards = eps.map((ep, i) => {
+      const res = resOf(ep, i);
+      const pending = !res;
+      const ok = !!(res && !res.error);
+      const hasErr = !!(res && res.error);
+      const fields = (!hasErr && res && res.fields && res.fields.length)
+        ? res.fields
+        : (ep.fields || []).map((f) => ({ label: f.label, value: "--", unit: f.unit || "" }));
       const fieldHtml = fields.map((f) => {
         let warn = false;
         const v = f.value;
-        if (typeof v === "number" && (String(f.label).indexOf("余额") >= 0 || String(f.label).indexOf("额度") >= 0) && v < warnTh) warn = true;
-        return '<div class="ep-field' + (warn ? " warn" : "") + '"><div class="k">' + esc(f.label) + "</div><div class=\"v\">" + esc(v) + esc(f.unit || "") + "</div></div>";
+        if (typeof v === "number" && /余额|额度/.test(String(f.label)) && v < warnTh) warn = true;
+        return '<div class="ep-field' + (warn ? " warn" : "") + '"><div class="k">' + esc(f.label) +
+          '</div><div class="v">' + esc(v) + esc(f.unit || "") + "</div></div>";
       }).join("");
-      epCards += '<div class="ep-card">' +
-        '<div class="ep-head"><span class="ep-status"><span class="dot ' + (pending ? "wait" : (ok ? "ok" : "err")) + '"></span>' + (pending ? "等待首次拉取" : (ok ? "正常" : "错误")) + "</span>" +
-        '<span class="ep-name">' + esc(ep.name || "未命名端点") + '</span><span class="tag gray">' + esc((ep.method || "GET").toUpperCase()) + "</span>" +
-        '<div style="flex:1"></div>' +
-        (ep.platform_url ? '<button class="btn sm" onclick="App.openPlatform(' + i + ')">打开平台</button>' : "") +
-        '<button class="btn sm" onclick="App.testEndpoint(' + i + ')">' + (apiState.testing[i] ? "测试中…" : "测试") + "</button>" +
-        '<button class="btn sm" onclick="App.editEndpoint(' + i + ')">编辑</button>' +
-        '<button class="btn sm danger" onclick="App.delEndpoint(' + i + ')">删除</button></div>' +
-        '<div class="ep-url">' + esc(ep.url || "") + "</div>" +
+      const tags = (ep.preset ? '<span class="tag gray">预设</span>' : "") +
+        (ep.badge_mode ? '<span class="tag blue">' + esc(EP_BADGE_LABEL[ep.badge_mode] || ("角标 · " + ep.badge_mode)) + "</span>" : "");
+      const errBlock = res && res.error
+        ? '<div class="ep-error">✗ ' + esc(res.error) +
+          (epErrorHint(res.error) ? '<div class="ep-error-hint">' + esc(epErrorHint(res.error)) + "</div>" : "") + "</div>"
+        : "";
+      return '<div class="ep-card">' +
+        '<div class="ep-head">' +
+          '<span class="ep-status"><span class="dot ' + (pending ? "wait" : (ok ? "ok" : "err")) + '"></span>' +
+            (pending ? "等待首次拉取" : (ok ? "正常" : "异常")) + "</span>" +
+          '<span class="ep-name">' + esc(ep.name || "未命名端点") + "</span>" + tags +
+          '<span class="tag gray">' + esc(String(ep.method || "GET").toUpperCase()) + "</span>" +
+          '<div style="flex:1"></div>' +
+          (ep.platform_url ? '<button class="btn sm" onclick="App.openPlatform(' + i + ')">平台</button>' : "") +
+          '<button class="btn sm" onclick="App.testEndpoint(' + i + ')">' + (apiState.testing[i] ? "测试中…" : "测试") + "</button>" +
+          '<button class="btn sm" onclick="App.editEndpoint(' + i + ')">编辑</button>' +
+          '<button class="btn sm" onclick="App.duplicateEndpoint(' + i + ')">复制</button>' +
+          '<button class="btn sm danger" onclick="App.delEndpoint(' + i + ')">删除</button>' +
+        "</div>" +
+        '<div class="ep-url">#' + (i + 1) + " " + esc(ep.url || "") + "</div>" +
         '<div class="ep-fields">' + (fieldHtml || '<div class="ep-field"><div class="v">无字段</div></div>') + "</div>" +
-        (res && res.error ? '<div class="ep-url" style="color:var(--warn)">' + esc(res.error) + "</div>" : "") +
-        "</div>";
-    });
-    inner += card("监控端点", "点击「测试」即时验证；「保存设置」后浮窗后台监控会按新配置重启。",
-      epCards + '<div style="margin-top:10px"><button class="btn primary" onclick="App.addEndpoint()">＋ 添加端点</button></div>');
-    inner += card("模板变量说明", "URL / Headers / Body 支持模板：<code>{{env:KEY}}</code> 读取环境变量（如 <code>{{env:DEEPSEEK_API_KEY}}</code>）、<code>{{today}}</code> 今日日期、<code>{{yesterday}}</code> 昨日日期。JSONPath 示例：<code>$.balance_infos[0].total_balance</code>。");
+        errBlock + "</div>";
+    }).join("");
+    const presets = apiState.presets || [];
+    const presetBtn = (p) => '<button class="btn sm" title="' + esc(p.description || "") +
+      '" onclick="App.addApiPreset(\'' + p.id + '\')">＋ ' + esc(p.name) + "</button>";
+    inner += card("监控端点", "端点决定「拉什么数据」；「测试」只即时验证、不改配置，绿色/红色为最近一次后台拉取的结果。",
+      warnBar +
+      (cards || '<div class="ep-empty">还没有监控端点：用下面的预设一键添加，或点「自定义端点」手动配置。</div>') +
+      '<div class="ep-add"><button class="btn" onclick="App.addEndpoint()">＋ 自定义端点</button>' +
+      (presets.length ? '<span class="ep-add-label">预设快速添加：</span>' + presets.map(presetBtn).join("") : "") +
+      "</div>");
+
+    // ── 余额显示框 ──
+    const preview = (st && st.badge_preview) || apiState.badgePreview || [];
+    const previewHtml = '<div class="badge-preview">' +
+      (preview.length
+        ? preview.map((r) => '<div class="bp-line">' +
+            (r.title ? '<span class="bp-t">' + esc(r.title) + "</span>" : "") +
+            '<span class="bp-v">' + esc(r.value) + "</span></div>").join("")
+        : '<div class="bp-line"><span class="bp-v">--</span></div>') +
+      "</div>";
+    const rowCount = (cfgApi.badge_rows || []).length;
+    inner += card("余额显示框", "半透明小框显示在浮球旁，可拖动位置；下方预览 = 小框此刻显示的内容（按已保存配置渲染，保存后即刷新）。",
+      row("实时预览", rowCount ? ("按 " + rowCount + " 行自定义显示") : "未配置显示行：按「单行模式」显示",
+        previewHtml +
+        '<button class="btn sm" style="margin-left:10px" onclick="App.clearBadgeRows()">清空显示行</button>') +
+      row("显示位置", "小框可直接用鼠标拖动到任意位置（松开即自动保存）",
+        selectCtl("api_monitor.badge_position", cfgApi.badge_position || "top",
+          [["top", "浮球上方"], ["bottom", "浮球下方"]]) +
+        '<button class="btn sm" style="margin-left:8px" onclick="App.resetBadgePos()">重置拖动偏移</button>') +
+      row("单行模式", "未配置「显示行」时生效；端点可单独覆盖（如 OpenCode Go 预设为剩余%）",
+        selectCtl("api_monitor.badge_mode", cfgApi.badge_mode || "balance",
+          [["balance", "余额金额"], ["remaining", "剩余百分比"], ["used", "已用百分比"]])) +
+      row("行预设（一键添加）", "推荐先点对应平台（重复点会在末尾继续追加，可在下方逐行删改）",
+        (apiState.rowPresets || []).map((p) =>
+          '<button class="btn sm" style="margin:0 6px 4px 0" onclick="App.addBadgeRowPreset(\'' + p.id + '\')">＋ ' + esc(p.name) + "</button>").join("") || "加载中…") +
+      row("显示行", "每行 = 标题 + 数据源 + 小数位 + 后缀；示例：「5h / 剩余百分比 / 0 位小数 / %」→ 5h 92%",
+        badgeRowsEditor()));
+    // ── 轮询与告警 ──
+    inner += card("轮询与告警", "后台按间隔自动拉取；阈值只影响显示与告警颜色。",
+      row("轮询间隔（秒）", "「立即拉取」不受此限制", numCtl("api_monitor.poll_interval_seconds", cfgApi.poll_interval_seconds || 60, { min: 10, max: 3600 })) +
+      row("低余额警告阈值", "余额 / 剩余额度低于该值标红", '<input type="number" data-bind="api_monitor.low_balance_warn" step="0.1" min="0" value="' + esc(warnTh) + '">'));
+    // ── 帮助（默认折叠，减少页面噪音）──
+    inner += card("模板与 JSONPath 说明",
+      '<details class="help"><summary>展开：模板变量、JSONPath 与字段显示方式</summary><div class="help-body">' +
+      "<p><b>模板变量</b>：<code>{{env:KEY}}</code> 读取环境变量（如 <code>{{env:DEEPSEEK_API_KEY}}</code>，也兼容注册表中的用户变量）、" +
+      "<code>{{today}}</code> 今日日期、<code>{{yesterday}}</code> 昨日日期、<code>{{now_iso}}</code>、<code>{{timestamp}}</code>。</p>" +
+      "<p><b>JSONPath</b>：<code>$.a.b</code> 取嵌套键、<code>$.a[0].b</code> 取数组元素、<code>$.a[*].b</code> 取列表。示例：<code>$.balance_infos[0].total_balance</code>（DeepSeek）。</p>" +
+      "<p><b>字段 display</b>：<code>number</code> 数值、<code>percent</code> 百分比（自动补 %）、<code>text</code> 文本；显示行可用「自定义字段」引用字段标签（如填「每周已用」）。</p>" +
+      "</div></details>");
     el.innerHTML = inner;
     bindAll(el);
     // PATCH 3.5.1：余额显示框「自定义显示行」编辑（输入即写入配置，保存后生效）
@@ -554,17 +661,24 @@ import {
       const custom = src.indexOf("field_remain:") === 0 || src.indexOf("field:") === 0;
       const fnPrefix = src.indexOf("field_remain:") === 0 ? "field_remain:" : "field:";
       html += '<div class="mini-row" data-brow="' + i + '">' +
-        '<input class="brow-title" style="width:60px" placeholder="标题" value="' + esc(r.title || "") + '">' +
+        '<span class="brow-idx">' + (i + 1) + "</span>" +
+        '<input class="brow-title" style="width:56px" placeholder="标题" value="' + esc(r.title || "") + '">' +
         '<select class="brow-src">' + opts.map(([v, l]) =>
           '<option value="' + v + '"' + (v === (custom ? fnPrefix : src) ? " selected" : "") + ">" + l + "</option>").join("") + "</select>" +
-        '<input class="brow-field" style="width:82px" placeholder="字段标签" value="' + esc(custom ? src.slice(fnPrefix.length) : "") + '"' + (custom ? "" : " disabled") + ">" +
-        '<input class="brow-dec" type="number" style="width:50px" placeholder="小数" value="' + esc(r.decimals != null ? r.decimals : "") + '">' +
-        '<input class="brow-suffix" style="width:44px" placeholder="后缀" value="' + esc(r.suffix != null ? r.suffix : "") + '">' +
+        '<input class="brow-field" style="width:78px" placeholder="字段标签" value="' + esc(custom ? src.slice(fnPrefix.length) : "") + '"' + (custom ? "" : " disabled") + ">" +
+        '<input class="brow-dec" type="number" style="width:46px" placeholder="小数" value="' + esc(r.decimals != null ? r.decimals : "") + '">' +
+        '<input class="brow-suffix" style="width:40px" placeholder="后缀" value="' + esc(r.suffix != null ? r.suffix : "") + '">' +
         '<button class="btn sm danger" onclick="App.delBadgeRow(' + i + ')">删</button></div>';
     });
-    return '<div id="badgeRows">' + (html || '<div class="mini-row"><span class="grow">未配置（按单行模式显示）</span></div>') + "</div>" +
+    return '<div id="badgeRows">' +
+      (html
+        ? '<div class="mini-row brow-head"><span class="brow-idx">#</span>' +
+          '<span style="width:56px">标题</span><span class="brow-src-label">数据源</span><span style="width:78px">字段标签</span>' +
+          '<span style="width:46px">小数</span><span style="width:40px">后缀</span><span style="width:34px"></span></div>' + html
+        : '<div class="mini-row"><span class="grow">未配置显示行 → 使用「单行模式」</span></div>') +
+      "</div>" +
       '<div style="margin-top:6px"><button class="btn sm" onclick="App.addBadgeRow()">＋ 添加行</button>' +
-      '<span style="margin-left:8px;font-size:11px;color:var(--dim)">示例：标题「5h」+ 剩余百分比 → 显示「5h 92%」</span></div>';
+      '<span style="margin-left:8px;font-size:11px;color:var(--hint)">示例：标题「5h」+ 数据源「剩余百分比」+ 小数 0 + 后缀 % → 显示「5h 92%」</span></div>';
   }
 
   function endpointModal(idx) {
@@ -624,7 +738,7 @@ import {
       else cfgApi.endpoints[window._epDraft.idx] = item;
       closeModal();
       refreshDirty();
-      renderApi($("#apiContent"), { results: apiState.results });
+      renderApiCached();
     });
     $("#modalBox [data-close]").addEventListener("click", closeModal);
   }
@@ -847,31 +961,44 @@ import {
     addEndpoint: () => endpointModal(null),
     addApiPreset: async (id) => {
       try {
-        const r = await API.api("/api/api_monitor/presets");
-        const p = (r.presets || []).find((x) => x.id === id);
+        await loadApiPresets();
+        let p = (apiState.presets || []).find((x) => x.id === id);
+        if (!p) {
+          const r = await API.api("/api/api_monitor/presets");
+          apiState.presets = r.presets || [];
+          apiState.rowPresets = r.row_presets || [];
+          p = (apiState.presets || []).find((x) => x.id === id);
+        }
         if (!p) { toast("预设不存在：" + id, "err"); return; }
         cfg.api_monitor = cfg.api_monitor || {};
-        cfg.api_monitor.endpoints = cfg.api_monitor.endpoints || [];
-        cfg.api_monitor.endpoints.push(p.endpoint);
+        const eps = cfg.api_monitor.endpoints = cfg.api_monitor.endpoints || [];
+        const url = String((p.endpoint || {}).url || "");
+        const idx = eps.findIndex((e) => String(e.url || "").trim() === url);
+        if (idx >= 0 && url) {
+          eps[idx] = deep(p.endpoint);      // 已存在同地址端点 → 用预设更新，避免重复堆积
+          toast("已有相同地址的端点：已用「" + p.name + "」预设更新", "ok");
+        } else {
+          eps.push(deep(p.endpoint));
+          toast("已添加预设：" + p.name + "（点保存后生效）", "ok");
+        }
         cfg.api_monitor.enabled = true;
         refreshDirty();
-        renderApi($("#apiContent"), { results: apiState.results });
-        toast("已添加预设：" + p.name + "（点保存后生效）", "ok");
+        renderApiCached();
       } catch (e) { toast("添加预设失败：" + e.message, "err"); }
     },
     editEndpoint: (i) => endpointModal(i),
-    delEndpoint: (i) => { if (confirm("确定删除端点？")) { cfg.api_monitor.endpoints.splice(i, 1); refreshDirty(); renderApi($("#apiContent"), { results: apiState.results }); } },
+    delEndpoint: (i) => { if (confirm("确定删除端点？")) { cfg.api_monitor.endpoints.splice(i, 1); refreshDirty(); renderApiCached(); } },
     addBadgeRow: () => {
       cfg.api_monitor = cfg.api_monitor || {};
       cfg.api_monitor.badge_rows = (cfg.api_monitor.badge_rows || []).concat([
         { title: "", source: "progress:remain_pct", decimals: 0, suffix: "%" }]);
       refreshDirty();
-      renderApi($("#apiContent"), { results: apiState.results });
+      renderApiCached();
     },
     delBadgeRow: (i) => {
       (cfg.api_monitor.badge_rows || []).splice(i, 1);
       refreshDirty();
-      renderApi($("#apiContent"), { results: apiState.results });
+      renderApiCached();
     },
     resetBadgePos: () => {
       cfg.api_monitor = cfg.api_monitor || {};
@@ -879,6 +1006,39 @@ import {
       cfg.api_monitor.badge_dy = 0;
       refreshDirty();
       toast("已重置拖动偏移（保存后生效）", "ok");
+    },
+    clearBadgeRows: () => {
+      cfg.api_monitor = cfg.api_monitor || {};
+      cfg.api_monitor.badge_rows = [];
+      refreshDirty();
+      renderApiCached();
+      toast("已清空显示行 → 回到单行模式（保存后生效）", "ok");
+    },
+    duplicateEndpoint: (i) => {
+      const src = (cfg.api_monitor.endpoints || [])[i];
+      if (!src) return;
+      const item = deep(src);
+      item.name = String(src.name || "端点") + " 副本";
+      cfg.api_monitor.endpoints.splice(i + 1, 0, item);
+      refreshDirty();
+      renderApiCached();
+      toast("已复制端点（记得改名字/Key 后保存）", "ok");
+    },
+    cleanupEndpoints: () => {
+      const eps = (cfg.api_monitor || {}).endpoints || [];
+      const seen = {};
+      let removed = 0;
+      cfg.api_monitor.endpoints = eps.filter((e) => {
+        const u = String(e.url || "").trim();
+        if (u.indexOf("api.example.com") >= 0) { removed++; return false; }
+        const key = String(e.name || "").trim() + "|" + u;
+        if (seen[key]) { removed++; return false; }
+        seen[key] = true;
+        return true;
+      });
+      refreshDirty();
+      renderApiCached();
+      toast(removed ? ("已整理：移除 " + removed + " 个端点（保存后生效）") : "没有需要整理的端点", "ok");
     },
     refreshApi: async () => {
       try {
@@ -900,21 +1060,28 @@ import {
           rows.push(item);
         });
         refreshDirty();
-        renderApi($("#apiContent"), { results: apiState.results });
+        renderApiCached();
         toast("已添加「" + p.name + "」显示行（保存后生效）", "ok");
       } catch (e) { toast("添加失败：" + e.message, "err"); }
     },
     testEndpoint: async (i) => {
       const ep = cfg.api_monitor.endpoints[i];
       apiState.testing[i] = true;
-      renderApi($("#apiContent"), { results: apiState.results });
+      renderApiCached();
       try {
         const r = await API.api("/api/api_monitor/test", { method: "POST", body: { endpoint: ep } });
-        if (r.ok) toast("测试成功：" + (r.result.fields || []).map((f) => f.label + "=" + f.value).join("，"), "ok");
-        else toast("测试失败：" + (r.result && r.result.error ? r.result.error : "未知错误"), "err");
+        if (r.ok) {
+          // 测试结果临时覆盖到卡片（仅本次会话显示，不改配置）
+          apiState.results = apiState.results || [];
+          apiState.results[i] = r.result;
+          apiState.fetchedAt = new Date();
+          toast("测试成功：" + (r.result.fields || []).map((f) => f.label + "=" + f.value).join("，"), "ok");
+        } else {
+          toast("测试失败：" + (r.result && r.result.error ? r.result.error : "未知错误"), "err");
+        }
       } catch (e) { toast("测试请求失败：" + e.message, "err"); }
       apiState.testing[i] = false;
-      renderApi($("#apiContent"), { results: apiState.results });
+      renderApiCached();
     },
     openPlatform: (i) => {
       const ep = cfg.api_monitor.endpoints[i];

@@ -22,7 +22,7 @@ from agentfloat.core.registry import (
 )
 from agentfloat.core.theme import DEFAULT_SIZE
 from agentfloat.services.api_monitor.config import (
-    DEFAULTS as API_MONITOR_DEFAULTS, SAMPLE_ENDPOINT,
+    DEFAULTS as API_MONITOR_DEFAULTS,
 )
 from agentfloat.services.news.fetcher import DEFAULT_NEWS as _NEWS_DEFAULTS
 from agentfloat.services.water.reminder import DEFAULT_WATER
@@ -49,11 +49,9 @@ def _read_json(path):
 
 
 def _default_api_monitor():
-    """内置默认 API 监控配置：含脱敏示例端点，新用户开箱即用（默认不启用）"""
+    """内置默认 API 监控配置（PATCH 3.5.3：不再预置示例占位端点，避免「My API」永远失败造成困扰）"""
     cfg = copy.deepcopy(API_MONITOR_DEFAULTS)
     cfg.setdefault("endpoints", [])
-    if not cfg["endpoints"]:
-        cfg["endpoints"] = [copy.deepcopy(SAMPLE_ENDPOINT)]
     return cfg
 
 def load_config():
@@ -164,6 +162,31 @@ def load_config():
                        ("badge_dy", 0), ("badge_rows", [])):
             if _k not in _am_cfg:
                 _am_cfg[_k] = _v
+                _migrated = True
+        # PATCH 3.5.3：端点清理——移除示例占位端点（api.example.com）+ 同名同 URL 去重
+        _eps = _am_cfg.get("endpoints")
+        if isinstance(_eps, list):
+            _cleaned = []
+            _seen = set()
+            for _ep in _eps:
+                if not isinstance(_ep, dict):
+                    _migrated = True
+                    continue
+                _url = str(_ep.get("url") or "").strip()
+                _name = str(_ep.get("name") or "").strip()
+                if "api.example.com" in _url and _name in ("My API", "", "未命名端点"):
+                    _log().info("配置迁移：移除示例占位端点 [%s]", _name or "未命名")
+                    _migrated = True
+                    continue
+                _key = (_name, _url)
+                if _key in _seen:
+                    _log().info("配置迁移：移除重复端点 [%s] %s", _name, _url)
+                    _migrated = True
+                    continue
+                _seen.add(_key)
+                _cleaned.append(_ep)
+            if len(_cleaned) != len(_eps):
+                _am_cfg["endpoints"] = _cleaned
                 _migrated = True
 
     if _migrated and (loaded or not parse_error):

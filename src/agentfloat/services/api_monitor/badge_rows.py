@@ -25,6 +25,13 @@ _logger = logging.getLogger("AgentFloat")
 _PCT_SOURCES = {"progress:used_pct", "progress:remain_pct"}
 
 
+def _g(obj, key, default=None):
+    """兼容 FetchResult 对象与 serialize_results 的 dict（Web 快照是 dict）"""
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
 def _num(value):
     try:
         return float(value)
@@ -104,7 +111,7 @@ def _row_value(spec, result):
     suffix = str(suffix)
 
     if source == "balance":
-        field = _balance_field(result.fields or [])
+        field = _balance_field(_g(result, "fields") or [])
         if field is None:
             return None
         raw = field.get("value")
@@ -121,7 +128,7 @@ def _row_value(spec, result):
         return _fmt(raw, decimals, user_prefix, suffix)
 
     if source.startswith("progress:"):
-        value = _progress_value(getattr(result, "progress", None), source)
+        value = _progress_value(_g(result, "progress"), source)
         if value is None:
             return None
         if decimals is None:
@@ -129,7 +136,7 @@ def _row_value(spec, result):
         return _fmt(value, decimals, prefix, suffix)
 
     if source.startswith("field_remain:"):
-        field = _find_field(result.fields or [], source.split(":", 1)[1])
+        field = _find_field(_g(result, "fields") or [], source.split(":", 1)[1])
         if field is None:
             return None
         num = _num(str(field.get("value", "")).replace("%", "").strip())
@@ -140,7 +147,7 @@ def _row_value(spec, result):
         return _fmt(100.0 - num, decimals, prefix, suffix)
 
     if source.startswith("field:"):
-        field = _find_field(result.fields or [], source.split(":", 1)[1])
+        field = _find_field(_g(result, "fields") or [], source.split(":", 1)[1])
         if field is None:
             return None
         raw = field.get("value")
@@ -162,12 +169,12 @@ def build_badge_rows(results, api_cfg):
     if not results:
         return [("", "--")], False, False
 
-    first_fields = results[0].fields or []
+    first_fields = _g(results[0], "fields") or []
     if first_fields and first_fields[0].get("label") == "错误":
-        err = str(first_fields[0].get("value") or "查询失败")
+        err = str(_g(results[0], "error") or "") or str(first_fields[0].get("value") or "查询失败")
         return [("", err)], False, True
 
-    names = [getattr(r, "endpoint_name", None) for r in results]
+    names = [_g(r, "endpoint_name") or _g(r, "name") for r in results]
     rows_cfg = api_cfg.get("badge_rows") or []
 
     if rows_cfg:
@@ -192,14 +199,14 @@ def build_badge_rows(results, api_cfg):
     # 兼容模式：单行（badge_mode：balance / remaining / used）——端点可覆盖全局
     r = results[0]
     from agentfloat.services.api_monitor.presets import badge_mode_for
-    mode = badge_mode_for(getattr(r, "endpoint_name", None), api_cfg)
-    prog = getattr(r, "progress", None)
+    mode = badge_mode_for(_g(r, "endpoint_name") or _g(r, "name"), api_cfg)
+    prog = _g(r, "progress")
     if mode in ("remaining", "used") and prog:
         pct = _num(prog.get("remain" if mode == "remaining" else "pct"))
         if pct is not None:
             low = bool(mode == "remaining" and pct < 20.0)
             return [("", "%d%%" % round(pct))], low, False
-    field = _balance_field(r.fields or [])
+    field = _balance_field(_g(r, "fields") or [])
     if field is None:
         return [("", "--")], False, False
     raw = field.get("value")

@@ -88,6 +88,7 @@ args = [
     "--workpath", os.path.join(SCRIPT_DIR, "build"),
     "--specpath", os.path.join(SCRIPT_DIR, "build"),
     "--noconfirm",
+    "--clean",              # PATCH 3.5.3：强制清理缓存，避免 PYZ 复用陈旧模块（曾导致修复未进包）
     *[f"--hidden-import={m}" for m in HIDDEN_IMPORTS],
     "--collect-all", "uvicorn",
     "--collect-all", "fastapi",

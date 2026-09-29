@@ -49,10 +49,20 @@ class WebAppHandlers(object):
 
     def get_api_state(self):
         cfg = self.widget.config.get("api_monitor") or API_MONITOR_DEFAULTS
+        results = self.bridge.get_snapshot("api_results")
+        # PATCH 3.5.3：服务端按同一套规则生成显示框预览（设置页所见即小框所得）
+        preview = []
+        try:
+            from agentfloat.services.api_monitor.badge_rows import build_badge_rows
+            rows, _low, _err = build_badge_rows(results, cfg)
+            preview = [{"title": t, "value": v} for t, v in rows]
+        except Exception:  # noqa: BLE001
+            preview = []
         return {
             "version": VERSION,
             "config": cfg,
-            "results": self.bridge.get_snapshot("api_results"),
+            "results": results,
+            "badge_preview": preview,
         }
 
     def get_news_state(self, date=None):
