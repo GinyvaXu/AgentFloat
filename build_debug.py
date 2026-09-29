@@ -73,7 +73,8 @@ HIDDEN_IMPORTS = [
 ]
 
 # P3 裁剪：应用未使用的重量级依赖（onedir/onefile 均生效）
-for _mod in ("sqlite3", "cryptography", "setuptools", "pkg_resources"):
+# v3.6.0：cryptography 已解禁（账户/密钥保险箱 + 口令保护导出需要），不再裁剪
+for _mod in ("sqlite3", "setuptools", "pkg_resources"):
     EXCLUDES.append(_mod)
 
 args = [
