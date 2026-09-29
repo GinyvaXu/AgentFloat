@@ -65,12 +65,17 @@ class ApiBalanceBadge(QWidget):
         except (TypeError, ValueError):
             self._warn_threshold = 5.0
 
-    def update_balance(self, text: str, value=None, is_error: bool = False):
-        """???????value ????????????is_error ??????"""
+    def update_balance(self, text: str, value=None, is_error: bool = False, is_low=None):
+        """更新角标文本；value 用于低余额判定（阈值见 set_warn_threshold）
+
+        PATCH 3.4.0：新增 is_low 显式覆盖（百分比模式：剩余% < 20 直接告警）
+        """
         self._text = (text or "--").strip()
         self._is_error = is_error
         self._is_low = False
-        if value is not None and self._warn_threshold > 0 and not is_error:
+        if is_low is not None and not is_error:
+            self._is_low = bool(is_low)
+        elif value is not None and self._warn_threshold > 0 and not is_error:
             try:
                 self._is_low = float(value) < self._warn_threshold
             except (TypeError, ValueError):

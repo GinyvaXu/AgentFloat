@@ -147,6 +147,12 @@ def create_app(bridge, handlers):
     def get_api_state():
         return handlers.get_api_state()
 
+    @api.get("/api_monitor/presets")
+    def get_api_monitor_presets():
+        """内置端点预设（PATCH 3.4.0：OpenCode Go 等一键添加）"""
+        from agentfloat.services.api_monitor.presets import PRESETS
+        return {"presets": PRESETS}
+
     @api.post("/api_monitor/test")
     def api_monitor_test(body: dict):
         endpoint = body.get("endpoint")

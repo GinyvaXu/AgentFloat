@@ -11,6 +11,7 @@ DEFAULTS = {
     "enabled": False,
     "poll_interval_seconds": 60,
     "low_balance_warn": 5.0,
+    "badge_mode": "balance",     # PATCH 3.4.0：角标显示模式（balance/remaining/used）
     "endpoints": [],
 }
 

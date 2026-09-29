@@ -12,7 +12,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 </p>
 
 <p align="center">
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.3.1-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.4.0-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%2010%2F11-8E44AD?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"></a>
@@ -161,6 +161,7 @@ AgentFloat/
 - [x] v3.2.1 — **跟手性与设置修复**：悬停检测 100ms→16ms / 高亮 60ms→20ms / DPI 命中偏差 / 背景预渲染（3.3 倍）/ 扇区数量与映射无法设置
 - [x] v3.3.0 — **全流程动效 + 游戏式手势**：按住不动 2s 启动（环形进度条）/ 按住外滑唤出轮盘 / 轮盘「移动浮窗」模式（左键放置·右键/Esc 取消）/ 全窗口渐入渐出 / 面板新风格
 - [x] v3.3.1 — **交互精简 + 关闭动效**：取消悬停唤出；选中后确认脉冲 + 丝滑收合再执行；面板深度打磨（渐变标题栏 / Esc 关闭 / 统一主按钮）
+- [x] v3.4.0 — **OpenCode Go 余额 + 贴边轮盘 + 跨屏 DPI**：预设一键接入与角标显示模式（剩余%/已用%/金额）；贴边让位回弹后开环；跨屏重建位图；吸附阈值 36px
 - [ ] v3.3.x（进行中）— 各子页面逐页深度重构（Skills/快报/剪贴板/命令/喝水）+ 剩余动效打磨
 - [ ] v3.3.x（候选）— OpenCode Go 余额预设（角标滚动剩余%）/ Web 多标签 / 更多效率工具
 

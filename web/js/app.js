@@ -456,6 +456,10 @@ import {
       row("启用监控", "", switchCtl("api_monitor.enabled", cfgApi.enabled)) +
       row("轮询间隔（秒）", "", numCtl("api_monitor.poll_interval_seconds", cfgApi.poll_interval_seconds || 60, { min: 10, max: 3600 })) +
       row("低余额警告阈值", "低于该值端点标红并触发浮窗角标变色", '<input type="number" data-bind="api_monitor.low_balance_warn" step="0.1" min="0" value="' + esc(warnTh) + '">') +
+      row("角标显示", "浮窗旁余额角标的显示方式（端点可单独覆盖，如 OpenCode Go 默认显示剩余%）",
+        selectCtl("api_monitor.badge_mode", cfgApi.badge_mode || "balance", [["balance", "余额金额（默认）"], ["remaining", "剩余百分比"], ["used", "已用百分比"]])) +
+      row("快速添加预设", "一键添加常用平台端点（OpenCode Go 订阅用量等）",
+        '<button class="btn primary" onclick="App.addApiPreset(\'opencode-go\')">＋ OpenCode Go</button>') +
       '<div class="row"><div class="lbl">测试与保存</div><div class="ctl"><button class="btn primary" onclick="App.save()">保存设置</button></div></div>');
     let epCards = "";
     eps.forEach((ep, i) => {
@@ -766,6 +770,20 @@ import {
     editTimer: (i) => timerModal(i),
     delTimer: (i) => { if (confirm("确定删除计时器？")) { cfg.water.timers.splice(i, 1); refreshDirty(); renderWater($("#settingsContent")); } },
     addEndpoint: () => endpointModal(null),
+    addApiPreset: async (id) => {
+      try {
+        const r = await API.api("/api/api_monitor/presets");
+        const p = (r.presets || []).find((x) => x.id === id);
+        if (!p) { toast("预设不存在：" + id, "err"); return; }
+        cfg.api_monitor = cfg.api_monitor || {};
+        cfg.api_monitor.endpoints = cfg.api_monitor.endpoints || [];
+        cfg.api_monitor.endpoints.push(p.endpoint);
+        cfg.api_monitor.enabled = true;
+        refreshDirty();
+        renderApi($("#apiContent"), { results: apiState.results });
+        toast("已添加预设：" + p.name + "（点保存后生效）", "ok");
+      } catch (e) { toast("添加预设失败：" + e.message, "err"); }
+    },
     editEndpoint: (i) => endpointModal(i),
     delEndpoint: (i) => { if (confirm("确定删除端点？")) { cfg.api_monitor.endpoints.splice(i, 1); refreshDirty(); renderApi($("#apiContent"), { results: apiState.results }); } },
     testEndpoint: async (i) => {

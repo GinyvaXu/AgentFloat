@@ -50,6 +50,13 @@ def fetch_endpoint(endpoint: dict, verify_ssl: bool = True) -> FetchResult:
     url = resolve_url(endpoint["url"])
     method = endpoint.get("method", "GET").upper()
     headers = resolve_headers(endpoint.get("headers", {}))
+    # PATCH 3.4.0：默认浏览器 UA（未显式设置时）——部分平台（如 opencode.ai）会被
+    # Cloudflare 按 UA 拦截（error 1010），带浏览器 UA 才可正常访问
+    if not any(k.lower() == "user-agent" for k in headers):
+        headers["User-Agent"] = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/128.0 Safari/537.36")
+    headers.setdefault("Accept", "application/json")
     body = endpoint.get("body")
     verify = verify_ssl
 
@@ -108,20 +115,25 @@ def fetch_endpoint(endpoint: dict, verify_ssl: bool = True) -> FetchResult:
             "display": display,
         })
 
-    # 进度信息
+    # 进度信息（PATCH 3.4.0：支持数值型 total + 已用/剩余双百分比）
     progress = None
     pf = endpoint.get("progress_field")
     if pf:
-        used = jsonpath_get(parsed, pf.get("used", ""))
-        total = jsonpath_get(parsed, pf.get("total", ""))
-        if used is not None and total is not None and total > 0:
-            try:
-                used_num = float(used)
-                total_num = float(total)
-                pct = round(used_num / total_num * 100, 1)
-                progress = {"used": used_num, "total": total_num, "pct": pct}
-            except (ValueError, TypeError):
-                pass
+        used = jsonpath_get(parsed, pf.get("used", "")) if isinstance(pf.get("used"), str) else pf.get("used")
+        total = jsonpath_get(parsed, pf.get("total", "")) if isinstance(pf.get("total"), str) else pf.get("total")
+        try:
+            used_num = float(used) if used is not None else None
+            total_num = float(total) if total is not None else None
+        except (ValueError, TypeError):
+            used_num = total_num = None
+        if used_num is not None and total_num is not None and total_num > 0:
+            pct = round(used_num / total_num * 100, 1)
+            progress = {
+                "used": used_num,
+                "total": total_num,
+                "pct": pct,                     # 已用百分比（兼容旧字段/网页进度条）
+                "remain": round(max(0.0, 100.0 - pct), 1),   # 剩余百分比
+            }
 
     return FetchResult(
         endpoint_name=name,

@@ -55,7 +55,7 @@ from agentfloat.ui.interaction import Actions as InteractionActions, BallInterac
 from agentfloat.ui.motion import Tokens as MotionTokens, motion, spring
 from agentfloat.ui.placement import (
     EDGE_MARGIN, VALID_EDGES, clamp_visible, edge_position, normalize_edge,
-    screen_index_for,
+    ring_room_position, screen_index_for,
 )
 from agentfloat.ui.toast import LaunchToast
 from agentfloat.ui.radial_menu import RadialMenu, RadialMenuItem, RADIAL_PAD
@@ -226,6 +226,7 @@ class FloatingWidget(QWidget):
             dpr = max(1.0, float(self.devicePixelRatioF()))
         except Exception:
             dpr = 1.0
+        self._pixmap_dpr = dpr
         cache = {"side": side, "accent": accent}
         for name, hovered in (("idle", False), ("hover", True)):
             pm = QPixmap(int(side * dpr), int(side * dpr))
@@ -490,6 +491,18 @@ class FloatingWidget(QWidget):
             self._api_badge.update_balance("查询失败", is_error=True)
             return
 
+        # PATCH 3.4.0：角标显示模式（金额 / 剩余% / 已用%）——端点可覆盖全局
+        from agentfloat.services.api_monitor.presets import badge_mode_for
+        api_cfg = self.config.get("api_monitor") or {}
+        mode = badge_mode_for(getattr(r, "endpoint_name", None), api_cfg)
+        if mode in ("remaining", "used") and getattr(r, "progress", None):
+            prog = r.progress
+            pct = float(prog.get("remain" if mode == "remaining" else "pct") or 0.0)
+            self._api_badge.update_balance(
+                "%d%%" % round(pct),
+                is_low=bool(mode == "remaining" and pct < 20.0))
+            return
+
         # 优先按标签匹配剩余额度，否则取第一个字段
         field = next((f for f in r.fields if f.get("label") == "剩余额度"), first)
         val, unit = field.get("value"), field.get("unit", "")
@@ -539,6 +552,7 @@ class FloatingWidget(QWidget):
         # PATCH 3.3.1：移动浮窗模式（由轮盘「移动浮窗」扇区进入）
         self._move_mode = False
         self._move_origin = QPoint()
+        self._wheel_open_pending = False
         self._move_timer = QTimer(self)
         self._move_timer.setInterval(16)
         self._move_timer.timeout.connect(self._on_move_tick)
@@ -619,6 +633,7 @@ class FloatingWidget(QWidget):
         """显示时启动 hover 检测"""
         super().showEvent(event)
         self._ensure_on_screen()   # PATCH 3.0.1：兜底收回屏幕外浮窗
+        self._ensure_dpr()         # PATCH 3.4.0：跨屏 DPR 变化重建位图
         _log().debug("浮窗显示")
         if not self._hover_timer.isActive():
             self._hover_timer.start()
@@ -628,8 +643,9 @@ class FloatingWidget(QWidget):
             self._api_badge.show()
 
     def moveEvent(self, event):
-        """移动时同步余额角标位置"""
+        """移动时同步余额角标位置（PATCH 3.4.0：跨屏时重建位图）"""
         super().moveEvent(event)
+        self._ensure_dpr()
         self._sync_api_panel_position()
 
     def hideEvent(self, event):
@@ -806,7 +822,7 @@ class FloatingWidget(QWidget):
         if not self.config.get("snap_enabled", True):
             return
 
-        SNAP_THRESHOLD = 25
+        SNAP_THRESHOLD = 36                    # PATCH 3.4.0：25→36「足够近就吸附」
         g = self._screen_geometry()
         off = self._ball_offset()
         cx = int(self.pos().x() + off + self.current_size // 2)
@@ -968,7 +984,7 @@ class FloatingWidget(QWidget):
 
         self._hidden_now = False
         self._interaction.notify_reveal(time.monotonic())
-        self._animate_slide(target, edge)
+        self._animate_slide(target, edge, bounce=True)   # PATCH 3.4.0：贴边弹出回弹
         if self._api_badge:
             self._api_badge.show()
         # 弹出后移除边缘检测器：避免它盖住浮窗（尤其贴边的小标签页）拦截点击/拖拽
@@ -980,10 +996,10 @@ class FloatingWidget(QWidget):
         # 设置延迟重新隐藏
         self._hide_timer.start(self.config.get("hide_delay_ms", 800))
 
-    def _reveal_now(self):
-        """吸附隐藏状态下：立即弹出到完全可见位置（供按压 / 打开菜单前调用）。
+    def _reveal_now(self, animated=False):
+        """吸附隐藏状态下：弹出到完全可见位置（供按压 / 打开菜单前调用）。
 
-        不使用动画，确保后续操作（点击启动、环绕菜单圆心）落在屏幕内。
+        PATCH 3.4.0：animated=True 时用 OutBack 回弹动效（贴边唤出/轮盘前更顺滑）。
         """
         if not (self._snapped and self._hidden_now):
             return
@@ -991,14 +1007,20 @@ class FloatingWidget(QWidget):
         s = self.current_size
         edge = self._snap_edge
         off = self._ball_offset()
+        target = None
         if edge == "right":
-            self.move(int(g.right() - s - 2 - off), self.pos().y())
+            target = QPoint(int(g.right() - s - 2 - off), self.pos().y())
         elif edge == "left":
-            self.move(int(g.left() + 2 - off), self.pos().y())
+            target = QPoint(int(g.left() + 2 - off), self.pos().y())
         elif edge == "top":
-            self.move(self.pos().x(), int(g.top() + 2 - off))
+            target = QPoint(self.pos().x(), int(g.top() + 2 - off))
         else:  # bottom
-            self.move(self.pos().x(), int(g.bottom() - s - 2 - off))
+            target = QPoint(self.pos().x(), int(g.bottom() - s - 2 - off))
+        if target is not None:
+            if animated:
+                self._animate_move_to(target, duration=170)
+            else:
+                self.move(target)
         if self._slide_anim is not None:
             self._slide_anim.stop()
         self._hide_timer.stop()
@@ -1020,16 +1042,69 @@ class FloatingWidget(QWidget):
             return
         self._do_hide()
 
-    def _animate_slide(self, target, edge):
-        """滑动动画"""
+    def _animate_slide(self, target, edge, bounce=False):
+        """滑动动画（PATCH 3.4.0：bounce=True 用 OutBack 呈现贴边「弹出」回弹）"""
         anim = QPropertyAnimation(self, b"slide_pos")
-        anim.setDuration(120)
-        anim.setEasingCurve(QEasingCurve.InOutCubic)
+        anim.setDuration(150 if bounce else 120)
+        anim.setEasingCurve(QEasingCurve.OutBack if bounce else QEasingCurve.InOutCubic)
         anim.setStartValue(self.pos().x() if edge in ("left", "right") else self.pos().y())
         anim.setEndValue(target)
         anim.start()
         # 保持引用防止被垃圾回收
         self._slide_anim = anim
+
+    def _animate_move_to(self, target, duration=170):
+        """通用位置动画（PATCH 3.4.0：贴边弹出/贴边让位，OutBack 回弹）"""
+        if self._slide_anim is not None:
+            self._slide_anim.stop()
+        anim = QPropertyAnimation(self, b"pos")
+        anim.setDuration(int(duration))
+        anim.setStartValue(self.pos())
+        anim.setEndValue(QPoint(int(target.x()), int(target.y())))
+        anim.setEasingCurve(QEasingCurve.OutBack)
+        anim.start()
+        self._slide_anim = anim
+
+    def _ensure_ring_room(self, animated=True):
+        """PATCH 3.4.0：贴边时把浮窗让到「环形菜单可完整展开」的位置。
+
+        返回是否发生了移动（供调用方决定是否等动画结束后再打开轮盘）。
+        """
+        screens = self._screen_rects()
+        if not screens:
+            return False
+        menu = self._radial_menu
+        need = 150
+        if menu is not None:
+            need = int(getattr(menu, "_outer", 120) + getattr(menu, "_pad", 30))
+        off = int(self._ball_offset())
+        size = self.current_size
+        cx = self.pos().x() + off + size / 2.0
+        cy = self.pos().y() + off + size / 2.0
+        nx, ny = ring_room_position(cx, cy, need, screens)
+        if abs(nx - cx) <= 1 and abs(ny - cy) <= 1:
+            return False
+        self._snap_menu_restore = self.pos()        # 菜单关闭后恢复（复用既有机制）
+        tx = int(nx - size / 2.0 - off)
+        ty = int(ny - size / 2.0 - off)
+        if animated:
+            self._animate_move_to(QPoint(tx, ty), duration=170)
+        else:
+            self.move(tx, ty)
+        _log().debug("贴边让位: (%d,%d) → (%d,%d)（环形菜单完整展开）", cx, cy, nx, ny)
+        return True
+
+    def _ensure_dpr(self):
+        """PATCH 3.4.0：跨屏（不同 DPI/分辨率）时重建位图与掩码，避免副屏绘制错乱"""
+        try:
+            dpr = max(1.0, float(self.devicePixelRatioF()))
+        except Exception:  # noqa: BLE001
+            return
+        if abs(dpr - getattr(self, "_pixmap_dpr", 0.0)) > 0.01:
+            self._render_pixmaps()
+            self._update_mask()
+            self.update()
+            _log().debug("屏幕 DPR 变化 → 重建浮球位图: %.2f", dpr)
 
     @pyqtProperty(int)
     def slide_pos(self):
@@ -1102,8 +1177,30 @@ class FloatingWidget(QWidget):
             self.launch_requested.emit()
 
     def _open_radial_menu(self, source):
+        """打开菜单入口（PATCH 3.4.0：轮盘在贴边时先「让位」再打开，方向映射才准确）"""
         if self._move_mode:
             return                                        # 移动模式：只可移动浮窗
+        if source == "wheel":
+            moved = False
+            if self._snapped and self._hidden_now:
+                self._reveal_now(animated=True)
+                moved = True
+            if self._ensure_ring_room(animated=True):
+                moved = True
+            if moved:
+                self._wheel_open_pending = True
+                QTimer.singleShot(200, self._open_wheel_delayed)
+                return
+        self._open_radial_menu_now(source)
+
+    def _open_wheel_delayed(self):
+        """贴边让位动画结束后再打开轮盘（期间松手则取消）"""
+        if not self._wheel_open_pending:
+            return
+        self._wheel_open_pending = False
+        self._open_radial_menu_now("wheel")
+
+    def _open_radial_menu_now(self, source):
         self._hover_open_timer.stop()
         self._hold_timer.stop()
         if not self._radial_cfg.get("enabled", True):
@@ -1890,8 +1987,9 @@ class FloatingWidget(QWidget):
         if self._quitting or self._move_mode:
             return
         if event.button() == Qt.LeftButton:
-            # PATCH 3.3.0：松手即取消「按住启动」进度
+            # PATCH 3.3.0/3.4.0：松手即取消「按住启动」进度与待打开的轮盘
             self._hold_timer.stop()
+            self._wheel_open_pending = False
             if self._hold_progress > 0.01:
                 self._hold_progress = 0.0
                 self.update()

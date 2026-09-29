@@ -127,7 +127,7 @@ def test_fetch_endpoint_success(local_server):
     assert res.endpoint_name == "local"
     assert res.fields[0]["value"] == 80
     assert res.fields[1]["value"].endswith("%")
-    assert res.progress == {"used": 80.0, "total": 200.0, "pct": 40.0}
+    assert res.progress == {"used": 80.0, "total": 200.0, "pct": 40.0, "remain": 60.0}
 
 
 def test_fetch_endpoint_http_error(local_server):
@@ -140,3 +140,53 @@ def test_fetch_endpoint_bad_json(local_server):
     with pytest.raises(FetchError) as ei:
         fetch_endpoint({"name": "e", "url": local_server + "/notjson", "fields": []})
     assert "JSON" in str(ei.value)
+
+
+# ── PATCH 3.4.0：默认浏览器 UA / 数值型 total / OpenCode Go 预设 ──
+
+def test_fetcher_default_ua_and_numeric_total(monkeypatch):
+    from agentfloat.services.api_monitor import fetcher
+
+    captured = {}
+
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b'{"usage": {"rolling": {"percent": 4}}}'
+
+    def fake_urlopen(req, context=None, timeout=None):
+        captured["headers"] = {k.lower(): v for k, v in req.header_items()}
+        return FakeResp()
+
+    monkeypatch.setattr(fetcher.urllib.request, "urlopen", fake_urlopen)
+    res = fetcher.fetch_endpoint({
+        "name": "t", "url": "https://example.com/x",
+        "headers": {"Authorization": "Bearer k"},
+        "fields": [{"label": "滚动", "jsonpath": "$.usage.rolling.percent",
+                    "unit": "%", "display": "percent"}],
+        "progress_field": {"used": "$.usage.rolling.percent", "total": 100},
+    })
+    assert captured["headers"].get("user-agent", "").startswith("Mozilla/5.0")
+    assert captured["headers"].get("accept") == "application/json"
+    assert res.progress == {"used": 4.0, "total": 100.0, "pct": 4.0, "remain": 96.0}
+
+
+def test_opencode_go_preset_shape():
+    from agentfloat.services.api_monitor.presets import (
+        PRESETS, badge_mode_for, opencode_go_endpoint,
+    )
+    ep = opencode_go_endpoint()
+    assert ep["url"] == "https://opencode.ai/zen/go/v1/usage"
+    assert "{{env:OPENCODE_GO_API_KEY}}" in ep["headers"]["Authorization"]
+    assert ep["badge_mode"] == "remaining"
+    assert ep["progress_field"] == {"used": "$.usage.rolling.percent", "total": 100}
+    assert PRESETS and PRESETS[0]["id"] == "opencode-go"
+    # 端点覆盖 > 全局默认
+    assert badge_mode_for("OpenCode Go", {"endpoints": [ep], "badge_mode": "balance"}) == "remaining"
+    assert badge_mode_for("Other", {"endpoints": [ep], "badge_mode": "used"}) == "used"
+    assert badge_mode_for("Other", {"endpoints": [ep]}) == "balance"

@@ -86,6 +86,21 @@ def test_edge_position_clamps_other_axis():
     assert y == EDGE_MARGIN
 
 
+def test_placement_ring_room():
+    """PATCH 3.4.0：贴边时环形菜单让位（向内收 need 半径；屏幕不足则居中）"""
+    from agentfloat.ui.placement import ring_room_position
+    screens = [(0, 0, 1706, 1066)]
+    nx, ny = ring_room_position(1690, 500, 150, screens)
+    assert nx == 1706 - 150 and ny == 500
+    nx, ny = ring_room_position(10, 10, 150, screens)
+    assert nx == 150 and ny == 150
+    # 原地不动的情形
+    assert ring_room_position(800, 500, 150, screens) == (800, 500)
+    # 屏幕不足以容纳整环 → 居中兜底，不越界
+    nx, ny = ring_room_position(100, 100, 900, screens)
+    assert 0 <= nx <= 1706 and 0 <= ny <= 1066
+
+
 def test_edge_position_empty_screens_safe():
     # 无屏幕信息时 clamp 原样返回（不抛异常）
     assert clamp_visible(10, 20, SIZE, []) == (10, 20)

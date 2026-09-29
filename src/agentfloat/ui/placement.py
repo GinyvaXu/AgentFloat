@@ -73,3 +73,23 @@ def edge_position(edge, x, y, size, screen):
     if edge == "top":
         return int(min(max(x, min_x), max_x)), min_y
     return int(min(max(x, min_x), max_x)), max_y
+
+
+def ring_room_position(cx, cy, need, screens):
+    """把浮球中心 (cx, cy) 调整到「半径为 need 的环形菜单可完整展开」的位置。
+
+    PATCH 3.4.0：贴边时按住外滑轮盘会被屏幕边缘钳制、方向映射错乱；
+    先在屏幕可容纳范围内移动浮窗（优先原地不动，否则向屏幕内侧收），
+    返回 (nx, ny)；无法完整容纳时按可用范围居中。
+    """
+    if not screens:
+        return int(cx), int(cy)
+    idx = screen_index_for(cx, cy, screens)
+    l, t, r, b = screens[idx]
+    min_cx, max_cx = l + need, r - need
+    min_cy, max_cy = t + need, b - need
+    if max_cx < min_cx:
+        min_cx = max_cx = (l + r) / 2.0
+    if max_cy < min_cy:
+        min_cy = max_cy = (t + b) / 2.0
+    return int(min(max(cx, min_cx), max_cx)), int(min(max(cy, min_cy), max_cy))
