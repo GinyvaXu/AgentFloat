@@ -22,6 +22,9 @@ import shutil
 BUILTIN_PRESETS = [
     {
         "id": "claude",
+        "proc_names": ["claude.exe"],
+        "cmd_tokens": ["claude"],
+        "continue_text": "continue",
         "name": "Claude Code",
         "command": "claude",
         "args": [],
@@ -38,6 +41,9 @@ BUILTIN_PRESETS = [
     },
     {
         "id": "codex",
+        "proc_names": ["codex.exe"],
+        "cmd_tokens": ["codex"],
+        "continue_text": "continue",
         "name": "Codex CLI",
         "command": "codex",
         "args": [],
@@ -54,6 +60,9 @@ BUILTIN_PRESETS = [
     },
     {
         "id": "pi",
+        "proc_names": ["pi.exe"],
+        "cmd_tokens": ["pi-coding-agent", "@earendil-works"],
+        "continue_text": "continue",
         "name": "Pi Coding Agent",
         "command": "pi",
         "args": [],
@@ -70,6 +79,9 @@ BUILTIN_PRESETS = [
     },
     {
         "id": "opencode",
+        "proc_names": ["opencode.exe"],
+        "cmd_tokens": ["opencode"],
+        "continue_text": "continue",
         "name": "OpenCode CLI",
         "command": "opencode",
         "args": ["--continue"],
@@ -86,6 +98,9 @@ BUILTIN_PRESETS = [
     },
     {
         "id": "opencode-desktop",
+        "proc_names": ["OpenCode.exe"],
+        "cmd_tokens": [],
+        "continue_text": "",
         "name": "OpenCode Desktop",
         "command": r"%LOCALAPPDATA%\Programs\@opencodedesktop\OpenCode.exe",
         "args": [],
@@ -102,6 +117,9 @@ BUILTIN_PRESETS = [
     },
     {
         "id": "opencode-web",
+        "proc_names": [],
+        "cmd_tokens": ["opencode", "serve"],
+        "continue_text": "",
         "name": "OpenCode Web",
         "command": "opencode",
         "args": ["serve", "--port", "4096"],
@@ -124,6 +142,9 @@ BUILTIN_PRESETS = [
     },
     {
         "id": "dsh",
+        "proc_names": ["dsh.exe"],
+        "cmd_tokens": ["dsh"],
+        "continue_text": "",
         "name": "DeepSeek Harness",
         "command": "dsh",
         "args": [],
@@ -218,6 +239,13 @@ def normalize_agents(raw):
         web = a.get("web")
         if isinstance(web, dict) and web:
             item["web"] = copy.deepcopy(web)
+        # PATCH 3.5.0：进程匹配与「继续任务」注入文本
+        for _k in ("proc_names", "cmd_tokens"):
+            _v = a.get(_k)
+            if isinstance(_v, list) and _v:
+                item[_k] = [str(x) for x in _v]
+        if a.get("continue_text") is not None:
+            item["continue_text"] = str(a.get("continue_text") or "")
         out.append(item)
     if not out:
         out = default_agents()

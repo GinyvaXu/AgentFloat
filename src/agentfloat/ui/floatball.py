@@ -557,6 +557,12 @@ class FloatingWidget(QWidget):
         self._move_timer.setInterval(16)
         self._move_timer.timeout.connect(self._on_move_tick)
 
+        # PATCH 3.5.0：进程面板（悬停浮球 250ms 弹出）
+        self._proc_panel = None
+        self._proc_panel_timer = QTimer(self)
+        self._proc_panel_timer.setSingleShot(True)
+        self._proc_panel_timer.timeout.connect(self._show_proc_panel)
+
         # 全局快捷键
         self._hotkey_id = 1
         self._hotkey_registered = False
@@ -688,6 +694,13 @@ class FloatingWidget(QWidget):
         # 同步余额角标主题
         if self._api_badge:
             self._api_badge.set_theme(theme)
+        # PATCH 3.5.0：同步进程面板主题
+        if self._proc_panel is not None:
+            try:
+                from agentfloat.ui.panel_style import panel_css
+                self._proc_panel.setStyleSheet(panel_css(theme))
+            except Exception:  # noqa: BLE001
+                pass
         _log().info("主题切换为: %s", theme)
 
 
@@ -1146,11 +1159,17 @@ class FloatingWidget(QWidget):
             self._interaction.hover_enter(now)
             self._animate_scale(HOVER_SCALE, MotionTokens.SPEED)
             # PATCH 3.3.1：悬停不再唤出菜单（只做视觉反馈）；唤出仅剩「按住外滑轮盘」
+            # PATCH 3.5.0：悬停 ~250ms 弹出进程面板
+            if self._proc_panel_enabled():
+                self._proc_panel_timer.start(int(self._proc_panel_cfg().get("hover_delay_ms", 250)))
         elif not self.is_hovered and was:
             _log().debug("悬停离开")
             self._interaction.hover_leave(now)
             self._animate_scale(1.0, MotionTokens.SPEED)
             self._hover_open_timer.stop()
+            self._proc_panel_timer.stop()
+            if self._proc_panel is not None and self._proc_panel.isVisible():
+                self._proc_panel.hide_soon()      # 留给鼠标移动到面板上（400ms 宽限）
             # 环绕菜单打开时不立即关闭：由菜单自身的宽限/点击外部逻辑处理
             if self._radial_menu is None or not self._radial_menu.isVisible():
                 self._close_radial_menu()
@@ -1200,7 +1219,36 @@ class FloatingWidget(QWidget):
         self._wheel_open_pending = False
         self._open_radial_menu_now("wheel")
 
+    # ── 进程面板（PATCH 3.5.0）────────────────────
+    def _proc_panel_cfg(self):
+        return self.config.get("process_panel") or {}
+
+    def _proc_panel_enabled(self):
+        return bool(self._proc_panel_cfg().get("enabled", True))
+
+    def _show_proc_panel(self):
+        if not self._proc_panel_enabled() or self._move_mode or self._quitting:
+            return
+        if self._drag_active or self._interaction.state != "idle":
+            return
+        if self._radial_menu is not None and self._radial_menu.isVisible():
+            return
+        try:
+            if self._proc_panel is None:
+                from agentfloat.ui.process_panel import ProcessPanel
+                self._proc_panel = ProcessPanel(lambda: self._agents, theme=self.theme,
+                                                parent=self)
+            self._proc_panel.show_for(self)
+        except Exception:  # noqa: BLE001
+            _log().warning("进程面板显示失败", exc_info=True)
+
+    def _hide_proc_panel(self):
+        self._proc_panel_timer.stop()
+        if self._proc_panel is not None and self._proc_panel.isVisible():
+            self._proc_panel.hide_panel()
+
     def _open_radial_menu_now(self, source):
+        self._hide_proc_panel()                           # 开环前收起进程面板
         self._hover_open_timer.stop()
         self._hold_timer.stop()
         if not self._radial_cfg.get("enabled", True):
@@ -1856,6 +1904,7 @@ class FloatingWidget(QWidget):
     def mousePressEvent(self, event):
         if self._quitting:
             return
+        self._hide_proc_panel()                           # PATCH 3.5.0：按压即收进程面板
         if self._move_mode:
             # PATCH 3.3.1：移动模式——左键放置 / 右键取消（只可移动）
             if event.button() == Qt.LeftButton:
@@ -1896,6 +1945,7 @@ class FloatingWidget(QWidget):
         self._move_origin = self.pos()
         self._hold_timer.stop()
         self._hold_progress = 0.0
+        self._hide_proc_panel()                           # PATCH 3.5.0：移动模式只可移动
         self._interaction.cancel()
         self._close_radial_menu()
         self._register_move_hotkey()

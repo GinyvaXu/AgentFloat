@@ -203,7 +203,11 @@ import {
         row("隐藏延迟 (ms)", "", numCtl("hide_delay_ms", cfg.hide_delay_ms, { min: 200, max: 3000 })) +
         row("退出时清理 Agent 进程", "退出 AgentFloat 时结束主 Agent 进程", switchCtl("cleanup_on_quit", cfg.cleanup_on_quit)) +
         row("开机自启", "登录 Windows 后自动运行", switchCtl("auto_start", cfg.auto_start)) +
-        row("启动时检查更新", "", switchCtl("check_updates", cfg.check_updates)));
+        row("启动时检查更新", "", switchCtl("check_updates", cfg.check_updates)) +
+        row("Agent 进程面板", "悬停浮球显示在线 Agent 进程与操作（中断 / 继续任务）",
+          switchCtl("process_panel.enabled", (cfg.process_panel || {}).enabled !== false)) +
+        row("面板悬停延迟 (ms)", "", numCtl("process_panel.hover_delay_ms",
+          (cfg.process_panel || {}).hover_delay_ms || 250, { min: 100, max: 1000 })));
       el.innerHTML = inner;
       bindAll(el);
       $$("#settingsContent [name='launch_mode']").forEach((r) => r.addEventListener("change", () => {

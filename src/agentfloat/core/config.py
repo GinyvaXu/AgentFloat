@@ -78,6 +78,8 @@ def load_config():
         "services": {"ai_first_run_done": False, "last_run": ""},
         "news": copy.deepcopy(_NEWS_DEFAULTS),
         "water": copy.deepcopy(DEFAULT_WATER),
+        # PATCH 3.5.0：Agent 进程面板（悬停浮球弹出）
+        "process_panel": {"enabled": True, "hover_delay_ms": 250},
     }
     loaded = {}
     parse_error = False
@@ -141,6 +143,14 @@ def load_config():
             if _k not in _rm:
                 _rm[_k] = _v
                 _migrated = True
+
+    # PATCH 3.5.0：进程面板配置补齐
+    if not isinstance(defaults.get("process_panel"), dict):
+        defaults["process_panel"] = {"enabled": True, "hover_delay_ms": 250}
+        _migrated = True
+    else:
+        defaults["process_panel"].setdefault("enabled", True)
+        defaults["process_panel"].setdefault("hover_delay_ms", 250)
 
     if _migrated and (loaded or not parse_error):
         save_config(defaults)

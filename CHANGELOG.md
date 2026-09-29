@@ -1,5 +1,18 @@
 # 更新日志
 
+## [3.5.0] - 2026-09-29（Agent 进程面板）
+### Added
+- **Agent 进程面板**：悬停浮球 ~250ms 侧边滑出（玻璃新风格 + 渐入动效；**靠边自动选侧并在屏幕内钳制**，与轮盘互斥，鼠标离开 400ms 收起）
+  - 每个 Agent 一张卡：状态点（运行中/未运行）、PID、**运行时长**（实时刷新）、**最近活动**（Claude Code jsonl / dsh 日志适配器，阶段 1）
+  - 未运行的 Agent 提供「启动」按钮（复用通用启动器）
+- **分级中断**：「软中断」（聚焦窗口后发送 Esc，不结束进程）/「结束进程…」（确认后终止进程树）
+- **继续任务**：聚焦对应窗口后注入 `continue`（文本按 Agent 可配，如 Pi/Codex 可改「继续」）+ 回车；注入前校验目标窗口为前台，失败则给出提示
+- 进程识别：ctypes Toolhelp32 枚举 + 命令行特征匹配（node 类 CLI 通过 `.cmd` shim 启动也能识别）+ `GetProcessTimes` 运行时长
+- 设置页「行为」新增：Agent 进程面板开关 / 悬停延迟
+
+### Changed
+- 内置 Agent 预设新增 `proc_names` / `cmd_tokens` / `continue_text` 字段（自动迁移补齐，不覆盖用户自定义）
+
 ## [3.4.0] - 2026-09-29
 ### Added
 - **OpenCode Go 余额接入**：API 用量页新增「＋ OpenCode Go」预设一键添加（官方 `GET /zen/go/v1/usage`，Key 取环境变量 `OPENCODE_GO_API_KEY`；滚动 5h / 每周 / 每月三窗口；查询不消耗套餐额度）
