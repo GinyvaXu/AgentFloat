@@ -645,7 +645,9 @@ def _main():
                 widget.raise_()
             except Exception:  # noqa: BLE001
                 _log().warning("启动动画结束后显示浮球失败", exc_info=True)
-        intro.finished.connect(_show_ball_after_intro)
+        # 落位即显示浮球（此后涟漪继续在覆盖层上播放）
+        intro.landed.connect(_show_ball_after_intro)
+        intro.finished.connect(lambda: _log().debug("[启动动画] 覆盖层已隐藏"))
         intro.app_ready(rect)
     else:
         widget.show()

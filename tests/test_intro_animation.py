@@ -88,14 +88,50 @@ def test_timeline_phases():
     assert late["phase"] == "intro"
 
 
-def test_timeline_fly_and_done():
+def test_timeline_fly_ripple_and_done():
     from agentfloat.ui import intro_animation as ia
     t_fly = 2200
     fly = ia.timeline(t_fly + ia.FLY_MS // 2, t_fly)
     assert fly["phase"] == "fly" and 0 < fly["fly_p"] < 1
     assert fly["ring1"] == (0.0, 0) and fly["sparkles"] == 0.0
-    done = ia.timeline(t_fly + ia.FLY_MS + 1, t_fly)
+    landed = ia.timeline(t_fly + ia.FLY_MS + 10, t_fly)
+    assert landed["phase"] == "ripple"
+    assert 0.0 < landed["ripple_p"] < 1.0
+    assert landed["flash"] > 0.5                       # 落点闪光
+    done = ia.timeline(t_fly + ia.FLY_MS + ia.RIPPLE_MS + 20, t_fly)
     assert done["phase"] == "done"
+
+
+def test_intro_emits_landed_then_finished(qapp):
+    """落位 → landed（显示真浮球）；涟漪播完 → finished（隐藏覆盖层）"""
+    from PyQt5.QtCore import QRectF
+    from agentfloat.ui import intro_animation as ia
+
+    class FakeClock:
+        def __init__(self, ms):
+            self._ms = ms
+        def elapsed(self):
+            return self._ms
+        def isValid(self):
+            return True
+        def start(self):
+            pass
+
+    intro = ia.IntroAnimation(version="3.6.2", theme="dark", greeting="", sound=False)
+    intro._ready_ms = 2000
+    intro._target_rect = QRectF(500, 400, 52, 52)
+    intro._target_size = 52.0
+    events = []
+    intro.landed.connect(lambda: events.append("landed"))
+    intro.finished.connect(lambda: events.append("finished"))
+
+    t_fly = intro._fly_start_ms()
+    intro._t0 = FakeClock(t_fly + ia.FLY_MS + 30)
+    intro._on_tick()
+    assert events == ["landed"]
+    intro._t0 = FakeClock(t_fly + ia.FLY_MS + ia.RIPPLE_MS + 40)
+    intro._on_tick()
+    assert events == ["landed", "finished"]
 
 
 def test_timeline_scale_monotonic_until_settle():
@@ -135,7 +171,7 @@ def test_floatball_uses_shared_renderer(qapp):
 
 
 def test_intro_render_frame_paints(qapp):
-    """离屏渲染能画出内容（球体/光环/星点），不同时刻画面不同"""
+    """离屏渲染能画出内容（球体/光环/星点/涟漪），不同时刻画面不同"""
     from PyQt5.QtCore import QPointF, QRectF, QSize
     from agentfloat.ui.intro_animation import IntroAnimation
     intro = IntroAnimation(version="3.6.2", theme="dark", greeting="测试", sound=False)
@@ -146,14 +182,19 @@ def test_intro_render_frame_paints(qapp):
     intro._ready_ms = 2000
     early = intro.render_frame(1000, QSize(600, 480))
     late = intro.render_frame(2500, QSize(600, 480))
-    assert not early.isNull() and not late.isNull()
+    ripple = intro.render_frame(2000 + 700 + 300, QSize(600, 480))
+    assert not early.isNull() and not late.isNull() and not ripple.isNull()
     assert early.toImage() != late.toImage()          # 动画在变化
     # 球体附近有不透明像素（中心区域）
     img = early.toImage()
-    center_alpha = img.pixelColor(300, 220).alpha()
-    assert center_alpha > 200                          # 球体本体（深色玻璃）
-    corner_alpha = img.pixelColor(4, 4).alpha()
-    assert corner_alpha < 255                          # 边缘不是实心块
+    assert img.pixelColor(300, 220).alpha() > 200     # 球体本体（深色玻璃）
+    assert img.pixelColor(4, 4).alpha() < 255         # 边缘不是实心块
+    # 涟漪阶段：中心不再重复画球（交给真浮球），但落点周围出现扩散环
+    rimg = ripple.toImage()
+    assert rimg.pixelColor(546, 426).alpha() < 90      # 目标中心无球体实心块
+    ring_pixels = sum(1 for x in range(470, 630) for y in range(398, 456)
+                      if rimg.pixelColor(x, y).alpha() > 10)
+    assert ring_pixels > 20                            # 存在涟漪环像素
 
 
 # ── 配置默认值 ────────────────────────────────────────────

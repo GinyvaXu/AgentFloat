@@ -35,6 +35,7 @@ TEXT_IN = (800, 1500)
 MIN_HOLD_END = 2200
 MAX_HOLD_END = 5200
 FLY_MS = 700
+RIPPLE_MS = 1150          # 落位后的涟漪持续时间
 
 GREETINGS = (
     "欢迎回来",
@@ -45,7 +46,8 @@ GREETINGS = (
     "一切都准备好了",
 )
 
-SPARKLE_COUNT = 14
+SPARKLE_COUNT = 18
+RIPPLE_COUNT = 3
 
 
 def pick_greeting(custom="", rng=None):
@@ -91,14 +93,20 @@ def timeline(t, t_fly=None):
     """返回该时刻的视觉状态（纯函数）"""
     state = {
         "phase": "intro",
+        "t": t,
         "ball_scale": ball_scale_at(t),
         "overlay_a": int(58 * _span(t, 0, FADE_IN_END)),
         "text_a": int(255 * _span(t, TEXT_IN[0], TEXT_IN[1])),
         "text_dy": int(16 * (1.0 - _span(t, TEXT_IN[0], TEXT_IN[1]))),
         "ring1": (0.0, 0),
         "ring2": (0.0, 0),
+        "arc_a": 0,                      # 旋转弧环
         "sparkles": 0.0,
-        "glow": 1.0 + 0.06 * math.sin(t / 260.0),
+        "glow": 1.0 + 0.08 * math.sin(t / 240.0),
+        "bob": 0.0,                      # 轻微上下浮动
+        "tilt": 0.0,                     # 球体轻微摇摆
+        "ripple_p": None,
+        "flash": 0.0,
     }
     for key, span in (("ring1", RING1), ("ring2", RING2)):
         p = _span(t, span[0], span[1])
@@ -107,24 +115,42 @@ def timeline(t, t_fly=None):
     sp = _span(t, SPARKLES[0], SPARKLES[1])
     if 0.0 < sp < 1.0:
         state["sparkles"] = sp
+    # 旋转弧环（比圆环更快、更有方向感）
+    arc = _span(t, 260, 1900)
+    if 0.0 < arc < 1.0:
+        state["arc_a"] = int(150 * (1.0 - arc))
+    if t < POP_END + 900:
+        state["bob"] = 6.0 * math.sin(t / 300.0)
+        state["tilt"] = 7.0 * math.sin(t / 380.0)
     if t_fly is not None and t >= t_fly:
+        fly_end = t_fly + FLY_MS
         state["phase"] = "fly"
-        state["fly_p"] = _span(t, t_fly, t_fly + FLY_MS)
-        fade = _span(t, t_fly + FLY_MS * 0.55, t_fly + FLY_MS)
+        state["fly_p"] = _span(t, t_fly, fly_end)
+        fade = _span(t, t_fly + FLY_MS * 0.55, fly_end)
         state["text_a"] = int(state["text_a"] * (1.0 - _span(t, t_fly, t_fly + FLY_MS * 0.35)))
         state["overlay_a"] = int(state["overlay_a"] * (1.0 - fade))
         state["ring1"] = (0.0, 0)
         state["ring2"] = (0.0, 0)
+        state["arc_a"] = 0
         state["sparkles"] = 0.0
-        if state["fly_p"] >= 1.0:
-            state["phase"] = "done"
+        state["bob"] = 0.0
+        state["tilt"] = 0.0
+        if t >= fly_end:
+            # 落位：涟漪 + 落点闪光
+            state["phase"] = "ripple"
+            state["ripple_p"] = _span(t, fly_end, fly_end + RIPPLE_MS)
+            state["flash"] = 1.0 - _span(t, fly_end, fly_end + 280)
+            state["overlay_a"] = int(state["overlay_a"] * (1.0 - _span(t, fly_end, fly_end + 400)))
+            if state["ripple_p"] >= 1.0:
+                state["phase"] = "done"
     return state
 
 
 class IntroAnimation(QWidget):
     """启动动画覆盖层（无边框、置顶、不接受输入、不抢焦点）"""
 
-    finished = pyqtSignal()
+    finished = pyqtSignal()      # 动画彻底结束（涟漪播完）
+    landed = pyqtSignal()        # 浮球已飞抵落点（此时显示真浮球，涟漪继续播）
 
     def __init__(self, version, theme="dark", greeting="", sound=True, volume=chime.DEFAULT_VOLUME,
                  parent=None):
@@ -139,6 +165,7 @@ class IntroAnimation(QWidget):
         self._target_rect = None
         self._t0 = QElapsedTimer()
         self._sound_played = False
+        self._landed_emitted = False
 
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint |
                             Qt.WindowTransparentForInput)
@@ -175,7 +202,8 @@ class IntroAnimation(QWidget):
         self._geo = screen.availableGeometry()
         self.setGeometry(self._geo)
         self._center = QPointF(self._geo.center())
-        self._big = max(120.0, min(self._geo.height() * 0.36, 360.0))
+        # 中心大球（比首版更小巧，避免"太大"）
+        self._big = max(96.0, min(self._geo.height() * 0.26, 240.0))
         try:
             dpr = float(screen.devicePixelRatio())
         except Exception:  # noqa: BLE001
@@ -208,6 +236,10 @@ class IntroAnimation(QWidget):
             chime.play(self._volume)
         state = timeline(t, self._fly_start_ms())
         self.update()
+        if state["phase"] == "ripple" and not self._landed_emitted:
+            self._landed_emitted = True
+            _log().info("[启动动画] 浮球落位 @%.0fms（进入涟漪阶段）", t)
+            self.landed.emit()
         if state["phase"] == "done":
             self._tick.stop()
             self.hide()
@@ -243,12 +275,16 @@ class IntroAnimation(QWidget):
         return start + (target - start) * p
 
     def _ball_center(self, state):
-        if state["phase"] != "fly" or self._target_rect is None:
+        if self._target_rect is None:
             return self._center
-        p = ease_out_cubic(state["fly_p"])
-        tc = self._target_rect.center()
-        return QPointF(self._center.x() + (tc.x() - self._center.x()) * p,
-                       self._center.y() + (tc.y() - self._center.y()) * p)
+        if state["phase"] == "fly":
+            p = ease_out_cubic(state["fly_p"])
+            tc = self._target_rect.center()
+            return QPointF(self._center.x() + (tc.x() - self._center.x()) * p,
+                           self._center.y() + (tc.y() - self._center.y()) * p)
+        if state["phase"] == "ripple":
+            return self._target_rect.center()          # 涟漪以落点为圆心
+        return self._center
 
     def paintEvent(self, event):
         state = timeline(self._t0.elapsed() if self._t0.isValid() else 0, self._fly_start_ms())
@@ -274,15 +310,16 @@ class IntroAnimation(QWidget):
             p.setBrush(grad)
             p.drawRect(0, 0, width, height)
 
-        # 外圈光晕（呼吸）
-        glow_r = radius * 2.4 * state["glow"]
-        glow = QRadialGradient(center, glow_r)
-        glow.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 96))
-        glow.setColorAt(0.55, QColor(accent.red(), accent.green(), accent.blue(), 34))
-        glow.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 0))
-        p.setBrush(glow)
-        p.setPen(Qt.NoPen)
-        p.drawEllipse(center, glow_r, glow_r)
+        # 外圈光晕（呼吸；涟漪阶段交给真浮球，不再绘制大球光晕）
+        if state["phase"] != "ripple":
+            glow_r = radius * 2.4 * state["glow"]
+            glow = QRadialGradient(center, glow_r)
+            glow.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 96))
+            glow.setColorAt(0.55, QColor(accent.red(), accent.green(), accent.blue(), 34))
+            glow.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 0))
+            p.setBrush(glow)
+            p.setPen(Qt.NoPen)
+            p.drawEllipse(center, glow_r, glow_r)
 
         # 扩散圆环
         for key in ("ring1", "ring2"):
@@ -293,6 +330,17 @@ class IntroAnimation(QWidget):
                               max(1.4, radius * 0.05)))
                 r = radius * scale
                 p.drawEllipse(center, r, r)
+
+        # 旋转弧环（比圆环更快、更有方向感）
+        if state.get("arc_a", 0) > 0:
+            spin = (state.get("t", 0) / 900.0) * 360.0
+            rr = radius * 1.38
+            p.setBrush(Qt.NoBrush)
+            for k, spread in ((0, 68), (170, 46)):
+                p.setPen(QPen(QColor(accent.red(), accent.green(), accent.blue(), state["arc_a"]),
+                              max(1.6, radius * 0.06)))
+                p.drawArc(QRectF(center.x() - rr, center.y() - rr, rr * 2.0, rr * 2.0),
+                          int((spin + k) * 16), int(spread * 16))
 
         # 星点
         if state["sparkles"] > 0:
@@ -308,34 +356,77 @@ class IntroAnimation(QWidget):
                 p.setBrush(QColor(accent.red(), accent.green(), accent.blue(), max(0, alpha)))
                 p.drawEllipse(QPointF(x, y), size, size)
 
-        # 浮球（预渲染位图缩放，视觉与主浮球一致）
-        if self._ball_px is not None and diameter > 2:
+        # 落位涟漪 + 落点闪光（先画，让球体压在涟漪之上）
+        ripple_p = state.get("ripple_p")
+        if ripple_p is not None:
+            base_r = max(10.0, (self._target_size or 52) * 0.55)
+            for i in range(RIPPLE_COUNT):
+                seg = ripple_p * 1.4 - i * 0.22
+                if 0.0 < seg < 1.0:
+                    alpha = int(165 * (1.0 - seg) * (1.0 - ripple_p * 0.2))
+                    if alpha > 0:
+                        rr = base_r + seg * base_r * 3.6
+                        p.setBrush(Qt.NoBrush)
+                        p.setPen(QPen(QColor(accent.red(), accent.green(), accent.blue(), alpha),
+                                      max(1.6, base_r * 0.12)))
+                        p.drawEllipse(center, rr, rr)
+                        # 内圈白亮描边，增强水波纹质感
+                        p.setPen(QPen(QColor(255, 255, 255, int(alpha * 0.45)),
+                                      max(1.0, base_r * 0.05)))
+                        p.drawEllipse(center, rr - max(1.6, base_r * 0.06), rr - max(1.6, base_r * 0.06))
+        if state.get("flash", 0) > 0:
+            fr = max(24.0, (self._target_size or 52) * 1.6)
+            flash_grad = QRadialGradient(center, fr * 1.5)
+            fa = int(120 * state["flash"])
+            flash_grad.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), fa))
+            flash_grad.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 0))
+            p.setPen(Qt.NoPen)
+            p.setBrush(flash_grad)
+            p.drawEllipse(center, fr * 1.5, fr * 1.5)
+
+        # 浮球（预渲染位图缩放；涟漪阶段交给真浮球，不再重复绘制）
+        if state["phase"] != "ripple" and self._ball_px is not None and diameter > 2:
             pm = self._ball_px
             logical = pm.width() / pm.devicePixelRatio()          # 含留白
             draw = logical * (diameter / max(1.0, self._ball_px_size))
-            p.drawPixmap(QRectF(center.x() - draw / 2.0, center.y() - draw / 2.0, draw, draw), pm,
+            p.save()
+            p.translate(center.x(), center.y() + state.get("bob", 0.0))
+            if state.get("tilt"):
+                p.rotate(state["tilt"])
+            p.drawPixmap(QRectF(-draw / 2.0, -draw / 2.0, draw, draw), pm,
                          QRectF(0, 0, pm.width(), pm.height()))
+            p.restore()
 
-        # 文字：版本号 + 问候语
+        # 文字：版本号 + 问候语（半透明胶囊底，任何壁纸上都清晰）
         if state["text_a"] > 0:
             text = self._title
             dark = self._theme != "light"
-            fg = QColor(245, 245, 247, state["text_a"]) if dark else QColor(28, 28, 30, state["text_a"])
-            font = QFont("Microsoft YaHei", max(13, int(self._big * 0.075)), QFont.DemiBold)
+            a = state["text_a"]
+            fg = QColor(245, 245, 247, a) if dark else QColor(28, 28, 30, a)
+            font = QFont("Microsoft YaHei", max(12, int(self._big * 0.085)), QFont.DemiBold)
             font.setLetterSpacing(QFont.PercentageSpacing, 106)
             p.setFont(font)
-            p.setPen(fg)
-            ty = center.y() + radius * 1.35 + 34 + state["text_dy"]
-            rect = QRectF(0, ty - 30, width, 60)
-            p.drawText(rect, Qt.AlignHCenter | Qt.AlignVCenter, text)
-            # 品牌色下划线
             fm = p.fontMetrics()
-            tw = fm.horizontalAdvance(text) / 2.0
-            grad = QLinearGradient(center.x() - tw, 0, center.x() + tw, 0)
+            tw = fm.horizontalAdvance(text)
+            th = fm.height()
+            pad_x, pad_y = 20, 10
+            pw, ph = tw + pad_x * 2.0, th + pad_y * 2.0
+            ty = center.y() + radius * 1.35 + 34 + state["text_dy"]      # 胶囊中心
+            pill = QRectF(center.x() - pw / 2.0, ty - ph / 2.0, pw, ph)
+            pill_r = ph / 2.0
+            k = a / 255.0
+            bg = QColor(10, 10, 14, int(160 * k)) if dark else QColor(255, 255, 255, int(185 * k))
+            border = QColor(255, 255, 255, int(46 * k)) if dark else QColor(0, 0, 0, int(30 * k))
+            p.setPen(QPen(border, 1))
+            p.setBrush(bg)
+            p.drawRoundedRect(pill, pill_r, pill_r)
+            p.setPen(fg)
+            p.drawText(pill, Qt.AlignCenter, text)
+            # 品牌渐变下划线（贴胶囊底部内侧）
+            grad = QLinearGradient(pill.left() + pad_x, 0, pill.right() - pad_x, 0)
             grad.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 0))
-            grad.setColorAt(0.5, QColor(accent.red(), accent.green(), accent.blue(),
-                                        min(255, state["text_a"])))
+            grad.setColorAt(0.5, QColor(accent.red(), accent.green(), accent.blue(), min(255, a)))
             grad.setColorAt(1.0, QColor(175, 82, 222, 0))
             p.setPen(QPen(grad, 2.0))
-            p.drawLine(QPointF(center.x() - tw, ty + fm.height() * 0.45),
-                       QPointF(center.x() + tw, ty + fm.height() * 0.45))
+            p.drawLine(QPointF(pill.left() + pad_x, pill.bottom() - 0.8),
+                       QPointF(pill.right() - pad_x, pill.bottom() - 0.8))
