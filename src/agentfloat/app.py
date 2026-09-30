@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 
-from PyQt5.QtCore import QCoreApplication, Qt, QTimer
+from PyQt5.QtCore import QCoreApplication, QPoint, QRectF, Qt, QTimer
 from PyQt5.QtGui import QColor, QFont, QIcon, QPixmap
 from PyQt5.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
@@ -227,13 +227,35 @@ def _main():
     app.setApplicationName("AgentFloat")
     app.setFont(QFont(FONT_FAMILY, 9))
 
-    # ── 启动窗口动画：展示启动状态，主窗口就绪后切换「已就绪」并自动关闭 ──
-    from agentfloat.ui.startup_splash import StartupSplash
-    splash = StartupSplash()
-    splash.start("正在启动 AgentFloat…")
-    QTimer.singleShot(60, lambda: splash.set_detail("正在加载配置…"))
-
     config = load_config()
+
+    # ── 启动动画（v3.6.2）：屏幕中心的光晕 + 圆环 + 放大浮球 → 缩小飞向落点 ──
+    # 取代旧的「正在启动 AgentFloat…」小窗；动画期间不抢焦点、点击可穿透、不可跳过。
+    intro = None
+    try:
+        intro_cfg = config.get("intro") or {}
+        if intro_cfg.get("enabled", True):
+            from agentfloat.ui.intro_animation import IntroAnimation
+            intro = IntroAnimation(
+                version=VERSION,
+                theme=config.get("theme", "light"),
+                greeting=intro_cfg.get("greeting", ""),
+                sound=bool(intro_cfg.get("sound", True)),
+                volume=float(intro_cfg.get("volume", 0.6) or 0.6))
+            # 动画显示在「浮球将要出现的那块屏幕」（按上次保存的浮球中心判断）
+            screen = None
+            try:
+                tx = int(config.get("window_x", -1) or -1)
+                ty = int(config.get("window_y", -1) or -1)
+                if tx >= 0 and ty >= 0:
+                    screen = app.screenAt(QPoint(tx, ty))
+            except (TypeError, ValueError):
+                screen = None
+            if not intro.start(screen or app.primaryScreen()):
+                intro = None
+    except Exception:  # noqa: BLE001
+        _log().warning("启动动画初始化失败，直接显示浮球", exc_info=True)
+        intro = None
 
     # v3.6.0：启动时尝试「快速登录」（DPAPI 令牌，免输口令解锁密钥保险箱）
     try:
@@ -605,11 +627,28 @@ def _main():
     # 主题切换时同步更新托盘菜单样式与 Web 壳
     widget.theme_changed.connect(lambda t: tray_menu.setStyleSheet(_build_menu_stylesheet(t)))
     widget.theme_changed.connect(lambda t: bridge.publish("theme_changed", {"theme": t}))
-    widget.show()
     # GUI 就绪后写 boot 标记，供更新批处理确认重装后的启动是否成功
     updater.mark_boot_ok()
-    # 主窗口就绪：启动动画切换为「已就绪」并约 1 秒后自动关闭
-    QTimer.singleShot(120, lambda: splash.done("启动完成，已就绪"))
+    # 启动动画：把「浮球真实落点」交给动画，动画结束后无缝交接（动画期间浮球保持隐藏）
+    if intro is not None:
+        try:
+            widget._ensure_on_screen()      # 先做一次屏幕内兜底，避免显示时位置跳变
+        except Exception:  # noqa: BLE001
+            _log().debug("浮球屏幕内兜底跳过", exc_info=True)
+        geo = widget.frameGeometry()
+        size = float(getattr(widget, "current_size", 0) or geo.width())
+        rect = QRectF(geo.center().x() - size / 2.0, geo.center().y() - size / 2.0, size, size)
+
+        def _show_ball_after_intro():
+            try:
+                widget.show()
+                widget.raise_()
+            except Exception:  # noqa: BLE001
+                _log().warning("启动动画结束后显示浮球失败", exc_info=True)
+        intro.finished.connect(_show_ball_after_intro)
+        intro.app_ready(rect)
+    else:
+        widget.show()
 
     if config.get("auto_start") and not is_auto_start_enabled():
         toggle_auto_start(True)

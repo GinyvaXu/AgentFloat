@@ -87,6 +87,7 @@ import {
     auto_start: "开机自启", check_updates: "检查更新", agents: "Agent 管理",
     radial_menu: "环绕菜单", skills: "Skills 设置", api_monitor: "API 用量",
     news: "AI 快报", water: "喝水助手", services: "本地 AI 服务",
+    intro: "启动动画", process_panel: "进程面板",
   };
   const labelOf = (k) => KEY_LABEL[k] || k;
 
@@ -199,6 +200,12 @@ import {
           '<label class="tag-row"><input type="radio" name="theme" data-bind="theme" value="dark"' + (cfg.theme === "dark" ? " checked" : "") + "> ☾ 深色</label>") +
         row("浮窗尺寸", "", rangeCtl("widget_size", cfg.widget_size || 52, 30, 200, 1, "sizeLabel") + '<span id="sizeLabel" class="val-tag">' + (cfg.widget_size || 52) + "px</span>") +
         row("不透明度", "", rangeCtl("opacity", cfg.opacity || 0.88, 0.1, 1, 0.01, "opLabel") + '<span id="opLabel" class="val-tag">' + Math.round((cfg.opacity || 0.88) * 100) + "%</span>"));
+      inner += card("启动动画", "每次启动在屏幕中心播放：光晕 + 扩散圆环 + 放大浮球 → 缩小飞向落点（不可跳过）。",
+        row("播放启动动画", "", switchCtl("intro.enabled", (cfg.intro || {}).enabled !== false)) +
+        row("启动音效", "代码合成的「叮—咚」双音提示音", switchCtl("intro.sound", (cfg.intro || {}).sound !== false)) +
+        row("音效音量", "", rangeCtl("intro.volume", (cfg.intro || {}).volume != null ? cfg.intro.volume : 0.6, 0, 1, 0.05, "ivLabel") +
+          '<span id="ivLabel" class="val-tag">' + Math.round(((cfg.intro || {}).volume != null ? cfg.intro.volume : 0.6) * 100) + "%</span>") +
+        row("问候语", "留空则每次启动随机一句", '<input type="text" data-bind="intro.greeting" value="' + esc((cfg.intro || {}).greeting || "") + '" placeholder="（随机问候）" style="width:170px">'));
       inner += card("行为",
         row("屏幕边缘吸附", "靠近边缘自动吸附并隐藏", switchCtl("snap_enabled", cfg.snap_enabled)) +
         row("吸附后自动隐藏", "吸附后鼠标移开即隐藏，悬停弹出", switchCtl("snap_hidden", cfg.snap_hidden)) +
@@ -1078,7 +1085,7 @@ import {
     rangeLabel: (el, id) => {
       const t = $("#" + id);
       if (!t) return;
-      const unit = (id === "opLabel" || id === "boLabel" || id === "ppLabel") ? "%"
+      const unit = (id === "opLabel" || id === "boLabel" || id === "ppLabel" || id === "ivLabel") ? "%"
         : ((id === "bsLabel" || id === "psLabel") ? "×" : "px");
       t.textContent = el.value + unit;
     },

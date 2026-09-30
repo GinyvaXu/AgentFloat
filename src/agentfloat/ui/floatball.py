@@ -244,66 +244,12 @@ class FloatingWidget(QWidget):
         self._cache = cache
 
     def _render_ball_pixmap(self, pm, hovered, accent, side):
-        """方案 C：深色玻璃 + 品牌渐变描边 + 内部光晕 + 白色旋涡"""
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.Antialiasing)
-        p.setRenderHint(QPainter.SmoothPixmapTransform)
-        s = float(self.current_size)
-        cx = cy = side / 2.0
-        rad = max(6.0, s * 0.30)
-        rect = QRectF(cx - s / 2.0, cy - s / 2.0, s, s)
+        """方案 C：深色玻璃 + 品牌渐变描边 + 内部光晕 + 白色旋涡
 
-        # 阴影（悬停加深 / P2 弹性放大有阴影托底更立体）
-        p.setPen(Qt.NoPen)
-        base_a = 64 if hovered else 46
-        for off, k in ((0.0, 0.45), (2.2, 0.28), (4.2, 0.15)):
-            p.setBrush(QColor(0, 0, 0, int(base_a * k)))
-            p.drawRoundedRect(rect.adjusted(off, off + 1.2, off, off + 1.2), rad, rad)
-
-        # 深色玻璃底
-        p.setBrush(QColor(30, 30, 34, 240))
-        p.drawRoundedRect(rect, rad, rad)
-
-        # 内部光晕（品牌色，悬停更亮）
-        glow = QRadialGradient(QPointF(cx, rect.y() + s * 0.40), s * 0.55)
-        ga = 64 if hovered else 46
-        glow.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), ga))
-        glow.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 0))
-        p.setBrush(QBrush(glow))
-        p.drawRoundedRect(rect, rad, rad)
-
-        # 品牌渐变描边（135°：#0a84ff → #af52de）
-        lg = QLinearGradient(rect.topLeft(), rect.bottomRight())
-        ba = 250 if hovered else 220
-        lg.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), ba))
-        lg.setColorAt(1.0, QColor(175, 82, 222, ba))
-        p.setBrush(Qt.NoBrush)
-        p.setPen(QPen(QBrush(lg), 1.8))
-        p.drawRoundedRect(rect.adjusted(0.9, 0.9, -0.9, -0.9), rad, rad)
-
-        # 白色旋涡 glyph（品牌延续）
-        self._draw_spiral(p, cx, cy, s / 52.0)
-        p.end()
-
-    @staticmethod
-    def _draw_spiral(p, cx, cy, k=1.0):
-        """白色旋涡：从中心向外 2.35 圈的螺旋线"""
-        path = QPainterPath()
-        n = 56
-        for i in range(n + 1):
-            t = i / n
-            ang = t * math.pi * 2.35 - math.pi * 0.5
-            rad = (1.2 + 7.3 * t) * k
-            x = cx + math.cos(ang) * rad
-            y = cy + math.sin(ang) * rad
-            if i == 0:
-                path.moveTo(x, y)
-            else:
-                path.lineTo(x, y)
-        p.setPen(QPen(QColor(255, 255, 255, 238), max(1.6, 3.2 * k),
-                      Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-        p.setBrush(Qt.NoBrush)
-        p.drawPath(path)
+        v3.6.2：实现抽到 ``ui.ball_render``（主浮球与启动动画共用，避免视觉分叉）
+        """
+        from agentfloat.ui import ball_render
+        ball_render.render_into(pm, side, float(self.current_size), accent, hovered)
 
 
     def _check_claude_process(self):
@@ -2285,6 +2231,11 @@ class FloatingWidget(QWidget):
                         self._proc_panel.set_scale(new_panel_cfg.get("scale", 1.0))
                     except Exception:  # noqa: BLE001
                         _log().debug("同步进程面板样式失败", exc_info=True)
+
+            # v3.6.2：启动动画配置（仅影响下次启动；不合并会被写回旧值 → 表现为「改了存不住」）
+            new_intro_cfg = new_cfg.get("intro")
+            if new_intro_cfg is not None:
+                self.config["intro"] = new_intro_cfg
 
             # PATCH 3.1.1：补齐此前被忽略的顶层键——它们不在上面任何分支里，
             # 收尾 save_config(self.config) 会把它们写回旧值（表现为「改了存不住」）
