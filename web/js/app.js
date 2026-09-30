@@ -474,50 +474,50 @@ import {
     if (page === "settings" && sub === "vault") renderVault($("#settingsContent"));
   }
 
-  function renderVault(el) {
-    const v = vaultState;
-    if (!v.crypto) {
-      el.innerHTML = card("密钥保险箱", "当前构建缺少 cryptography 组件，账户与密钥功能不可用。");
-      bindAll(el);
-      return;
-    }
+  const VAULT_QUICK_KEYS = ["OPENCODE_GO_API_KEY", "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY",
+    "SILICONFLOW_API_KEY", "OPENROUTER_API_KEY"];
+
+  function vaultAccountCard(v) {
     const accounts = v.accounts || [];
-    let inner = "";
     if (v.unlocked) {
-      inner += card("密钥保险箱", "已解锁：启动 Agent 时自动把这些密钥注入为环境变量；密钥在本机以 AES-256-GCM 加密保存。",
+      return card("密钥保险箱", "已解锁：启动 Agent 时自动把这些密钥注入为环境变量；密钥在本机以 AES-256-GCM 加密保存。",
         row("当前账户", "", "<b>" + esc(v.active || "") + '</b><button class="btn sm" style="margin-left:10px" onclick="App.vaultLogout()">登出</button>') +
         row("密钥数量", "", esc((v.keys || []).length) + " 个 · 修改后自动重新加密保存") +
         (accounts.length > 1 ? row("切换账户", "各账户密钥独立加密；切换后需用该账户口令登录",
           accounts.filter((a) => !a.active).map((a) =>
             '<button class="btn sm" style="margin-right:6px" onclick="App.vaultSwitch(\'' + esc(a.id) + '\')">' + esc(a.name) + "</button>").join("")) : "") +
         row("修改口令", "将重新加密保险箱并清除本机快速登录", '<button class="btn sm" onclick="App.vaultChangePw()">修改口令</button>'));
-    } else {
-      const options = accounts.map((a) => [a.name, a.name + (a.has_keys ? "（含密钥）" : "")]);
-      inner += card("密钥保险箱", "本地多账户：口令加密保存 API Key；登录后启动 Agent 会自动注入为环境变量。",
-        row("账户", "", accounts.length ? selectCtl("__vault_name", v.active || (accounts[0] || {}).name, options)
-          : '<input id="vaultName" type="text" placeholder="账户名（如 zhenl）" style="width:180px">') +
-        row("口令", "至少 6 位；仅本机校验（PBKDF2 600k 次）", '<input id="vaultPw" type="password" placeholder="口令" style="width:180px">') +
-        row("快速登录", "本机免口令解锁（DPAPI 绑定当前 Windows 用户，可随时禁用）",
-          '<label class="tag-row"><input type="checkbox" id="vaultQuick" checked> 在此设备记住</label>') +
-        row("", "", (accounts.length ? '<button class="btn" onclick="App.vaultLogin()">登录</button>' : "") +
-          '<button class="btn primary" style="margin-left:8px" onclick="App.vaultCreate()">新建账户</button>' +
-          (v.has_quick ? '<button class="btn" style="margin-left:8px" onclick="App.vaultQuickLogin()">快速登录</button>' : "")));
     }
-    if (v.unlocked) {
-      const rowsHtml = (v.keys || []).map((k) => '<div class="mini-row">' +
-        '<span class="grow"><b>' + esc(k.name) + "</b>" +
-        (k.note ? ' <span style="color:var(--hint)">' + esc(k.note) + "</span>" : "") +
-        '<br><span style="font-family:monospace;font-size:11px;color:var(--text2)">' + esc(k.value) + "</span></span>" +
-        '<button class="btn sm" onclick="App.keyReveal(\'' + esc(k.name) + '\')">显示</button>' +
-        '<button class="btn sm" onclick="App.keyEdit(\'' + esc(k.name) + '\')">编辑</button>' +
-        '<button class="btn sm danger" onclick="App.keyDelete(\'' + esc(k.name) + '\')">删除</button></div>').join("");
-      const quickNames = ["OPENCODE_GO_API_KEY", "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "SILICONFLOW_API_KEY", "OPENROUTER_API_KEY"];
-      inner += card("API Key 管理", "密钥名即环境变量名（如 OPENCODE_GO_API_KEY）；界面默认掩码，可点「显示」查看。",
-        (rowsHtml || '<div class="ep-empty">还没有保存的密钥：点下方按钮添加，或直接从常用名称开始</div>') +
-        '<div class="ep-add"><button class="btn primary" onclick="App.keyEdit(null)">＋ 添加密钥</button>' +
-        quickNames.map((n) => '<button class="btn sm" onclick="App.keyEdit(\'' + n + '\')">＋ ' + n + "</button>").join("") + "</div>");
-    }
-    inner += card("配置导出 / 导入", "导出为单个 .afpack 文件（口令保护，AES-256-GCM）；在新设备输入同一口令即可导入。",
+    const options = accounts.map((a) => [a.name, a.name + (a.has_keys ? "（含密钥）" : "")]);
+    return card("密钥保险箱", "本地多账户：口令加密保存 API Key；登录后启动 Agent 会自动注入为环境变量。",
+      row("账户", "", accounts.length ? selectCtl("__vault_name", v.active || (accounts[0] || {}).name, options)
+        : '<input id="vaultName" type="text" placeholder="账户名（如 zhenl）" style="width:180px">') +
+      row("口令", "至少 6 位；输入后按回车即可提交", '<input id="vaultPw" type="password" placeholder="口令" style="width:180px">') +
+      row("快速登录", "本机免口令解锁（DPAPI 绑定当前 Windows 用户，可随时禁用）",
+        '<label class="tag-row"><input type="checkbox" id="vaultQuick" checked> 在此设备记住</label>') +
+      row("", "", (accounts.length ? '<button class="btn" onclick="App.vaultLogin()">登录</button>' : "") +
+        '<button class="btn primary" style="margin-left:8px" onclick="App.vaultCreate()">新建账户</button>' +
+        (v.has_quick ? '<button class="btn" style="margin-left:8px" onclick="App.vaultQuickLogin()">快速登录</button>' : "")));
+  }
+
+  function vaultKeysCard(v) {
+    if (!v.unlocked) return "";
+    const rowsHtml = (v.keys || []).map((k) => '<div class="mini-row">' +
+      '<span class="grow"><b>' + esc(k.name) + "</b>" +
+      (k.note ? ' <span style="color:var(--hint)">' + esc(k.note) + "</span>" : "") +
+      '<br><span style="font-family:monospace;font-size:11px;color:var(--text2)">' + esc(k.value) + "</span></span>" +
+      '<button class="btn sm" onclick="App.keyCopy(\'' + esc(k.name) + '\')">复制</button>' +
+      '<button class="btn sm" onclick="App.keyReveal(\'' + esc(k.name) + '\')">显示</button>' +
+      '<button class="btn sm" onclick="App.keyEdit(\'' + esc(k.name) + '\')">编辑</button>' +
+      '<button class="btn sm danger" onclick="App.keyDelete(\'' + esc(k.name) + '\')">删除</button></div>').join("");
+    return card("API Key 管理", "密钥名即环境变量名（如 OPENCODE_GO_API_KEY）；界面默认掩码，可「复制」或「显示」。",
+      (rowsHtml || '<div class="ep-empty">还没有保存的密钥：点下方按钮添加，或直接从常用名称开始</div>') +
+      '<div class="ep-add"><button class="btn primary" onclick="App.keyEdit(null)">＋ 添加密钥</button>' +
+      VAULT_QUICK_KEYS.map((n) => '<button class="btn sm" onclick="App.keyEdit(\'' + n + '\')">＋ ' + n + "</button>").join("") + "</div>");
+  }
+
+  function vaultTransferCard(v) {
+    return card("配置导出 / 导入", "导出为单个 .afpack 文件（口令保护，AES-256-GCM）；在新设备输入同一口令即可导入。",
       row("导出密码", "至少 6 位；新设备导入时需输入", '<input id="expPw" type="password" style="width:130px" placeholder="密码">' +
         '<input id="expPw2" type="password" style="width:130px;margin-left:6px" placeholder="确认密码">') +
       row("包含 API Key", v.unlocked ? "密钥将一起加密写入文件" : "未登录：仅导出配置（登录后可含密钥）",
@@ -534,8 +534,28 @@ import {
           " · 端点 " + esc(v.importPreview.endpoints) +
           " · 密钥 " + ((v.importPreview.keys || []).length) + " 个</span>" +
         '<button class="btn primary" style="margin-left:10px" onclick="App.importApply()">确认导入</button>') : ""));
-    el.innerHTML = inner;
+  }
+
+  function renderVault(el) {
+    const v = vaultState;
+    if (!v.crypto) {
+      el.innerHTML = card("密钥保险箱", "当前构建缺少 cryptography 组件，账户与密钥功能不可用。");
+      bindAll(el);
+      return;
+    }
+    el.innerHTML = vaultAccountCard(v) + vaultKeysCard(v) + vaultTransferCard(v);
     bindAll(el);
+    // 交互：账户名/口令输入后按回车直接提交
+    const submit = (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      if ((v.accounts || []).length) App.vaultLogin();
+      else App.vaultCreate();
+    };
+    ["vaultName", "vaultPw"].forEach((id) => {
+      const node = $("#" + id);
+      if (node) node.addEventListener("keydown", submit);
+    });
   }
 
   // ══════════════════ API 用量页 ══════════════════
@@ -1271,6 +1291,19 @@ import {
           await loadVault();
         } catch (e) { toast("保存失败：" + e.message, "err"); }
       });
+    },
+    keyCopy: async (name) => {
+      try {
+        const r = await API.api("/api/vault/keys?reveal=1");
+        const k = (r.keys || []).find((x) => x.name === name);
+        if (!k) { toast("未找到该密钥", "err"); return; }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(k.value);
+          toast("已复制到剪贴板：" + name, "ok");
+        } else {
+          App.keyReveal(name);          // 剪贴板不可用时退回「显示」
+        }
+      } catch (e) { App.keyReveal(name); }
     },
     keyDelete: async (name) => {
       if (!confirm("确定删除密钥「" + name + "」？")) return;

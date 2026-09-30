@@ -39,7 +39,6 @@ class Actions(object):
     END_DRAG = "end_drag"
     CLICK = "click"
     LAUNCH_HOLD = "launch_hold"      # PATCH 3.3.0：按住不动完成 → 默认启动
-    OPEN_MENU = "open_menu"
 
 
 class BallInteraction(object):
@@ -203,9 +202,3 @@ class BallInteraction(object):
 
     def hover_leave(self, t):
         return [Actions.HOVER_OUT]
-
-    def hover_timer_fired(self, t):
-        """悬停计时器到点（视图精确计时，状态机做最终校验）"""
-        if not self.hover_open_allowed(t):
-            return []
-        return [Actions.OPEN_MENU]

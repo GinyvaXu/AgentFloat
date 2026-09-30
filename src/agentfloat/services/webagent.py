@@ -119,10 +119,8 @@ def start(agent, config=None):
         logf = open(log_path, "a", encoding="utf-8", errors="replace")
         env = None
         try:  # v3.6.0：注入密钥保险箱环境变量（未解锁则为 None → 继承当前环境）
-            from agentfloat.services.vault.accounts import get_store
-            store = get_store()
-            if store.unlocked():
-                env = store.env_for_launch()
+            from agentfloat.services.vault.accounts import launch_env
+            env = launch_env()
         except Exception:  # noqa: BLE001
             env = None
         proc = subprocess.Popen(

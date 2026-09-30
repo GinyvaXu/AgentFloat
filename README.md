@@ -12,7 +12,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 </p>
 
 <p align="center">
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.6.1-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.6.2-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%2010%2F11-8E44AD?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"></a>
@@ -168,7 +168,8 @@ AgentFloat/
 - [x] v3.5.3 — **API 用量页彻底重构**：状态总览条 + 端点卡片（状态/字段/错误建议/复制）+ 显示框实时预览 + 独立设置与折叠帮助；移除示例占位端点、端点自动去重、结果按名对齐
 - [x] v3.5.4 — **显示框自由调整**：滚轮/右下角拖拽/设置滑杆调整大小与不透明度；进程面板不透明度
 - [x] v3.6.0 — **本地账户 + API Key 保险箱 + 配置导出导入**：多账户（PBKDF2/AES-256-GCM/DPAPI 快速登录）、启动 Agent 自动注入密钥环境变量、`.afpack` 口令保护单文件导出导入（可选含 Key）
-- [ ] 下一步候选 — 云账户同步（AuthProvider 抽象）/ 密钥使用审计 / 更多平台行预设
+- [x] v3.6.2 — **代码审查清理 + Windows 安装包**：去死代码/消重复/前端分卡重构；账户页回车提交与密钥一键复制；`build_installer.py` 产出免管理员安装包
+- [ ] 下一步候选 — 云账户同步（AuthProvider 抽象）/ 密钥一键测端点 / 导出文件拖到浮球导入
 - [ ] v3.3.x（进行中）— 各子页面逐页深度重构（Skills/快报/剪贴板/命令/喝水）+ 剩余动效打磨
 - [ ] v3.3.x（候选）— OpenCode Go 余额预设（角标滚动剩余%）/ Web 多标签 / 更多效率工具
 

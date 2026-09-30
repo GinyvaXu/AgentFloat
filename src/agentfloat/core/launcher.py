@@ -18,16 +18,14 @@ LAUNCHED_PIDS = []
 
 def _launch_env():
     """v3.6.0：启动 Agent 时注入密钥保险箱环境变量（未解锁则继承当前环境）"""
-    try:
-        from agentfloat.services.vault.accounts import get_store
-        store = get_store()
-        if store.unlocked():
-            env = store.env_for_launch()
-            _log().info("启动环境：已注入 %d 个保险箱密钥", len(store.list_keys()))
-            return env
-    except Exception:  # noqa: BLE001
-        _log().debug("保险箱环境注入跳过", exc_info=True)
-    return None
+    from agentfloat.services.vault.accounts import get_store, launch_env
+    env = launch_env()
+    if env is not None:
+        try:
+            _log().info("启动环境：已注入 %d 个保险箱密钥", len(get_store().list_keys()))
+        except Exception:  # noqa: BLE001
+            pass
+    return env
 
 
 def launch_agent(agent, config=None):

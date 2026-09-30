@@ -558,10 +558,7 @@ class FloatingWidget(QWidget):
         self._hover_timer.timeout.connect(self._check_hover)
         self._hover_timer.start()
 
-        # 环绕菜单触发定时器（悬停通道）+ 按住启动（PATCH 3.3.0）
-        self._hover_open_timer = QTimer(self)
-        self._hover_open_timer.setSingleShot(True)
-        self._hover_open_timer.timeout.connect(self._on_hover_open_fired)
+        # 按住启动（PATCH 3.3.0）；悬停唤出已在 3.3.1 取消（定时器与入口一并移除，避免死代码）
         self._hold_timer = QTimer(self)
         self._hold_timer.setInterval(16)
         self._hold_timer.timeout.connect(self._on_hold_tick)
@@ -677,7 +674,6 @@ class FloatingWidget(QWidget):
         super().hideEvent(event)
         _log().debug("浮窗隐藏")
         self._hover_timer.stop()
-        self._hover_open_timer.stop()
         self._hold_timer.stop()
         self._hold_progress = 0.0
         if self._move_mode:
@@ -1183,7 +1179,6 @@ class FloatingWidget(QWidget):
             _log().debug("悬停离开")
             self._interaction.hover_leave(now)
             self._animate_scale(1.0, MotionTokens.SPEED)
-            self._hover_open_timer.stop()
             self._proc_panel_timer.stop()
             if self._proc_panel is not None and self._proc_panel.isVisible():
                 self._proc_panel.hide_soon()      # 留给鼠标移动到面板上（400ms 宽限）
@@ -1191,12 +1186,7 @@ class FloatingWidget(QWidget):
             if self._radial_menu is None or not self._radial_menu.isVisible():
                 self._close_radial_menu()
 
-    # ── 环绕菜单（悬停 / 长按双通道，状态机裁决）────────
-    def _on_hover_open_fired(self):
-        acts = self._interaction.hover_timer_fired(time.monotonic())
-        if InteractionActions.OPEN_MENU in acts:
-            self._open_radial_menu("hover")
-
+    # ── 环绕菜单（按住外滑 / 长按确认，状态机裁决）────────
     def _on_hold_tick(self):
         """按住启动进度（PATCH 3.3.0）：环形进度实时更新，满 → 默认启动"""
         if self._move_mode:
@@ -1279,7 +1269,6 @@ class FloatingWidget(QWidget):
 
     def _open_radial_menu_now(self, source):
         self._hide_proc_panel()                           # 开环前收起进程面板
-        self._hover_open_timer.stop()
         self._hold_timer.stop()
         if not self._radial_cfg.get("enabled", True):
             return
@@ -1812,7 +1801,6 @@ class FloatingWidget(QWidget):
         if self._launch_toast is not None:
             self._launch_toast.hide()
         self._hover_timer.stop()
-        self._hover_open_timer.stop()
         self._hold_timer.stop()
         # 弹性收拢：整体缩小 + 窗口淡出（弹簧驱动 + 速度继承，收尾不再生硬）
         base_opacity = self.windowOpacity()
@@ -1953,7 +1941,6 @@ class FloatingWidget(QWidget):
             self._window_origin = self.pos()
             self._drag_active = False
             # 按住即取消悬停展开，避免拖拽时误弹菜单
-            self._hover_open_timer.stop()
             self._interaction.press(now)
             # 按压反馈
             self.is_pressed = True
@@ -2046,7 +2033,6 @@ class FloatingWidget(QWidget):
             self._hold_timer.stop()
             self._hold_progress = 0.0
             self.update()
-            self._hover_open_timer.stop()
             self._open_radial_menu("wheel")
         if InteractionActions.BEGIN_DRAG in acts:
             self._drag_active = True
@@ -2054,7 +2040,6 @@ class FloatingWidget(QWidget):
             self._hold_progress = 0.0
             self.update()
             # 拖拽开始：取消悬停展开，并关闭已打开的环绕菜单
-            self._hover_open_timer.stop()
             if self._slide_anim is not None:
                 self._slide_anim.stop()
             if self._radial_menu is not None and self._radial_menu.isVisible():

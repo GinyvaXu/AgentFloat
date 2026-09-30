@@ -237,7 +237,6 @@ def launch_dsh_web(agent, config=None, config_dir=None):
     立即返回，就绪检查 / 打开浏览器 / 超时提示全部放到后台守护线程执行，
     避免在 Qt 主线程（点击浮窗）或 API 线程里长时间阻塞导致程序未响应。
     """
-    global _proc
     if config_dir is None:
         config_dir = _app_config_dir()
 

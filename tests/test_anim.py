@@ -27,7 +27,6 @@ def test_fade_helpers_smoke(qapp):
     while time.time() < deadline:
         qapp.processEvents()
         time.sleep(0.01)
-    done = []
     fade_out(d, duration=60)                       # 默认 on_done=hide
     deadline = time.time() + 1.0
     while time.time() < deadline and d.isVisible():

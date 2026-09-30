@@ -21,6 +21,8 @@
 - 会话密钥只存在内存（``_session``），不落盘
 """
 import copy
+import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -153,11 +155,9 @@ class AccountStore(object):
         return acc["id"]
 
     def _verify_hash(self, key):
-        import hashlib
         return hashlib.sha256(VERIFY_PEPPER + bytes(key)).digest()
 
     def _check_password(self, acc, password):
-        import hmac
         try:
             salt = crypto.b64d(acc.get("salt"))
             it = int(acc.get("iter") or crypto.iterations_default())
@@ -408,4 +408,15 @@ def reset_store():
     """测试用：清空单例"""
     global _STORE
     _STORE = None
+
+
+def launch_env(base_env=None):
+    """启动 Agent 用的环境：已解锁则注入保险箱密钥；不可用时返回 None（继承当前环境）"""
+    try:
+        store = get_store()
+        if store.unlocked():
+            return store.env_for_launch(base_env)
+    except Exception:  # noqa: BLE001
+        pass
+    return None
 

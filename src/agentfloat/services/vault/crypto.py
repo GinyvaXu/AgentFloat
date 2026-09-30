@@ -54,11 +54,6 @@ def derive_key(password, salt, iterations=None):
     return hashlib.pbkdf2_hmac("sha256", str(password).encode("utf-8"), bytes(salt), it, dklen=32)
 
 
-def hash_password(password, salt, iterations=None):
-    """口令校验用的哈希（与派生密钥同参数，便于单测对比）"""
-    return derive_key(password, salt, iterations)
-
-
 # ── 对称加密 ──────────────────────────────────────────────
 def encrypt(data, key, aad=None):
     """AES-256-GCM 加密 → MAGIC + nonce + ciphertext(含 tag)"""

@@ -1,5 +1,20 @@
 # 更新日志
 
+## [3.6.2] - 2026-09-30（代码审查与清理 + 安装包）
+### Changed
+- **代码审查与结构清理**（无行为变更）：
+  - 移除死代码：悬停唤出的定时器与状态机入口（3.3.1 已取消悬停唤出）、`crypto.hash_password`（零引用）、
+    `dsh.py` 无效 `global`、测试中未使用变量
+  - 消除重复：启动 Agent 的保险箱环境注入统一为 `vault.accounts.launch_env()`（终端/桌面/Web 共用一处）
+  - `accounts.py` 模块级导入整理（hashlib/hmac 不再函数内导入）
+  - 前端「账户与密钥」页拆分为 `vaultAccountCard / vaultKeysCard / vaultTransferCard` 三个子渲染，逻辑更清晰
+- **交互质量**：账户页支持**回车提交**登录/建号；密钥行新增「**复制**」（剪贴板不可用时退回「显示」）
+
+### Added
+- **Windows 安装包（Inno Setup）**：`build_installer.py` 一键产出 `AgentFloat-Setup-X.Y.Z.exe`
+  - 按用户安装（无需管理员）：`%LOCALAPPDATA%\Programs\AgentFloat`；开始菜单 + 可选桌面快捷方式；自带卸载程序
+  - lzma2 压缩；安装后可勾选立即启动
+
 ## [3.6.1] - 2026-09-29（账户页修复）
 ### Fixed
 - **「账户与密钥」页无法输入账户名**：新建账户的输入框被误当作提示文字渲染（`row()` 参数错位，页面显示原始 HTML 与 `undefined`）→ 修正为控件位，输入框正常显示

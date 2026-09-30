@@ -81,11 +81,9 @@ def test_hover_never_opens_menu():
     m.hover_enter(1.0)
     assert m.hover_channel is False
     assert m.hover_open_allowed(1.2) is False
-    assert m.hover_timer_fired(1.4) == []
     m.notify_reveal(2.0)                           # 贴边唤出后同样不展开
     assert m.hover_open_allowed(3.0) is False
     m.press(0.1)
-    assert m.hover_timer_fired(0.5) == []
     assert m.release(0.6) == [Actions.CLICK]
 
 
