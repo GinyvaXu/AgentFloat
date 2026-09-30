@@ -12,7 +12,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 </p>
 
 <p align="center">
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.6.2-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.7.0-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%2010%2F11-8E44AD?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"></a>
@@ -169,6 +169,7 @@ AgentFloat/
 - [x] v3.5.4 — **显示框自由调整**：滚轮/右下角拖拽/设置滑杆调整大小与不透明度；进程面板不透明度
 - [x] v3.6.0 — **本地账户 + API Key 保险箱 + 配置导出导入**：多账户（PBKDF2/AES-256-GCM/DPAPI 快速登录）、启动 Agent 自动注入密钥环境变量、`.afpack` 口令保护单文件导出导入（可选含 Key）
 - [x] v3.6.2 — **启动动画 + 代码审查清理 + Windows 安装包**：屏幕中心光晕/圆环/放大浮球 → 飞向落点（版本号+随机问候语、合成提示音、不可跳过、多屏适配）；去死代码/消重复（含球体渲染共用）；`build_installer.py` 产出免管理员安装包
+- [x] v3.7.0 — **全新品牌图标 + 浮球新外观**：紫→蓝渐变 + 白色旋涡标志（应用/安装器/托盘/README/Web 全套替换）；浮球改为品牌渐变底 + 旋涡 glyph（保留阴影/悬停/呼吸/涟漪）；圆角比例统一收敛到一处；Web 控制台新增 favicon
 - [ ] 下一步候选 — 云账户同步（AuthProvider 抽象）/ 密钥一键测端点 / 导出文件拖到浮球导入
 - [ ] v3.3.x（进行中）— 各子页面逐页深度重构（Skills/快报/剪贴板/命令/喝水）+ 剩余动效打磨
 - [ ] v3.3.x（候选）— OpenCode Go 余额预设（角标滚动剩余%）/ Web 多标签 / 更多效率工具

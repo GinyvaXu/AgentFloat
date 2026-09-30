@@ -225,6 +225,9 @@ def _main():
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("AgentFloat")
+    # 窗口/任务栏/Alt-Tab/对话框统一使用品牌图标（v3.7.0 AF-2 新图标）
+    if os.path.exists(ICO_PATH):
+        app.setWindowIcon(QIcon(ICO_PATH))
     app.setFont(QFont(FONT_FAMILY, 9))
 
     config = load_config()

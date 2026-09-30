@@ -61,7 +61,7 @@ body {
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 16px; }
 .brand-dot {
   width: 34px; height: 34px; border-radius: 10px;
-  background: linear-gradient(145deg, #4D6BFE, #7A5CFF);
+  background: url("/icon.png") center/contain no-repeat;
   color: #fff; font-weight: 700; font-size: 16px;
   display: flex; align-items: center; justify-content: center;
   box-shadow: 0 6px 16px rgba(77,107,254,0.35);

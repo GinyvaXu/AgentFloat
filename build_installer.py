@@ -15,6 +15,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 APP_SRC = os.path.join(ROOT, "dist", "AgentFloat")
+ICO_SRC = os.path.join(ROOT, "assets", "agent_float_icon.ico")
 WORK_DIR = os.path.join(ROOT, "build", "installer")
 
 ISCC_CANDIDATES = [
@@ -59,6 +60,7 @@ AppVerName=AgentFloat %(version)s
 AppPublisher=GinyvaXu
 AppPublisherURL=https://github.com/GinyvaXu/AgentFloat
 AppSupportURL=https://github.com/GinyvaXu/AgentFloat
+SetupIconFile=%(ico)s
 DefaultDirName={localappdata}\Programs\AgentFloat
 DefaultGroupName=AgentFloat
 DisableProgramGroupPage=yes
@@ -102,6 +104,7 @@ Type: files; Name: "{app}\*.log"
         "version": version,
         "out_dir": out_dir,
         "src": APP_SRC,
+        "ico": ICO_SRC,
         "languages": "\n".join(languages),
     }
     os.makedirs(WORK_DIR, exist_ok=True)

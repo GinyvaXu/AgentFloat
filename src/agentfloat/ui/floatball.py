@@ -204,10 +204,11 @@ class FloatingWidget(QWidget):
 
     def _update_mask(self):
         """掩码：球体范围 + 少量余量（拖动/点击命中区域）"""
+        from agentfloat.ui import ball_render
         s = self.current_size
         off = self._ball_offset()
         m = 5.0
-        rad = max(6.0, s * 0.30) + m
+        rad = ball_render.ball_radius(s) + m
         path = QPainterPath()
         path.addRoundedRect(QRectF(off - m, off - m, s + 2 * m, s + 2 * m), rad, rad)
         region = QRegion(path.toFillPolygon().toPolygon())
@@ -235,16 +236,17 @@ class FloatingWidget(QWidget):
             self._render_ball_pixmap(pm, hovered, accent, side)
             cache[name] = pm
         # 球体路径（涟漪裁剪用）
+        from agentfloat.ui import ball_render
         off = self._ball_offset()
         s = self.current_size
-        rad = max(6.0, s * 0.30)
+        rad = ball_render.ball_radius(s)
         path = QPainterPath()
         path.addRoundedRect(QRectF(off, off, s, s), rad, rad)
         cache["ball_path"] = path
         self._cache = cache
 
     def _render_ball_pixmap(self, pm, hovered, accent, side):
-        """方案 C：深色玻璃 + 品牌渐变描边 + 内部光晕 + 白色旋涡
+        """品牌渐变底 + 白色旋涡 glyph（v3.7.0 新图标）
 
         v3.6.2：实现抽到 ``ui.ball_render``（主浮球与启动动画共用，避免视觉分叉）
         """

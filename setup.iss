@@ -51,6 +51,7 @@ Source: "dist\AgentFloat.exe"; DestDir: "{app}"; Flags: ignoreversion
 #endif
 Source: "assets\agent_float_icon.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
 Source: "assets\agent_float_icon.png"; DestDir: "{app}\assets"; Flags: ignoreversion
+Source: "assets\agent_float_swirl.png"; DestDir: "{app}\assets"; Flags: ignoreversion
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "VERSION"; DestDir: "{app}"; Flags: ignoreversion
 

@@ -34,6 +34,8 @@ def _resolve_path(*parts):
 
 ICO_PATH = _resolve_path("assets", "agent_float_icon.ico")
 PNG_PATH = _resolve_path("assets", "agent_float_icon.png")
+# 品牌旋涡 glyph（v3.7.0 新图标）：浮球内部图案，缺失时回退为矢量绘制
+SWIRL_PATH = _resolve_path("assets", "agent_float_swirl.png")
 
 
 def config_dir():
