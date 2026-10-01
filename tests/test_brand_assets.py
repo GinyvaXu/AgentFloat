@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """v3.7.0 品牌图标 / 浮球图案 测试
 
-覆盖：新品牌资源齐全且规格正确、浮球改用品牌渐变 + 白色旋涡 glyph、
-资源缺失时矢量回退、掩码圆角与渲染实现同源、Web 控制台使用新图标。
+覆盖：新品牌资源齐全且规格正确、浮球保留深色玻璃质感 + 品牌渐变描边并换用
+AF-2 旋涡 glyph、资源缺失时矢量回退、掩码圆角与渲染实现同源、Web 控制台用新图标。
 """
 import os
 
@@ -68,19 +68,29 @@ def _sample(pm, size, fx, fy):
     return pm.toImage().pixelColor(x, y)
 
 
-def test_ball_uses_brand_gradient(qapp):
+def test_ball_keeps_dark_glass_look(qapp):
+    """v3.7.0 用户明确要求保留深色质感：玻璃底 + 品牌渐变描边（只换旋涡）"""
     from agentfloat.ui import ball_render
     size = 200
     pm = ball_render.render_ball_pixmap(size, QColor(10, 132, 255), hovered=False, dpr=1.0)
-    start = _sample(pm, size, 0.16, 0.16)      # 左上：紫
-    end = _sample(pm, size, 0.84, 0.84)        # 右下：蓝
-    assert start.alpha() == 255 and end.alpha() == 255
-    # 左上是紫（红>绿、蓝高），右下是蓝（绿 > 红）
-    assert start.red() > start.green() and start.blue() > 150, "左上应为品牌紫"
-    assert end.green() > end.red(), "右下应为品牌蓝"
-    assert start.red() > end.red(), "渐变应从紫过渡到蓝"
-    # 不再是旧版深色玻璃底
-    assert start.red() + start.green() + start.blue() > 300
+    inner = _sample(pm, size, 0.50, 0.50)
+    assert inner.alpha() >= 200, "球体内部应基本不透明（玻璃底 240 alpha + 光晕）"
+    assert max(inner.red(), inner.green(), inner.blue()) < 130, "球体内部应仍是深色玻璃底"
+
+    # 描边是「主题蓝 → 品牌紫」渐变：全图应同时存在明显偏蓝与明显偏紫的描边像素
+    img = pm.toImage()
+    blue_edge = purple_edge = False
+    for y in range(0, img.height(), 2):
+        for x in range(0, img.width(), 2):
+            c = img.pixelColor(x, y)
+            if c.alpha() < 120:
+                continue
+            if c.blue() - c.red() > 120:
+                blue_edge = True
+            if c.red() - c.green() > 60:
+                purple_edge = True
+    assert blue_edge, "描边起点应为品牌蓝（主题强调色）"
+    assert purple_edge, "描边终点应为品牌紫"
 
 
 def test_ball_renders_white_swirl_glyph(qapp):
@@ -91,8 +101,8 @@ def test_ball_renders_white_swirl_glyph(qapp):
     off = int(round(size * 0.10))
     cx = int(off + size / 2.0)
     found = False
-    for dx in range(-22, 23, 2):
-        for dy in range(-22, 23, 2):
+    for dx in range(-40, 41, 2):
+        for dy in range(-40, 41, 2):
             c = img.pixelColor(cx + dx, cx + dy)
             if c.alpha() > 200 and min(c.red(), c.green(), c.blue()) > 200:
                 found = True

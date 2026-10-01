@@ -1,24 +1,23 @@
 # -*- coding: utf-8 -*-
 """浮球位图绘制（主浮球与启动动画共用同一实现，保证视觉一致、去除重复代码）。
 
-v3.7.0 品牌更新：与「AgentFloat」新图标一致 —— 紫→蓝品牌渐变圆角底 +
-白色旋涡 glyph（取自随包资源 ``assets/agent_float_swirl.png``，缺失时回退
-为矢量螺旋绘制，保证冻结/裁剪场景下仍可渲染）。
+沿用 v3.6.2 的深色玻璃质感（方案 A）：深色玻璃底 + 品牌渐变描边 + 内部光晕；
+v3.7.0 起内部旋涡 glyph 换成 AF-2 新图标（取自随包资源
+``assets/agent_float_swirl.png``，缺失时回退为矢量螺旋绘制，保证冻结/裁剪场景
+下仍可渲染）。
 """
 import math
 import os
 
 from PyQt5.QtCore import QPointF, QRectF, Qt
 from PyQt5.QtGui import (QBrush, QColor, QLinearGradient, QPainter, QPainterPath, QPen,
-                         QPixmap)
+                         QPixmap, QRadialGradient)
 
-# 品牌渐变端点（取样自新图标 1024px 原稿的左上 / 中心 / 右下角）
-BRAND_START = (150, 47, 229)      # 紫 #962FE5
-BRAND_MID = (70, 58, 236)         # 中段 #463AEC
-BRAND_END = (2, 133, 254)         # 蓝 #0285FE
+# 球体圆角比例（沿用深色玻璃球时期的比例；浮球掩码/涟漪裁剪共用，避免两份魔数）
+BALL_RADIUS_RATIO = 0.30
 
-# 球体圆角比例（与图标方圆角一致；浮球掩码/涟漪裁剪共用，避免两份魔数）
-BALL_RADIUS_RATIO = 0.22
+# 描边渐变的收尾色（品牌紫，起点用主题强调色）
+BORDER_END = (175, 82, 222)
 
 # 旋涡 glyph 源位图缓存（None=未加载，False=不可用）
 _GLYPH_SOURCE = None
@@ -95,37 +94,28 @@ def render_into(pm, side, size, accent, hovered=False):
         p.setBrush(QColor(0, 0, 0, int(base_a * k)))
         p.drawRoundedRect(rect.adjusted(off, off + 1.2, off, off + 1.2), rad, rad)
 
-    # 品牌渐变底（135°：紫 → 蓝，与新图标同源）
+    # 深色玻璃底
+    p.setBrush(QColor(30, 30, 34, 240))
+    p.drawRoundedRect(rect, rad, rad)
+
+    # 内部光晕（品牌色，悬停更亮）
+    glow = QRadialGradient(QPointF(cx, rect.y() + s * 0.40), s * 0.55)
+    ga = 64 if hovered else 46
+    glow.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), ga))
+    glow.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 0))
+    p.setBrush(QBrush(glow))
+    p.drawRoundedRect(rect, rad, rad)
+
+    # 品牌渐变描边（135°：主题强调色 → 品牌紫）
     lg = QLinearGradient(rect.topLeft(), rect.bottomRight())
-    boost = 14 if hovered else 0
-    lg.setColorAt(0.0, QColor(min(255, BRAND_START[0] + boost),
-                              min(255, BRAND_START[1] + boost),
-                              min(255, BRAND_START[2] + boost)))
-    lg.setColorAt(1.0, QColor(min(255, BRAND_END[0] + boost),
-                              min(255, BRAND_END[1] + boost),
-                              min(255, BRAND_END[2] + boost)))
-    # 中段取样自原稿中心色，避免角对角线性插值把中段冲淡
-    lg.setColorAt(0.5, QColor(min(255, BRAND_MID[0] + boost),
-                              min(255, BRAND_MID[1] + boost),
-                              min(255, BRAND_MID[2] + boost)))
-    p.setBrush(QBrush(lg))
-    p.drawRoundedRect(rect, rad, rad)
-
-    # 顶部微高光：给平面渐变一点玻璃厚度（不影响图标还原度）
-    sheen = QLinearGradient(rect.topLeft(), QPointF(rect.left(), rect.top() + s * 0.45))
-    sheen.setColorAt(0.0, QColor(255, 255, 255, 30))
-    sheen.setColorAt(1.0, QColor(255, 255, 255, 0))
-    p.setBrush(QBrush(sheen))
-    p.drawRoundedRect(rect, rad, rad)
-
-    # 边缘描边：常态极淡白边；悬停转为品牌色高亮环（兼作悬停反馈）
-    ring = QColor(accent.red(), accent.green(), accent.blue(), 120) if hovered \
-        else QColor(255, 255, 255, 40)
+    ba = 250 if hovered else 220
+    lg.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), ba))
+    lg.setColorAt(1.0, QColor(BORDER_END[0], BORDER_END[1], BORDER_END[2], ba))
     p.setBrush(Qt.NoBrush)
-    p.setPen(QPen(ring, max(1.2, s * 0.022)))
-    p.drawRoundedRect(rect.adjusted(0.6, 0.6, -0.6, -0.6), rad, rad)
+    p.setPen(QPen(QBrush(lg), max(1.8, s * 0.035)))
+    p.drawRoundedRect(rect.adjusted(0.9, 0.9, -0.9, -0.9), rad, rad)
 
-    # 白色旋涡 glyph（与图标同比例：约占球体 45%）
+    # 白色旋涡 glyph（AF-2 新图标：与品牌图标同一识别符号）
     try:
         dpr = max(1.0, float(pm.devicePixelRatio()))
     except Exception:
@@ -133,7 +123,8 @@ def render_into(pm, side, size, accent, hovered=False):
     glyph = _glyph(max(16, int(round(s * dpr))))
     if glyph is not None:
         glyph.setDevicePixelRatio(dpr)
-        p.drawPixmap(QRectF(cx - s / 2.0, cy - s / 2.0, s, s), glyph,
+        gw = s * 0.72      # 与旧绘制比例接近，深色玻璃上留出边距
+        p.drawPixmap(QRectF(cx - gw / 2.0, cy - gw / 2.0, gw, gw), glyph,
                      QRectF(0, 0, glyph.width(), glyph.height()))
     else:
         draw_spiral(p, cx, cy, s / 52.0)
