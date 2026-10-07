@@ -156,7 +156,7 @@ class WaterPanel(FadePanelMixin, QDialog):
         dot.setFixedSize(34, 34)
         dot.setStyleSheet(
             "QLabel { color: #FFF; font-size: 14px; font-weight: bold;"
-            " background: %s; border-radius: 17px; }" % t["color"])
+            " background: %s; border-radius: 999px; }" % t["color"])
         lay.addWidget(dot)
 
         info = QVBoxLayout()
@@ -276,7 +276,7 @@ class WaterReminderPopup(QDialog):
         card = QFrame()
         card.setFixedSize(420, 320)
         card.setStyleSheet(
-            "QFrame { background: %s; border: 1px solid %s; border-radius: 22px; }"
+            "QFrame { background: %s; border: 1px solid %s; border-radius: 14px; }"
             % (card_bg, border))
         cv = QVBoxLayout(card)
         cv.setContentsMargins(30, 26, 30, 24)
@@ -289,7 +289,7 @@ class WaterReminderPopup(QDialog):
         dot.setFixedSize(72, 72)
         dot.setStyleSheet(
             "QLabel { color: #FFF; font-size: 32px; font-weight: bold;"
-            " background: %s; border-radius: 36px; }" % color)
+            " background: %s; border-radius: 999px; }" % color)
         cv.addWidget(dot, 0, Qt.AlignCenter)
 
         name = QLabel("（%s 计时提醒）" % (self._timer.get("name") or "喝水"))
@@ -350,7 +350,7 @@ class WaterReminderPopup(QDialog):
         else:
             self.show()
         if self._screen is not None:
-            g = self._screen.geometry()
+            g = self._screen.availableGeometry()
             if self._fullscreen:
                 self.setGeometry(g)
             else:

@@ -1,6 +1,7 @@
 {
-  "version": "2.2.0",
-  "url": "https://github.com/GinyvaXu/AgentFloat/releases/download/v2.2.0/AgentFloat_Setup.exe",
-  "notes": "# v2.2.0 - Agent Installer & Stability Fixes\n\n## English\n- New **Agent Install** module in Web settings: one-click install / upgrade / uninstall for Claude Code, Codex CLI, Pi Coding Agent and DeepSeek Harness (npm global install, CN mirror first with auto fallback).\n- Fixed Web shell backend startup crash (uvicorn formatter in frozen env).\n- Fixed loading indicator animation logic; success toast now closes in ~1s.\n",
-  "notes_zh": "# v2.2.0 - Agent 安装服务与稳定性修复\n\n## 中文\n- Web 设置新增「Agent 安装」模块：Claude Code / Codex CLI / Pi / DeepSeek Harness 一键安装、升级、卸载（npm 全局安装，国内镜像优先自动回退）。\n- 修复 Web 套壳后端启动崩溃（冻结环境 uvicorn formatter 问题）。\n- 修复加载指示器动画逻辑；启动成功提示约 1 秒自动关闭。\n"
+  "version": "3.8.0",
+  "url": "https://github.com/GinyvaXu/AgentFloat/releases/download/v3.8.0/AgentFloat-Setup-3.8.0.exe",
+  "sha256": "B24B442E6E02780A9CF153C2A276969A0CA7DB67D045F00EB41345629E085660",
+  "notes": "# v3.8.0 - Security Hardening & UX Polish\n\n## English\n- **Security fix (high):** the local 3087 API had no authentication and allowed any origin, so any website you visited could call `POST /api/vault/quick_login` and then read every API key in plaintext. Added a random per-run access token, a loopback-only Host allowlist (blocks DNS rebinding), strict same-origin checks, and removed the wildcard CORS policy.\n- **Update integrity:** downloaded installers are now verified against the SHA256 from the GitHub release asset (or the manifest) and refused on mismatch.\n- Pinned runtime dependencies for reproducible builds.\n- Unified design tokens (radii/font sizes) and empty/loading/error wording across panels.\n- Displays: the ball now recovers automatically after monitor unplug / resolution / DPI changes.\n- Performance: agent process detection is ~15x faster (process snapshot instead of spawning tasklist every 3s).\n",
+  "notes_zh": "# v3.8.0 - 安全加固 + 体验优化\n\n## 中文\n- **安全修复（高危）**：本地 3087 接口此前无鉴权且允许任意来源，浏览任意网页都可能被免密读取保险箱里的全部 API Key。现加随机访问令牌、Host 白名单（防 DNS rebinding）、同源校验，并移除通配 CORS。\n- **更新完整性**：下载安装包后按 GitHub 资产的 SHA256 校验，不匹配拒绝安装。\n- 运行时依赖锁版本，构建可复现。\n- 统一设计令牌（圆角/字号）与空态/加载态/错误态文案。\n- 显示器热插拔 / 改分辨率 / DPI 变化后浮窗自动收敛，不再「失踪」。\n- 性能：Agent 进程检测提速约 15 倍（进程快照替代每 3 秒 tasklist）。\n"
 }

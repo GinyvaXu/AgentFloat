@@ -14,6 +14,7 @@
   （{"manifest": "...", "installer": "..."}，例如 Gitee 仓库）。
 """
 import concurrent.futures
+import hashlib
 import io
 import json
 import logging
@@ -128,28 +129,36 @@ def fetch_manifest(url, timeout=_DEFAULT_TIMEOUT):
     return json.loads(data.decode("utf-8"))
 
 
+def _asset_sha256(asset):
+    """从 GitHub 资产对象里取 SHA256（digest 形如 'sha256:abcd…'）"""
+    digest = str(asset.get("digest", "") or "").strip().lower()
+    if digest.startswith("sha256:"):
+        return digest.split(":", 1)[1]
+    return ""
+
+
 def _from_release_api(data):
-    """把 GitHub releases/latest API 响应转为 (version, url, notes)"""
+    """把 GitHub releases/latest API 响应转为 (version, url, notes, sha256)"""
     tag = str(data.get("tag_name", "") or "").strip().lstrip("vV")
     if not tag:
         raise ValueError("empty tag")
-    url = ""
+    asset = None
     for a in (data.get("assets") or []):
-        u = str(a.get("browser_download_url", "") or "")
-        if u.lower().endswith(".exe"):
-            url = u
+        if str(a.get("browser_download_url", "") or "").lower().endswith(".exe"):
+            asset = a
             break
-    if not url:
+    if asset is None:
         raise ValueError("no installer asset")
     # 优先安装包（Setup），避免静默重装拿到独立 exe
     for a in (data.get("assets") or []):
         u = str(a.get("browser_download_url", "") or "")
         name = str(a.get("name", "") or "")
         if u.lower().endswith(".exe") and "setup" in name.lower():
-            url = u
+            asset = a
             break
+    url = str(asset.get("browser_download_url", "") or "")
     notes = str(data.get("body", "") or "")[:400].replace("\r", "")
-    return tag, url, notes
+    return tag, url, notes, _asset_sha256(asset)
 
 
 def mirror_urls(url):
@@ -168,7 +177,7 @@ def resolve_latest_asset_url(timeout=_DEFAULT_TIMEOUT):
     """从 GitHub Releases API 获取最新正式版的安装包直链（用于 manifest 悬空/固定 URL 回退）"""
     try:
         data = _fetch("https://api.github.com/repos/%s/releases/latest" % REPO, timeout)
-        _tag, url, _notes = _from_release_api(json.loads(data.decode("utf-8")))
+        _tag, url, _notes, _sha = _from_release_api(json.loads(data.decode("utf-8")))
         return url or ""
     except Exception:
         return ""
@@ -195,6 +204,7 @@ def _result_from_manifest(man, current):
     return {"available": is_newer(latest, current),
             "version": latest, "current": current,
             "url": str(man.get("url", "") or ""),
+            "sha256": str(man.get("sha256", "") or "").strip().lower(),
             "notes": str(man.get("notes", "") or "").replace("\r", ""),
             "notes_zh": str(man.get("notes_zh", "") or "").replace("\r", ""),
             "error": None, "detail": ""}
@@ -205,10 +215,10 @@ def _probe_one(kind, url, per_timeout, current):
     try:
         if kind == "api":
             data = _fetch(url, per_timeout)
-            latest, dl_url, notes = _from_release_api(json.loads(data.decode("utf-8")))
+            latest, dl_url, notes, sha = _from_release_api(json.loads(data.decode("utf-8")))
             return True, {"available": is_newer(latest, current),
                           "version": latest, "current": current,
-                          "url": dl_url, "notes": notes, "notes_zh": "",
+                          "url": dl_url, "sha256": sha, "notes": notes, "notes_zh": "",
                           "error": None, "detail": ""}
         man = fetch_manifest(url, per_timeout)
         return True, _result_from_manifest(man, current)
@@ -238,7 +248,7 @@ def _check_parallel(current, timeout):
         return max(results, key=lambda r: parse_version(r["version"]))
     last = errs[-1] if errs else TimeoutError("all sources timed out")
     return {"available": False, "version": "", "current": current,
-            "url": "", "notes": "", "notes_zh": "",
+            "url": "", "sha256": "", "notes": "", "notes_zh": "",
             "error": error_code(last), "detail": str(last)}
 
 
@@ -276,11 +286,23 @@ def _download_once(url, path, timeout, progress):
                     progress(got, total)
 
 
+def sha256_file(path, chunk=1 << 20):
+    """计算文件 SHA256（小写十六进制）"""
+    h = hashlib.sha256()
+    with io.open(path, "rb") as f:
+        for block in iter(lambda: f.read(chunk), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
 def download_installer(url, dest_dir=None, progress=None, timeout=_DOWNLOAD_TIMEOUT,
-                       attempts=_DOWNLOAD_ATTEMPTS):
+                       attempts=_DOWNLOAD_ATTEMPTS, expected_sha256=""):
     """下载安装包到临时目录，返回本地路径。
 
     progress(got, total) 回调；GitHub 资产按 [直连 + 代理镜像] 逐个尝试。
+
+    v3.8.0 安全加固：expected_sha256 非空时，下载完成必须校验通过才返回，
+    否则删除文件并抛异常 —— 防止镜像/代理被投毒后静默安装恶意包。
     """
     dest_dir = dest_dir or download_dir()
     os.makedirs(dest_dir, exist_ok=True)
@@ -290,13 +312,33 @@ def download_installer(url, dest_dir=None, progress=None, timeout=_DOWNLOAD_TIME
         raise ValueError("no download URL")
     fname = os.path.basename(candidates[0].split("?")[0]) or "AgentFloat_Setup.exe"
     path = os.path.join(dest_dir, fname)
+    expect = str(expected_sha256 or "").strip().lower()
     last_err = None
+
+    def _verified(p):
+        """校验下载文件；返回 (ok, 错误信息)"""
+        if not expect:
+            _logger.warning("更新包未提供 SHA256，跳过完整性校验（来源: %s）", p)
+            return True, ""
+        actual = sha256_file(p)
+        if actual == expect:
+            return True, ""
+        return False, "安装包校验失败（期望 %s… 实际 %s…）" % (expect[:12], actual[:12])
+
     for cand in candidates:
         cand_attempts = max(1, attempts) if len(candidates) == 1 else 1
         for _ in range(cand_attempts):
             try:
                 _download_once(cand, path, timeout, progress)
-                return path
+                ok, why = _verified(path)
+                if ok:
+                    return path
+                last_err = ValueError(why)
+                _logger.error("更新包校验未通过（%s）: %s", cand, why)
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
             except Exception as e:
                 last_err = e
                 try:
@@ -310,7 +352,14 @@ def download_installer(url, dest_dir=None, progress=None, timeout=_DOWNLOAD_TIME
     if fallback and fallback not in candidates and fallback not in [c.split("?")[0] for c in candidates]:
         try:
             _download_once(fallback, path, timeout, progress)
-            return path
+            ok, why = _verified(path)
+            if ok:
+                return path
+            last_err = ValueError(why)
+            try:
+                os.remove(path)
+            except OSError:
+                pass
         except Exception as e:
             last_err = e
     raise last_err
@@ -548,19 +597,21 @@ def _friendly_error(e):
 
 
 class DownloadWorker(QThread):
-    """后台下载安装包（带进度）"""
+    """后台下载安装包（带进度 + SHA256 完整性校验）"""
 
     done = pyqtSignal(str)            # 保存路径
     failed = pyqtSignal(str)          # 错误信息
     progress = pyqtSignal(int, int)   # (已下载, 总大小)
 
-    def __init__(self, url, parent=None):
+    def __init__(self, url, sha256="", parent=None):
         super().__init__(parent)
         self._url = url
+        self._sha256 = str(sha256 or "")
 
     def run(self):
         try:
-            path = download_installer(self._url, progress=self._on_progress)
+            path = download_installer(self._url, progress=self._on_progress,
+                                      expected_sha256=self._sha256)
             self.done.emit(path)
         except Exception as e:
             _logger.warning("更新下载失败: %s", e)

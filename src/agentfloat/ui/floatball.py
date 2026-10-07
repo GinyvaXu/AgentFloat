@@ -8,7 +8,6 @@ import copy
 import ctypes
 import math
 import os
-import subprocess
 import time
 from ctypes import wintypes
 
@@ -50,7 +49,7 @@ from agentfloat.ui.panels.skills import SkillsPanel
 from agentfloat.ui.panels.water import WaterPanel, WaterReminderPopup
 from agentfloat.core.single_instance import activate_message_id
 from agentfloat.core.qtutil import release_thread_later, track
-from agentfloat.core.sysutil import _open_url
+from agentfloat.core.sysutil import _open_url, process_running
 from agentfloat.ui.interaction import Actions as InteractionActions, BallInteraction
 from agentfloat.ui.motion import Tokens as MotionTokens, motion, spring
 from agentfloat.ui.placement import (
@@ -134,6 +133,12 @@ class FloatingWidget(QWidget):
         self._hide_timer.timeout.connect(self._auto_hide)
         # 边缘检测条（透明窗口，用于检测鼠标靠近屏幕边缘）
         self._edge_detector = None
+
+        # 显示器热插拔 / 分辨率与 DPI 变化（v3.8.0）：防浮窗跑到屏幕外
+        self._display_timer = QTimer(self)
+        self._display_timer.setSingleShot(True)
+        self._display_timer.timeout.connect(self._apply_display_change)
+        self._bind_display_signals()
 
         # Claude 进程检测（绿色指示灯）
         self._claude_running = False
@@ -255,7 +260,12 @@ class FloatingWidget(QWidget):
 
 
     def _check_claude_process(self):
-        """检测主 Agent 进程是否在运行，更新指示灯状态"""
+        """检测主 Agent 进程是否在运行，更新指示灯状态
+
+        v3.8.0 性能：改用 CreateToolhelp32Snapshot 进程快照（与单实例守卫同源），
+        不再每 3 秒 spawn 一次 tasklist.exe —— 实测省掉一次进程创建 + 控制台管道，
+        也避免杀软对高频 tasklist 的误报。
+        """
         try:
             primary = get_primary_agent(self._agents)
             cmd = (primary or {}).get("command", "")
@@ -265,12 +275,9 @@ class FloatingWidget(QWidget):
                 return
             if not base.lower().endswith(".exe"):
                 base += ".exe"
-            result = subprocess.run(
-                ["tasklist", "/fi", "imagename eq %s" % base, "/nh"],
-                capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
-            )
+            running = process_running(base)
             was_running = self._claude_running
-            self._claude_running = base.lower() in result.stdout.lower()
+            self._claude_running = running
             if was_running != self._claude_running:
                 _log().debug("Agent 进程状态变化: running=%s", self._claude_running)
                 self.update()  # 状态变化时重绘
@@ -742,6 +749,63 @@ class FloatingWidget(QWidget):
             # 自由位置（含非法 snap_edge）：保持完全可见，不进入吸附隐藏
             self._snapped = False
             self._snap_edge = ""
+
+    def _bind_display_signals(self):
+        """绑定显示器变化信号（增删屏 / 分辨率 / DPI 缩放）——v3.8.0
+
+        改造前只在启动时收敛一次：拔掉显示器或改分辨率后，浮窗可能停在
+        已不存在的屏幕坐标上，用户「找不到小球」。
+        """
+        try:
+            app = QApplication.instance()
+            if app is not None:
+                for sig in ("screenAdded", "screenRemoved", "primaryScreenChanged"):
+                    s = getattr(app, sig, None)
+                    if s is not None:
+                        try:
+                            s.connect(self._on_display_changed)
+                        except TypeError:
+                            pass        # 已连接过（Qt 会忽略重复连接的普通槽）
+            for screen in QApplication.screens():
+                for sig in ("geometryChanged", "logicalDotsPerInchChanged"):
+                    s = getattr(screen, sig, None)
+                    if s is not None:
+                        try:
+                            s.connect(self._on_display_changed)
+                        except TypeError:
+                            pass
+        except Exception as e:  # noqa: BLE001
+            _log().debug("显示器信号绑定失败（不影响使用）: %s", e)
+
+    def _on_display_changed(self, *_args):
+        """显示器变化 → 防抖 400ms 后统一收敛（切换分辨率时信号会连发）"""
+        try:
+            self._display_timer.start(400)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _apply_display_change(self):
+        """收敛浮窗：拉回可见区 + 维持贴边 + 按新 DPI 重建位图"""
+        try:
+            self._bind_display_signals()     # 屏幕增删后重新绑定新屏幕的信号
+            self._ensure_on_screen()
+            # 贴边状态在分辨率变化后需要重新贴回边缘（否则会留在旧坐标）
+            if self._snapped and self._snap_edge:
+                screens = self._screen_rects()
+                if screens:
+                    off = int(self._ball_offset())
+                    size = self.current_size
+                    x = self.pos().x() + off
+                    y = self.pos().y() + off
+                    idx = screen_index_for(x + size / 2.0, y + size / 2.0, screens)
+                    nx, ny = edge_position(self._snap_edge, x, y, size, screens[idx])
+                    self.move(int(nx - off), int(ny - off))
+            self._render_pixmaps()           # DPI 变化 → 重建球体位图
+            self._update_mask()
+            self.update()
+            _log().info("显示器变化：浮窗已收敛到 (%d, %d)", self.pos().x(), self.pos().y())
+        except Exception as e:  # noqa: BLE001
+            _log().warning("显示器变化收敛失败: %s", e)
 
     def _ensure_on_screen(self):
         """窗口完全落在所有屏幕之外时，收回到可见区域（PATCH 3.0.1 安全网）"""
@@ -2104,6 +2168,7 @@ class FloatingWidget(QWidget):
 
         menu.addSeparator()
         menu.addAction("设置...", self.settings_requested.emit)
+        menu.addAction("复制 Web 控制台令牌", self._copy_web_token)
         menu.addSeparator()
 
         auto = menu.addAction("开机自启")
@@ -2115,6 +2180,29 @@ class FloatingWidget(QWidget):
         menu.addAction("退出", self.quit_requested.emit)
 
         menu.exec_(QCursor.pos())
+
+    def _copy_web_token(self):
+        """复制本地 Web 控制台访问令牌（v3.8.0：浏览器手动打开控制台时粘贴）"""
+        try:
+            from agentfloat.webshell.server import _current_token as _tok
+            token = _tok()
+        except Exception:  # noqa: BLE001
+            token = ""
+        if not token:
+            self._show_launch_toast("Web 控制台未启动，暂无令牌")
+            return
+        try:
+            from PyQt5.QtWidgets import QApplication
+            QApplication.clipboard().setText(token)
+            self._show_launch_toast("已复制 Web 控制台令牌（本次运行内有效）")
+        except Exception:  # noqa: BLE001
+            self._show_launch_toast("复制失败，请稍后重试")
+
+    def _show_launch_toast(self, text):
+        """浮球旁的一句话提示（复用启动提示气泡）"""
+        if self._launch_toast is None:
+            self._launch_toast = LaunchToast()
+        self._launch_toast.show_for(self, text, self.theme)
 
     def _toggle_web_agent(self, agent):
         """Web Agent 启动/终止（浮球右键菜单入口，PATCH 3.1.0）"""

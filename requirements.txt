@@ -1,10 +1,12 @@
-# AgentFloat 运行时依赖
-PyQt5>=5.15.0
-pywebview>=5.0
-pythonnet>=3.0
-fastapi>=0.115.0
-uvicorn>=0.30.0
-pydantic>=2.7.0
+# AgentFloat 运行时依赖（v3.8.0 起锁定版本，保证构建可复现、避免上游投毒）
+# 升级依赖请成对更新本文件与 CHANGELOG，并重跑全量测试 + 冒烟。
+PyQt5==5.15.11
+PyQt5-Qt5==5.15.2
+pywebview==6.2.1
+pythonnet==3.1.0
+fastapi==0.141.1
+uvicorn==0.54.0
+pydantic==2.13.5
 
-# 构建依赖（可选）
-# pyinstaller>=6.0
+# 构建依赖（可选，需要打包时手动安装）
+# pyinstaller==6.22.3

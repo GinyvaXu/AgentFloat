@@ -1,6 +1,6 @@
 # AgentFloat 开发依赖（测试 / 静态检查）
-# 运行时依赖见 requirements.txt
+# 运行时依赖见 requirements.txt（已锁版本）
 -r requirements.txt
 
-pytest>=8.0
-pyflakes>=3.0
+pytest==9.1.1
+pyflakes==4.0.0

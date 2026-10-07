@@ -85,9 +85,9 @@ class CommandEditDialog(QDialog):
             "QDialog { background: %s; }" % sf +
             "QLabel { color: %s; font-size: 12px; }" % tx +
             "QLineEdit, QComboBox { background: #FFFFFF; color: %s; border: 1px solid %s;"
-            " border-radius: 6px; padding: 5px 8px; font-size: 12px; }" % (tx, bd) +
+            " border-radius: 8px; padding: 5px 8px; font-size: 12px; }" % (tx, bd) +
             "QPushButton { background: #FFFFFF; color: %s; border: 1px solid %s;"
-            " border-radius: 6px; padding: 5px 14px; font-size: 12px; }" % (ac, bd)
+            " border-radius: 8px; padding: 5px 14px; font-size: 12px; }" % (ac, bd)
         )
         lay = QVBoxLayout(self)
         form = QFormLayout()
@@ -197,9 +197,9 @@ class CommandPanel(FadePanelMixin, QDialog):
             "QPushButton:hover { background: %s; }" % sf +
             "QListWidget { background: %s; color: %s; border: 1px solid %s;"
             " border-radius: 8px; padding: 4px; font-size: 12px; }" % (card, tx, bd) +
-            "QListWidget::item { padding: 8px 8px; border-radius: 7px; margin: 2px; }" +
+            "QListWidget::item { padding: 8px 8px; border-radius: 8px; margin: 2px; }" +
             "QListWidget::item:hover { background: %s; }" % hover +
-            "QListWidget::item:selected { background: %s; color: #FFF; border-radius: 7px; }" % ac
+            "QListWidget::item:selected { background: %s; color: #FFF; border-radius: 8px; }" % ac
         )
 
     def _setup_ui(self):

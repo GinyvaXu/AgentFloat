@@ -100,9 +100,9 @@ class ClipboardPanel(FadePanelMixin, QDialog):
             "QPushButton:hover { background: %s; }" % sf +
             "QListWidget { background: %s; color: %s; border: 1px solid %s;"
             " border-radius: 8px; padding: 4px; font-size: 12px; }" % (card, tx, bd) +
-            "QListWidget::item { padding: 8px 8px; border-radius: 7px; margin: 2px; }" +
+            "QListWidget::item { padding: 8px 8px; border-radius: 8px; margin: 2px; }" +
             "QListWidget::item:hover { background: %s; }" % hover +
-            "QListWidget::item:selected { background: %s; color: #FFF; border-radius: 7px; }" % ac
+            "QListWidget::item:selected { background: %s; color: #FFF; border-radius: 8px; }" % ac
         )
 
     def _setup_ui(self):
@@ -156,7 +156,8 @@ class ClipboardPanel(FadePanelMixin, QDialog):
             self.list.addItem(it)
         self.lbl_count.setText("共 %d 条" % len(entries))
         if not entries:
-            self.list.addItem("暂无剪贴板记录")
+            from agentfloat.ui import states
+            self.list.addItem(states.empty("剪贴板记录", "复制任意文本后会自动收录"))
 
     def _copy_item(self, item):
         text = item.data(Qt.UserRole)

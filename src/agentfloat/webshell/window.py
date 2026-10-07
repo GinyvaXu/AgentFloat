@@ -25,6 +25,7 @@ PREHEAT_TTL_S = 600        # 预热窗口空闲回收（秒）
 REPREHEAT_DELAY_S = 60     # 用户关闭窗口后再预热延迟（秒）
 
 _base_url = "http://127.0.0.1:3087"
+_access_token = ""          # 本地接口令牌（v3.8.0，由 app.py 注入）
 _worker = None
 _cmd_q = None
 _closed_evt = None
@@ -45,8 +46,27 @@ def set_base_url(url):
     _base_url = (url or _base_url).rstrip("/")
 
 
+def set_token(token):
+    """注入本地接口访问令牌（Web 壳 URL 会自动携带 ?token=）"""
+    global _access_token
+    _access_token = str(token or "")
+
+
 def base_url():
     return _base_url
+
+
+def page_url(route="#/settings"):
+    """带令牌的前端地址：http://127.0.0.1:PORT/?token=xxx#/settings
+
+    查询串必须在 # 之前；令牌仅供本机 Web 壳/浏览器使用。
+    """
+    if not route.startswith("#"):
+        route = "#" + route
+    if _access_token:
+        from urllib.parse import quote
+        return "%s/?token=%s%s" % (_base_url, quote(_access_token, safe=""), route)
+    return "%s/%s" % (_base_url, route)
 
 
 def _open_browser(url):
@@ -151,7 +171,7 @@ def _spawn(route, width, height, hidden, kind):
     _cmd_q = multiprocessing.Queue()
     _closed_evt = multiprocessing.Event()
     _ready_evt = multiprocessing.Event()
-    url = "%s/%s" % (_base_url, route)
+    url = page_url(route)
     _worker = multiprocessing.Process(
         target=_worker_main,
         args=(url, route, width, height, _cmd_q, _closed_evt, _ready_evt, hidden),

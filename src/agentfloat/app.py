@@ -2,6 +2,7 @@
 """AgentFloat — 应用引导（QApplication / 托盘 / 生命周期 / 更新链路）"""
 import ctypes
 import os
+import secrets
 import subprocess
 import sys
 
@@ -34,6 +35,7 @@ from agentfloat.ui.loading_indicator import LoadingIndicator
 from agentfloat.webshell import window as web_ui
 from agentfloat.webshell.bridge import WebBridge
 from agentfloat.webshell.handlers import WebAppHandlers
+from agentfloat.webshell.server import set_token as set_web_token
 from agentfloat.webshell.server import start_server_thread
 
 # 启动时检测到的其他 AgentFloat 实例（供 _main 的托盘提醒使用，PATCH 3.0.2）
@@ -369,6 +371,10 @@ def _main():
     bridge = WebBridge()
     bridge.set_snapshot("version", VERSION)
     widget._web_bridge = bridge
+    # 本地接口访问令牌（v3.8.0）：随机生成，只有本机 Web 壳窗口/浏览器携带
+    _web_token = secrets.token_urlsafe(24)
+    set_web_token(_web_token)
+    web_ui.set_token(_web_token)
     _web_handlers = WebAppHandlers(widget, bridge)
     _web_thread, _web_port, _web_ok = start_server_thread(bridge, _web_handlers)
     web_ui.set_base_url("http://127.0.0.1:%d" % _web_port)
@@ -445,7 +451,7 @@ def _main():
             if box.clickedButton() is open_btn:
                 updater.open_release_page()
 
-        worker = DownloadWorker(url)
+        worker = DownloadWorker(url, info.get("sha256", ""))
         track(worker, "DownloadWorker")
         worker.done.connect(_on_done)
         worker.failed.connect(_on_failed)

@@ -84,6 +84,7 @@ def test_process_panel_construct_and_refresh(qapp):
 
 
 def test_process_panel_empty_state_text(qapp):
+    """v3.8.0：空态文案统一为「暂无…」（见 ui/states.py）"""
     from agentfloat.ui.process_panel import ProcessPanel
     p = ProcessPanel(lambda: [], theme="dark")
     p.refresh()
@@ -92,7 +93,8 @@ def test_process_panel_empty_state_text(qapp):
         w = p._body.itemAt(i).widget()
         if w is not None and hasattr(w, "text"):
             texts.append(w.text())
-    assert any("没有正在进行" in t for t in texts)
+    assert any(t.startswith("暂无") for t in texts), texts
+    assert any("运行中的 Agent 进程" in t for t in texts), texts
     p.hide_panel()
 
 

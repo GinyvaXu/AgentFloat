@@ -104,3 +104,51 @@ def test_placement_ring_room():
 def test_edge_position_empty_screens_safe():
     # 无屏幕信息时 clamp 原样返回（不抛异常）
     assert clamp_visible(10, 20, SIZE, []) == (10, 20)
+
+
+# ── v3.8.0：显示器热插拔 / 分辨率变化 / 负坐标副屏 ──────────────
+def test_monitor_unplugged_ball_returns_to_remaining_screen():
+    """拔掉副屏后，原本在副屏上的浮窗必须回到主屏可见区"""
+    was_on_second = (1800, 500)
+    after = [SCREENS[0]]                 # 副屏消失
+    x, y = clamp_visible(was_on_second[0], was_on_second[1], SIZE, after)
+    l, t, r, b = after[0]
+    assert l <= x <= r - SIZE and t <= y <= b - SIZE, "应整球落在剩余屏幕内"
+
+
+def test_resolution_shrink_keeps_ball_visible():
+    """分辨率调小后，浮窗不能停在旧坐标（右侧/下方越界）"""
+    big = (0, 0, 2559, 1439)
+    small = (0, 0, 1279, 719)
+    x, y = clamp_visible(big[2] - SIZE - EDGE_MARGIN, big[3] - SIZE - EDGE_MARGIN,
+                         SIZE, [small])
+    assert x + SIZE <= small[2] and y + SIZE <= small[3]
+
+
+def test_secondary_screen_with_negative_origin():
+    """副屏在主屏左侧（负坐标）时，就近判断与贴边都要正确"""
+    left_monitor = [(-1920, 0, -1, 1079), (0, 0, 1706, 1066)]
+    assert screen_index_for(-960, 500, left_monitor) == 0
+    x, y = edge_position("right", -960, 500, SIZE, left_monitor[0])
+    assert left_monitor[0][0] <= x <= left_monitor[0][2] - SIZE + 1
+    assert x + SIZE <= 0, "不能越过该屏幕的右边界"
+
+
+def test_ring_room_position_on_small_screen():
+    """小屏幕上环菜单放不下时居中，不返回屏外坐标"""
+    from agentfloat.ui.placement import ring_room_position
+    tiny = [(0, 0, 799, 599)]
+    nx, ny = ring_room_position(10, 10, 400, tiny)
+    assert 0 <= nx <= 799 and 0 <= ny <= 599
+
+
+def test_display_change_handler_wired():
+    """浮窗必须监听显示器变化（v3.8.0：热插拔/改分辨率自动收敛）"""
+    import inspect
+    from agentfloat.ui import floatball
+    src = inspect.getsource(floatball)
+    for token in ("screenAdded", "screenRemoved", "geometryChanged",
+                  "_apply_display_change", "logicalDotsPerInchChanged"):
+        assert token in src, "缺少显示器变化处理：%s" % token
+    assert "_bind_display_signals" in inspect.getsource(
+        floatball.FloatingWidget.__init__), "初始化时应绑定显示器信号"

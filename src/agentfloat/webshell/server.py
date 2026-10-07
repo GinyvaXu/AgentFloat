@@ -11,19 +11,62 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import socket
 import threading
 import time
 from mimetypes import guess_type
 
 from fastapi import APIRouter, FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from agentfloat.services.vault.accounts import VaultError
 
 WEB_PORT = 3087
+
+# ── 本地接口访问令牌（v3.8.0）──────────────────────────────────────
+# 启动时由 app.py 生成随机令牌；Web 壳窗口/浏览器带 ?token= 打开，SPA 存
+# sessionStorage 并在每个请求上带 X-AgentFloat-Token（SSE 用 ?token=）。
+TOKEN_COOKIE = "AgentFloatToken"
+_ALLOWED_HOSTS = ("127.0.0.1", "localhost", "::1")
+_TOKEN = ""
+
+
+def set_token(token: str):
+    """设置访问令牌（app.py 启动时调用；空值表示不校验——仅用于单元测试）"""
+    global _TOKEN
+    _TOKEN = str(token or "")
+
+
+def _current_token() -> str:
+    return _TOKEN
+
+
+def _host_allowed(host: str) -> bool:
+    """Host 白名单：仅允许本机回环（防 DNS rebinding 用攻击者域名访问本服务）"""
+    if not host:
+        return False
+    h = host.strip()
+    if h.startswith("["):                  # [::1]:3087
+        h = h[1:h.find("]")] if "]" in h else h
+    elif h.count(":") == 1:                # 127.0.0.1:3087 / localhost:3087
+        h = h.rsplit(":", 1)[0]
+    return h.strip(".").lower() in _ALLOWED_HOSTS
+
+
+def _origin_allowed(origin: str, host: str) -> bool:
+    """Origin 必须与请求 Host 同源（浏览器跨站请求一律拒绝）"""
+    try:
+        from urllib.parse import urlparse
+        return urlparse(origin).netloc.lower() == host.lower()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _query_token_ok(request) -> bool:
+    supplied = request.query_params.get("token") or ""
+    return bool(_TOKEN) and secrets.compare_digest(supplied, _TOKEN)
 
 
 def _locate_web_dir() -> str:
@@ -111,13 +154,48 @@ def _news_payload(config_dir_hint=None, date=None):
 
 def create_app(bridge, handlers):
     app = FastAPI(title="AgentFloat Web UI", version=getattr(handlers, "version", ""))
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
     api = APIRouter(prefix="/api")
+
+    # ── 本地接口防护（v3.8.0 安全加固）──────────────────────────────
+    # 背景：本服务监听 127.0.0.1，但**浏览器里的任意网页**都能向它发请求：
+    #   ① 跨站 fetch（旧版 CORS allow_origins=["*"] 直接放行，可读取响应）
+    #   ② DNS rebinding（攻击者域名解析到 127.0.0.1，浏览器视为同源，连 CORS 都不过）
+    # 一旦被调用：POST /api/vault/quick_login 可免密解锁保险箱，
+    # GET /api/vault/keys?reveal=1 会返回全部密钥明文 —— 等于钥匙被隔空取走。
+    # 因此这里加三道闸：Host 白名单 → Origin 校验 → /api 令牌校验。
+    @app.middleware("http")
+    async def _local_guard(request, call_next):
+        from starlette.responses import JSONResponse
+
+        token = _current_token()
+        if not token:
+            # 未配置令牌（单元测试 / 直接调用 create_app）→ 不做校验
+            return await call_next(request)
+
+        host = (request.headers.get("host") or "").strip()
+        if not _host_allowed(host):
+            return JSONResponse({"error": "invalid host"}, status_code=403)
+
+        origin = (request.headers.get("origin") or "").strip()
+        if origin and not _origin_allowed(origin, host):
+            return JSONResponse({"error": "cross-origin request blocked"}, status_code=403)
+
+        path = request.url.path
+        if path.startswith("/api"):
+            supplied = (request.headers.get("x-agentfloat-token")
+                        or request.query_params.get("token")
+                        or request.cookies.get(TOKEN_COOKIE)
+                        or "")
+            if not secrets.compare_digest(supplied, token):
+                return JSONResponse({"error": "unauthorized", "code": "token_required"},
+                                    status_code=401)
+
+        response = await call_next(request)
+        # 首页带 ?token= 打开时种一个同站 Cookie，刷新/新标签页免再拼令牌
+        if path in ("/", "/index.html") and _query_token_ok(request):
+            response.set_cookie(TOKEN_COOKIE, token, httponly=True, samesite="strict",
+                                path="/", max_age=60 * 60 * 24 * 30)
+        return response
 
     @api.get("/config")
     def get_config():

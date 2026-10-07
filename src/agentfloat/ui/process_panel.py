@@ -6,7 +6,7 @@
 - 已中断：中断后进程从运行列表转入「已中断」保留显示，并提供「继续任务」
   - 软中断（进程仍在）：聚焦窗口注入 continue/继续 + 回车
   - 已结束进程：按 Agent 的 resume_args 重新启动并续接上次会话
-- 没有任何运行/中断的 Agent 时显示「没有正在进行的 Agent 进程」
+- 没有运行/中断的 Agent 时显示统一空态「暂无运行中的 Agent 进程」（见 ui.states）
 
 v3.6.1：
 - **大小可调**：面板上滚轮缩放、Ctrl+滚轮调不透明度（也可在设置中调），自动保存
@@ -301,8 +301,10 @@ class ProcessPanel(QDialog):
                 del self._interrupted[aid]
 
         if not running and not self._interrupted:
-            empty = QLabel("没有正在进行的 Agent 进程")
-            empty.setObjectName("dim")
+            from agentfloat.ui import states
+            empty = QLabel(states.empty("运行中的 Agent 进程", "启动任意 Agent 后会在这里显示"))
+            empty.setObjectName("state")
+            empty.setStyleSheet(states.css(self._theme))
             self._body.addWidget(empty)
         for m in running:
             self._body.addWidget(self._card(m["agent"], m))

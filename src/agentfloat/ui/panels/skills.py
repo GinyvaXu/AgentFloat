@@ -207,9 +207,9 @@ class SkillsPanel(FadePanelMixin, QDialog):
             " border-top-right-radius: 14px; border-bottom: 1px solid %s; }" % (banner, bd) +
             "QTreeWidget, QTextBrowser, QLineEdit, QComboBox { background: %s; color: %s;"
             " border: 1px solid %s; border-radius: 8px; padding: 6px; font-size: 12px; }" % (card, tx, bd) +
-            "QTreeWidget::item { padding: 6px 6px; border-radius: 7px; }" +
+            "QTreeWidget::item { padding: 6px 6px; border-radius: 8px; }" +
             "QTreeWidget::item:hover { background: %s; }" % hover_bg +
-            "QTreeWidget::item:selected { background: %s; color: #FFF; border-radius: 7px; }" % ac +
+            "QTreeWidget::item:selected { background: %s; color: #FFF; border-radius: 8px; }" % ac +
             "QTreeWidget::branch { background: transparent; }" +
             "QPushButton { background: %s; color: %s; border: 1px solid %s;"
             " border-radius: 8px; padding: 6px 14px; font-size: 12px; }" % (card, ac, bd) +
@@ -386,7 +386,8 @@ class SkillsPanel(FadePanelMixin, QDialog):
         self._title.lbl_count.setText("共 %d 个 skill" % total)
         if total == 0:
             self.lbl_name.setText("—")
-            self.desc_view.setPlainText("未找到匹配的 skill。")
+            from agentfloat.ui import states
+            self.desc_view.setPlainText(states.empty("匹配的 Skill", "换个关键词，或在设置里调整扫描根目录"))
             self.ed_trigger.clear()
             self.btn_copy.setEnabled(False)
             self._current = None

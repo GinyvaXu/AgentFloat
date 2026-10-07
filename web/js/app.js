@@ -518,7 +518,7 @@ import {
       '<button class="btn sm" onclick="App.keyEdit(\'' + esc(k.name) + '\')">编辑</button>' +
       '<button class="btn sm danger" onclick="App.keyDelete(\'' + esc(k.name) + '\')">删除</button></div>').join("");
     return card("API Key 管理", "密钥名即环境变量名（如 OPENCODE_GO_API_KEY）；界面默认掩码，可「复制」或「显示」。",
-      (rowsHtml || '<div class="ep-empty">还没有保存的密钥：点下方按钮添加，或直接从常用名称开始</div>') +
+      (rowsHtml || '<div class="ep-empty">暂无保存的密钥：点下方按钮添加，或直接从常用名称开始</div>') +
       '<div class="ep-add"><button class="btn primary" onclick="App.keyEdit(null)">＋ 添加密钥</button>' +
       VAULT_QUICK_KEYS.map((n) => '<button class="btn sm" onclick="App.keyEdit(\'' + n + '\')">＋ ' + n + "</button>").join("") + "</div>");
   }
@@ -713,7 +713,7 @@ import {
       '" onclick="App.addApiPreset(\'' + p.id + '\')">＋ ' + esc(p.name) + "</button>";
     inner += card("监控端点", "端点决定「拉什么数据」；「测试」只即时验证、不改配置，绿色/红色为最近一次后台拉取的结果。",
       warnBar +
-      (cards || '<div class="ep-empty">还没有监控端点：用下面的预设一键添加，或点「自定义端点」手动配置。</div>') +
+      (cards || '<div class="ep-empty">暂无监控端点：用下面的预设一键添加，或点「自定义端点」手动配置。</div>') +
       '<div class="ep-add"><button class="btn" onclick="App.addEndpoint()">＋ 自定义端点</button>' +
       (presets.length ? '<span class="ep-add-label">预设快速添加：</span>' + presets.map(presetBtn).join("") : "") +
       "</div>");

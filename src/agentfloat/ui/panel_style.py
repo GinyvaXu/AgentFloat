@@ -7,8 +7,11 @@
 - 控件：主按钮品牌渐变、幽灵按钮半透明、危险按钮红、输入/列表/滚动条统一
 
 用法：各面板在自己的样式前拼接 ``panel_css(theme)``，再用局部规则覆盖细节。
+
+v3.8.0：圆角/字号改用 ``ui.tokens`` 统一档位（此前 9px/12px 等散落值已收敛）。
 """
 from agentfloat.core.theme import get_colors
+from agentfloat.ui.tokens import FONT, RADIUS
 
 ACCENT = "#0a84ff"
 ACCENT_2 = "#af52de"
@@ -35,17 +38,20 @@ def panel_css(theme="light"):
         # 窗口玻璃底 + 圆角
         "QDialog { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         " stop:0 %(top)s, stop:1 %(bottom)s); border: 1px solid %(sep)s;"
-        " border-radius: 16px; }" % {"top": glass_top, "bottom": glass_bottom, "sep": sep} +
-        "QFrame#titleBar { background: %(h)s; border-top-left-radius: 16px;"
-        " border-top-right-radius: 16px; border-bottom: 2px solid qlineargradient("
-        "x1:0,y1:0,x2:1,y2:0, stop:0 %(a1)s, stop:1 %(a2)s); }" % {"h": header, "a1": ACCENT, "a2": ACCENT_2} +
-        "QFrame#titleBar QLabel { font-size: 13px; font-weight: 600; }" +
+        " border-radius: %(rxl)dpx; }" % {"top": glass_top, "bottom": glass_bottom,
+                                          "sep": sep, "rxl": RADIUS.xl} +
+        "QFrame#titleBar { background: %(h)s; border-top-left-radius: %(rxl)dpx;"
+        " border-top-right-radius: %(rxl)dpx; border-bottom: 2px solid qlineargradient("
+        "x1:0,y1:0,x2:1,y2:0, stop:0 %(a1)s, stop:1 %(a2)s); }" % {
+            "h": header, "a1": ACCENT, "a2": ACCENT_2, "rxl": RADIUS.xl} +
+        "QFrame#titleBar QLabel { font-size: %(ft)dpx; font-weight: 600; }" % {"ft": FONT.title} +
         # 文字
-        "QLabel { color: %s; font-size: 12px; background: transparent; }" % tx +
+        "QLabel { color: %s; font-size: %dpx; background: transparent; }" % (tx, FONT.body) +
         "QLabel#hint, QLabel.hint { color: %s; }" % hint +
         # 按钮
         "QPushButton { background: %(card)s; color: %(ac)s; border: 1px solid %(sep)s;"
-        " border-radius: 9px; padding: 6px 13px; font-size: 12px; }" % {"card": card, "ac": accent, "sep": sep} +
+        " border-radius: %(rsm)dpx; padding: 6px 13px; font-size: %(fb)dpx; }" % {
+            "card": card, "ac": accent, "sep": sep, "rsm": RADIUS.sm, "fb": FONT.body} +
         "QPushButton:hover { background: %s; }" % hover +
         "QPushButton:pressed { background: %s; }" % surface +
         "QPushButton#primary, QPushButton.primary { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
@@ -56,35 +62,40 @@ def panel_css(theme="light"):
         # 输入
         "QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {"
         " background: %(card)s; color: %(tx)s; border: 1px solid %(sep)s;"
-        " border-radius: 9px; padding: 6px 9px; font-size: 12px;"
-        " selection-background-color: %(ac)s; }" % {"card": card, "tx": tx, "sep": sep, "ac": accent} +
+        " border-radius: %(rsm)dpx; padding: 6px 9px; font-size: %(fb)dpx;"
+        " selection-background-color: %(ac)s; }" % {"card": card, "tx": tx, "sep": sep,
+                                                    "ac": accent, "rsm": RADIUS.sm,
+                                                    "fb": FONT.body} +
         "QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus { border: 1px solid %s; }" % accent +
         "QComboBox QAbstractItemView { background: %(card)s; color: %(tx)s;"
-        " border: 1px solid %(sep)s; border-radius: 8px; selection-background-color: %(ac)s; }"
-        % {"card": card, "tx": tx, "sep": sep, "ac": accent} +
+        " border: 1px solid %(sep)s; border-radius: %(rsm)dpx; selection-background-color: %(ac)s; }"
+        % {"card": card, "tx": tx, "sep": sep, "ac": accent, "rsm": RADIUS.sm} +
         # 列表 / 树
         "QListWidget, QTreeWidget, QTableWidget { background: %(card)s; color: %(tx)s;"
-        " border: 1px solid %(sep)s; border-radius: 12px; padding: 5px; font-size: 12px;"
-        " outline: 0; }" % {"card": card, "tx": tx, "sep": sep} +
-        "QListWidget::item, QTreeWidget::item { padding: 8px 9px; border-radius: 8px; margin: 2px; }" +
+        " border: 1px solid %(sep)s; border-radius: %(rmd)dpx; padding: 5px; font-size: %(fb)dpx;"
+        " outline: 0; }" % {"card": card, "tx": tx, "sep": sep, "rmd": RADIUS.md,
+                            "fb": FONT.body} +
+        "QListWidget::item, QTreeWidget::item { padding: 8px 9px; border-radius: %(rsm)dpx;"
+        " margin: 2px; }" % {"rsm": RADIUS.sm} +
         "QListWidget::item:hover, QTreeWidget::item:hover { background: %s; }" % hover +
         "QListWidget::item:selected, QTreeWidget::item:selected { background: qlineargradient("
-        "x1:0,y1:0,x2:1,y2:1, stop:0 %(a1)s, stop:1 %(a2)s); color: #FFF; border-radius: 8px; }"
-        % {"a1": ACCENT, "a2": ACCENT_2} +
+        "x1:0,y1:0,x2:1,y2:1, stop:0 %(a1)s, stop:1 %(a2)s); color: #FFF;"
+        " border-radius: %(rsm)dpx; }" % {"a1": ACCENT, "a2": ACCENT_2, "rsm": RADIUS.sm} +
         "QHeaderView::section { background: transparent; color: %s; border: none; padding: 6px; }" % hint +
         # 滚动条（细、半透明）
         "QScrollBar:vertical { background: transparent; width: 10px; margin: 4px 2px; }" +
-        "QScrollBar::handle:vertical { background: %s; border-radius: 4px; min-height: 30px; }" % (
-            "rgba(255,255,255,0.22)" if is_dark else "rgba(0,0,0,0.18)") +
+        "QScrollBar::handle:vertical { background: %s; border-radius: %dpx; min-height: 30px; }" % (
+            "rgba(255,255,255,0.22)" if is_dark else "rgba(0,0,0,0.18)", RADIUS.bar) +
         "QScrollBar::handle:vertical:hover { background: %s; }" % (
             "rgba(255,255,255,0.34)" if is_dark else "rgba(0,0,0,0.30)") +
         "QScrollBar::add-line, QScrollBar::sub-line { height: 0; }" +
         "QScrollBar:horizontal { background: transparent; height: 10px; margin: 2px 4px; }" +
-        "QScrollBar::handle:horizontal { background: %s; border-radius: 4px; min-width: 30px; }" % (
-            "rgba(255,255,255,0.22)" if is_dark else "rgba(0,0,0,0.18)") +
+        "QScrollBar::handle:horizontal { background: %s; border-radius: %dpx; min-width: 30px; }" % (
+            "rgba(255,255,255,0.22)" if is_dark else "rgba(0,0,0,0.18)", RADIUS.bar) +
         # 提示/状态
         "QToolTip { background: %(card)s; color: %(tx)s; border: 1px solid %(sep)s;"
-        " border-radius: 8px; padding: 5px 8px; }" % {"card": card, "tx": tx, "sep": sep}
+        " border-radius: %(rsm)dpx; padding: 5px 8px; }" % {"card": card, "tx": tx,
+                                                             "sep": sep, "rsm": RADIUS.sm}
     )
 
 
