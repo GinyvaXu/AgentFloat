@@ -504,6 +504,8 @@ def _main():
             bridge.resolve_wait(payload.get("_wait_token"))
         elif kind == "generate_news":
             widget._generate_news(auto=False)
+        elif kind == "cancel_news":
+            widget.cancel_news()
         elif kind == "news_read":
             widget._mark_news_read()
         elif kind == "check_update":
@@ -628,11 +630,49 @@ def _main():
     widget.auto_translate_failed.connect(lambda err: tray_icon.showMessage(
         "AgentFloat — 自动翻译失败", str(err), QSystemTrayIcon.Warning, 7000))
     widget.news_done.connect(lambda msg: tray_icon.showMessage(
-        "AgentFloat — AI 快报", msg, QSystemTrayIcon.Information, 5000))
+        "AgentFloat — AI 快报", "%s\n点击查看今日快报" % msg, QSystemTrayIcon.Information, 6000))
     widget.water_reminded.connect(lambda msg: tray_icon.showMessage(
         "AgentFloat — 喝水助手", msg, QSystemTrayIcon.Information, 5000))
     widget.news_failed.connect(lambda err: tray_icon.showMessage(
         "AgentFloat — AI 快报失败", str(err), QSystemTrayIcon.Warning, 7000))
+
+    # ── AI 快报提醒与状态（v3.9.0）──
+    def _refresh_tray_news():
+        """托盘提示带上未读数与下次生成时间"""
+        try:
+            unread = widget.news_unread_count()
+            nxt = widget.news_next_run()
+            bits = []
+            if unread:
+                bits.append("AI 快报 %d 条未读" % unread)
+            if nxt:
+                bits.append("下次生成 %s" % nxt)
+            tray_icon.setToolTip(
+                "AgentFloat — AI Agent 浮窗助手"
+                + ("  |  " + " · ".join(bits) if bits else "")
+                + "  |  点击启动默认 Agent | 悬停/长按环绕菜单 | Ctrl+Alt+C")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_tray_message_clicked():
+        """点击托盘气泡直达对应页面（v3.9.0：通知可点击）"""
+        try:
+            _log().debug("托盘通知被点击 → 打开 AI 快报")
+            widget._open_news_panel()
+        except Exception as e:  # noqa: BLE001
+            _log().debug("打开快报失败: %s", e)
+
+    try:
+        tray_icon.messageClicked.connect(_on_tray_message_clicked)
+    except Exception:  # noqa: BLE001
+        pass
+    widget.news_done.connect(lambda _m: _refresh_tray_news())
+    widget.news_failed.connect(lambda _m: _refresh_tray_news())
+    try:
+        widget.refresh_news_unread()      # 启动时按已读状态还原未读数
+    except Exception:  # noqa: BLE001
+        pass
+    _refresh_tray_news()
     # 主题切换时同步更新托盘菜单样式与 Web 壳
     widget.theme_changed.connect(lambda t: tray_menu.setStyleSheet(_build_menu_stylesheet(t)))
     widget.theme_changed.connect(lambda t: bridge.publish("theme_changed", {"theme": t}))
@@ -663,6 +703,15 @@ def _main():
 
     if config.get("auto_start") and not is_auto_start_enabled():
         toggle_auto_start(True)
+
+    # v3.9.0：首次运行播放新用户引导（等启动动画结束、浮球稳定后再弹）
+    def _maybe_onboarding():
+        try:
+            QTimer.singleShot(1200, widget.maybe_start_onboarding)
+        except Exception:  # noqa: BLE001
+            _log().debug("引导启动检查失败", exc_info=True)
+
+    QTimer.singleShot(4200, _maybe_onboarding)
 
     # 启动后延迟自动检查更新（不阻塞启动）
     if config.get("check_updates", True):

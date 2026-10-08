@@ -45,11 +45,17 @@ GITHUB_PROXIES = [
     "https://gh.llkk.cc/",
 ]
 
+# 自有镜像（Cloudflare R2，国内直连快；v3.9.0 起作为首选更新源）
+# 由 personal-website 的镜像管线生成：{project, tag, updatedAt, base, files:[{name,size,sha256}]}
+R2_MANIFEST = "https://dl.ginyva.site/releases/agentfloat/latest.json"
+
 _RAW_MANIFEST = ("https://raw.githubusercontent.com/GinyvaXu/"
                  "AgentFloat/main/update.json")
 _JS_MANIFEST = ("https://cdn.jsdelivr.net/gh/GinyvaXu/"
                 "AgentFloat@main/update.json")
+# 顺序即优先级：同版本时取先出现者（R2 镜像最快且免代理）
 MANIFEST_SOURCES = [
+    ("r2", R2_MANIFEST),
     ("ghfast", "https://ghfast.top/" + _RAW_MANIFEST),
     ("raw", _RAW_MANIFEST),
     ("ghproxynet", "https://ghproxy.net/" + _RAW_MANIFEST),
@@ -197,6 +203,37 @@ def custom_mirror():
         return {}
 
 
+def _result_from_r2_manifest(man, current):
+    """把自有 R2 镜像的 latest.json 转成检查结果（v3.9.0 首选源）。
+
+    格式：{project, tag, updatedAt, base, files:[{name, size, sha256}]}
+    R2 走 Cloudflare 边缘（国内直连快），且自带 sha256 供下载校验。
+    """
+    latest = str(man.get("tag", "") or "").strip().lstrip("vV")
+    if not latest:
+        raise ValueError("empty r2 tag")
+    base = str(man.get("base", "") or "")
+    files = [f for f in (man.get("files") or []) if isinstance(f, dict)]
+    if not files or not base:
+        raise ValueError("r2 manifest missing files/base")
+    # 优先安装包（Setup）；否则取第一个
+    pick = files[0]
+    for f in files:
+        if "setup" in str(f.get("name", "")).lower():
+            pick = f
+            break
+    name = str(pick.get("name", "") or "")
+    if not name:
+        raise ValueError("r2 manifest missing file name")
+    return {"available": is_newer(latest, current),
+            "version": latest, "current": current,
+            "url": base.rstrip("/") + "/" + name,
+            "sha256": str(pick.get("sha256", "") or "").strip().lower(),
+            "notes": "", "notes_zh": "",
+            "error": None, "detail": "", "source": "r2",
+            "size": int(pick.get("size") or 0)}
+
+
 def _result_from_manifest(man, current):
     latest = str(man.get("version", "") or "").strip()
     if not latest:
@@ -219,11 +256,33 @@ def _probe_one(kind, url, per_timeout, current):
             return True, {"available": is_newer(latest, current),
                           "version": latest, "current": current,
                           "url": dl_url, "sha256": sha, "notes": notes, "notes_zh": "",
-                          "error": None, "detail": ""}
+                          "error": None, "detail": "", "source": "api"}
         man = fetch_manifest(url, per_timeout)
-        return True, _result_from_manifest(man, current)
+        if kind == "r2":
+            return True, _result_from_r2_manifest(man, current)
+        res = _result_from_manifest(man, current)
+        res.setdefault("source", kind)
+        return True, res
     except Exception as e:
         return False, e
+
+
+def _merge_best(results):
+    """取版本最高者；同版本时优先 R2（MANIFEST_SOURCES 顺序），
+    并用其它同版本结果补齐缺失的 notes / sha256（v3.9.0）。"""
+    best = max(results, key=lambda r: parse_version(r["version"]))
+    same = [r for r in results if parse_version(r["version"]) == parse_version(best["version"])]
+    merged = dict(best)
+    for r in same:
+        if r is best:
+            continue
+        if not merged.get("sha256") and r.get("sha256"):
+            merged["sha256"] = r["sha256"]
+        if not merged.get("notes") and r.get("notes"):
+            merged["notes"] = r["notes"]
+        if not merged.get("notes_zh") and r.get("notes_zh"):
+            merged["notes_zh"] = r["notes_zh"]
+    return merged
 
 
 def _check_parallel(current, timeout):
@@ -245,25 +304,26 @@ def _check_parallel(current, timeout):
         pass
     ex.shutdown(wait=False)
     if results:
-        return max(results, key=lambda r: parse_version(r["version"]))
+        return _merge_best(results)
     last = errs[-1] if errs else TimeoutError("all sources timed out")
     return {"available": False, "version": "", "current": current,
             "url": "", "sha256": "", "notes": "", "notes_zh": "",
-            "error": error_code(last), "detail": str(last)}
-
+            "error": error_code(last), "detail": str(last), "source": ""}
 
 def check_for_update(current_version, timeout=_DEFAULT_TIMEOUT):
     """返回状态 dict，绝不抛异常。
 
-    keys: available / version / current / url / notes / notes_zh /
-          error（None 或 'timeout'/'network'/'unknown'）/ detail
-    自建镜像 manifest 优先；否则并行探测全部内置源，取最高版本。
+    keys: available / version / current / url / sha256 / source(命中源) /
+          notes / notes_zh / error（None 或 'timeout'/'network'/'unknown'）/ detail
+    自建镜像 manifest 优先；否则并行探测全部内置源（R2 自有镜像优先），取最高版本。
     """
     custom = custom_mirror().get("manifest") or ""
     if custom:
         try:
-            return _result_from_manifest(fetch_manifest(custom, timeout),
-                                         current_version)
+            res = _result_from_manifest(fetch_manifest(custom, timeout),
+                                        current_version)
+            res.setdefault("source", "custom")
+            return res
         except Exception:
             pass
     return _check_parallel(current_version, timeout)

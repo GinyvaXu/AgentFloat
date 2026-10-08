@@ -332,8 +332,38 @@ def create_app(bridge, handlers):
         return {"ok": True}
 
     @api.post("/news/read")
-    def news_read():
-        bridge.command("news_read")  # 清零未读数
+    def news_read(body: dict | None = None):
+        """标记已读：body.item_id 为空表示整期已读；read=false 可标未读"""
+        body = body or {}
+        try:
+            return handlers.news_mark_read(body.get("item_id"), bool(body.get("read", True)))
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": str(e)[:200]}, status_code=500)
+
+    @api.post("/news/star")
+    def news_star(body: dict):
+        try:
+            return handlers.news_star(body.get("item_id"))
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": str(e)[:200]}, status_code=500)
+
+    @api.post("/news/export")
+    def news_export(body: dict | None = None):
+        try:
+            return handlers.news_export((body or {}).get("date"))
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": str(e)[:200]}, status_code=500)
+
+    @api.post("/news/retry_source")
+    def news_retry_source(body: dict):
+        try:
+            return handlers.news_retry_source(body.get("source_id"))
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": str(e)[:200]}, status_code=500)
+
+    @api.post("/news/cancel")
+    def news_cancel():
+        bridge.command("cancel_news")
         return {"ok": True}
 
     @api.get("/skills")

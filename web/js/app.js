@@ -129,9 +129,10 @@ import {
     page = p;
     if (p !== "install") leaveInstallPage();
     $$("#nav .nav-item").forEach((a) => a.classList.toggle("active", a.dataset.page === p));
-    ["settings", "install", "api", "news"].forEach((id) => $("#page-" + id).classList.toggle("hidden", id !== p));
-    $("#pageTitle").textContent = { settings: "设置", install: "Agent 安装", api: "API 用量", news: "AI 快报" }[p];
-    if (p === "settings") renderSettings();
+    ["guide", "settings", "install", "api", "news"].forEach((id) => $("#page-" + id).classList.toggle("hidden", id !== p));
+    $("#pageTitle").textContent = { guide: "使用指南", settings: "设置", install: "Agent 安装", api: "API 用量", news: "AI 快报" }[p];
+    if (p === "guide") renderGuide();
+    else if (p === "settings") renderSettings();
     else if (p === "install") renderInstallPage();
     else if (p === "api") loadApiPage();
     else loadNewsPage();
@@ -184,7 +185,16 @@ import {
     if (!cfg) return;      // v3.6.0：配置尚未加载完成时（过早点击子页）直接跳过，避免空引用
     const agents = cfg.agents || [];
     const primary = agents.find((a) => a.primary) || agents[0] || {};
-    if (sub === "general") {
+
+    // v3.9.0：新用户提示卡（未看过引导时显示；点「我已熟悉」写入 onboarding_done）
+    let _guideBanner = "";
+    if (!cfg.onboarding_done) {
+      _guideBanner = '<div class="card guide-hero"><h3>新用户？先看这里</h3>' +
+        '<div class="desc">花 3 分钟看完「使用指南」：浮球操作、Agent 启动、密钥保险箱、余额监控与自动更新一次讲清。</div>' +
+        '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">' +
+        '<button class="btn primary" id="btnGoGuide">打开使用指南</button>' +
+        '<button class="btn" id="btnSkipOnboard">我已熟悉，不再提示</button></div></div>';
+    }    if (sub === "general") {
       const canSkip = !!primary.skip_permissions_arg && (primary.launcher || "terminal") !== "web";
       const agentOpts = agents.map((a) => [a.id, a.name + (a.primary ? "（默认）" : "")]);
       let inner = "";
@@ -223,7 +233,7 @@ import {
         row("面板不透明度", "只影响面板背景，文字保持清晰",
           rangeCtl("process_panel.opacity", (cfg.process_panel || {}).opacity != null ? cfg.process_panel.opacity : 1, 0.35, 1, 0.05, "ppLabel") +
           '<span id="ppLabel" class="val-tag">' + Math.round(((cfg.process_panel || {}).opacity != null ? cfg.process_panel.opacity : 1) * 100) + "%</span>"));
-      el.innerHTML = inner;
+      el.innerHTML = _guideBanner + inner;
       bindAll(el);
       $$("#settingsContent [name='launch_mode']").forEach((r) => r.addEventListener("change", () => {
         cfg.launch_mode = $("input[name='launch_mode']:checked").value;
@@ -762,7 +772,7 @@ import {
       "<p><b>JSONPath</b>：<code>$.a.b</code> 取嵌套键、<code>$.a[0].b</code> 取数组元素、<code>$.a[*].b</code> 取列表。示例：<code>$.balance_infos[0].total_balance</code>（DeepSeek）。</p>" +
       "<p><b>字段 display</b>：<code>number</code> 数值、<code>percent</code> 百分比（自动补 %）、<code>text</code> 文本；显示行可用「自定义字段」引用字段标签（如填「每周已用」）。</p>" +
       "</div></details>");
-    el.innerHTML = inner;
+    el.innerHTML = _guideBanner + inner;
     bindAll(el);
     // PATCH 3.5.1：余额显示框「自定义显示行」编辑（输入即写入配置，保存后生效）
     $$("#badgeRows [data-brow]").forEach((rowEl) => {
@@ -901,9 +911,11 @@ import {
     $("#modalBox [data-close]").addEventListener("click", closeModal);
   }
 
-  // ══════════════════ AI 快报页 ══════════════════
+  // ══════════════════ AI 快报页（v3.9.0 交互层重写）══════════════════
+  // 阅读器状态（跨重渲染保留：搜索词 / 过滤 / 折叠 / 密度 / 键盘焦点）
+  const newsUI = { search: "", filter: "all", collapsed: {}, focus: -1, showSettings: false };
+
   async function loadNewsPage() {
-    API.api("/api/news/read", { method: "POST" }).catch(() => {});
     const el = $("#newsContent");
     el.innerHTML = '<div class="card">加载中…</div>';
     await loadNewsState();
@@ -919,28 +931,123 @@ import {
       toast("快报状态加载失败：" + e.message, "err");
     }
   }
+
+  const NEWS_CAT_COLOR = { "模型": "#4D6BFE", "工具": "#16A085", "论文": "#8E44AD",
+                           "产品": "#E67E22", "行业": "#2E86C1", "综合": "#7F8C8D" };
+
+  function newsFilteredItems(report) {
+    const n = cfg.news || {};
+    const kw = (newsUI.search || "").trim().toLowerCase();
+    return (report.items || []).filter((it) => {
+      if (newsUI.filter === "unread" && it.read) return false;
+      if (newsUI.filter === "starred" && !it.starred) return false;
+      if (!kw) return true;
+      return ((it.title || "") + " " + (it.summary || "") + " " + (it.source || "") +
+              " " + (it.category || "")).toLowerCase().indexOf(kw) >= 0;
+    });
+  }
+
+  function newsItemHtml(it, idx) {
+    const c = NEWS_CAT_COLOR[it.category] || "#7F8C8D";
+    return '<div class="news-item' + (it.read ? "" : " unread") + (newsUI.focus === idx ? " focus" : "") +
+      '" data-idx="' + idx + '" data-id="' + esc(it.id || "") + '">' +
+      '<div class="news-line">' +
+      '<span class="news-dot" title="' + (it.read ? "已读" : "未读") + '"></span>' +
+      '<div class="t"><a href="' + esc(it.url) + '" target="_blank" rel="noopener">' + esc(it.title || "") + "</a></div>" +
+      '<button class="news-star' + (it.starred ? " on" : "") + '" title="收藏/取消收藏" data-star="' +
+      esc(it.id || "") + '">' + (it.starred ? "★" : "☆") + "</button></div>" +
+      (it.summary ? '<div class="s">' + esc(it.summary) + "</div>" : "") +
+      '<div class="meta"><span class="chip" style="color:#fff;background:' + c + '">' +
+      esc(it.category || "综合") + "</span>" +
+      (it.source ? '<span class="src">' + esc(it.source) + "</span>" : "") +
+      '<button class="linklike" data-toggle-read="' + esc(it.id || "") + '" data-read="' +
+      (it.read ? "1" : "0") + '">' + (it.read ? "标为未读" : "标为已读") + "</button></div></div>";
+  }
+
   function renderNews(el, st) {
     const n = cfg.news || {};
-    const report = st.report;
-    const catColor = { "模型": "#4D6BFE", "工具": "#16A085", "论文": "#8E44AD", "产品": "#E67E22", "行业": "#2E86C1", "综合": "#7F8C8D" };
-    const width = st.generating ? (st.phase === "AI 摘要" ? "72%" : "38%") : "";
-    let reader = '<div class="card"><h3>今日快报</h3>';
+    const report = st.report || null;
+    const scrollTop = el.scrollTop || 0;
+    const prog = st.progress || {};
+    const phaseLabel = st.generating
+      ? (prog.label || st.phase || "抓取数据源…")
+      : "";
+    const pct = st.generating
+      ? (prog.total ? Math.round((prog.done / prog.total) * 100) : (prog.phase === "ai" ? 80 : 12))
+      : 0;
+
+    // ── 生成卡片：阶段进度 + 取消 + 每源状态 ──
+    let gen = '<div class="card"><h3>生成</h3>' +
+      '<div class="row"><div class="lbl">' +
+      (n.last_generated ? "上次生成：" + esc(n.last_generated) : "尚未生成") +
+      (st.next_run ? '<span class="hint"> · 下次自动生成 ' + esc(st.next_run) + "</span>" : "") +
+      "</div><div class=\"ctl\">" +
+      (st.generating
+        ? '<button class="btn danger" id="btnCancel">取消生成</button>'
+        : '<button class="btn primary" id="btnGen">立即生成</button>') +
+      "</div></div>";
     if (st.generating) {
-      reader += '<div class="desc">正在生成：' + esc(st.phase || "抓取数据源…") + "</div>" + '<div class="progress"><div style="width:' + width + '"></div></div>';
-    } else if (report) {
+      gen += '<div class="desc">' + esc(phaseLabel) +
+        (prog.total ? "（" + prog.done + "/" + prog.total + "）" : "") + "</div>" +
+        '<div class="progress"><div style="width:' + pct + '%"></div></div>';
+    }
+    if (report && (report.sources || []).length) {
+      gen += '<div class="news-sources">' + report.sources.map((s) =>
+        '<span class="news-src-chip' + (s.ok ? " ok" : " bad") + '" title="' + esc(s.error || "") + '">' +
+        esc(s.name) + (s.ok ? " · " + (s.count || 0) : " · 失败") +
+        (s.ok ? "" : ' <button class="linklike" data-retry="' + esc(s.id) + '">重试</button>') + "</span>").join("") +
+        "</div>";
+    }
+    if (report && report.stats) {
+      const s = report.stats;
+      gen += '<div class="desc">抓取 ' + (s.raw || 0) + " 条" +
+        (s.blocked ? " · 屏蔽 " + s.blocked : "") +
+        " · 去重后 " + (s.deduped || 0) + " · 展示 " + (s.shown || report.count || 0) + "</div>";
+    }
+    gen += "</div>";
+
+    // ── 阅读器：工具条 + 分类分组 ──
+    let reader = '<div class="card"><div class="news-head">' +
+      "<h3>今日快报</h3>" +
+      '<div class="news-tools">' +
+      '<input id="newsSearch" class="news-search" placeholder="搜索标题 / 摘要 / 来源（/）" value="' + esc(newsUI.search) + '">' +
+      '<div class="news-filter">' + [["all", "全部"], ["unread", "未读"], ["starred", "收藏"]]
+        .map((f) => '<button class="news-filter-btn' + (newsUI.filter === f[0] ? " on" : "") +
+                    '" data-filter="' + f[0] + '">' + f[1] + "</button>").join("") + "</div>" +
+      '<button class="btn sm" id="btnDensity">' + (n.density === "compact" ? "紧凑" : "舒适") + "</button>" +
+      '<button class="btn sm" id="btnExport" title="导出为 Markdown">导出</button>' +
+      "</div></div>";
+    if (report) {
+      const items = newsFilteredItems(report);
+      const unread = report.unread != null ? report.unread : (report.items || []).filter((i) => !i.read).length;
       reader += '<div class="news-headline">' + esc(report.headline || "今日 AI 速览") + "</div>" +
-        '<div class="desc">生成于 ' + esc(report.generated_at || "") + (report.used_ai ? ' · <span class="tag purple">AI 摘要</span>' : ' · <span class="tag gray">标题列表</span>') + "</div>";
-      (report.items || []).forEach((it) => {
-        const c = catColor[it.category] || "#7F8C8D";
-        reader += '<div class="news-item"><div class="t"><a href="' + esc(it.url) + '" target="_blank">' + esc(it.title) + "</a></div>" +
-          (it.summary ? '<div class="s">' + esc(it.summary) + "</div>" : "") +
-          '<div class="meta"><span class="chip" style="color:#fff;background:' + c + '">' + esc(it.category || "综合") + "</span>" +
-          (it.source ? '<span class="src">' + esc(it.source) + "</span>" : "") + "</div></div>";
+        '<div class="desc">生成于 ' + esc(report.generated_at || "") +
+        (report.used_ai ? ' · <span class="tag purple">AI 摘要</span>' : ' · <span class="tag gray">标题列表</span>') +
+        " · 共 " + (report.items || []).length + " 条 · 未读 " + unread +
+        (st.starred_count ? " · 收藏 " + st.starred_count : "") + "</div>";
+      if (!items.length) {
+        reader += '<div class="desc">没有符合条件的条目（换个筛选或清空搜索）。</div>';
+      }
+      const groups = {};
+      items.forEach((it) => { (groups[it.category || "综合"] = groups[it.category || "综合"] || []).push(it); });
+      let flat = 0;
+      Object.keys(groups).sort().forEach((cat) => {
+        const collapsed = !!newsUI.collapsed[cat];
+        const c = NEWS_CAT_COLOR[cat] || "#7F8C8D";
+        reader += '<div class="news-group"><button class="news-group-head" data-cat="' + esc(cat) + '">' +
+          '<span class="chip" style="color:#fff;background:' + c + '">' + esc(cat) + "</span>" +
+          '<span class="grow">' + groups[cat].length + " 条</span>" +
+          '<span class="caret">' + (collapsed ? "▸" : "▾") + "</span></button>";
+        if (!collapsed) {
+          groups[cat].forEach((it) => { reader += newsItemHtml(it, flat); flat += 1; });
+        }
+        reader += "</div>";
       });
     } else {
-      reader += '<div class="desc">今日尚未生成快报。</div>';
+      reader += '<div class="desc">今日尚未生成快报。点上方「立即生成」开始。</div>';
     }
     reader += "</div>";
+
     const hist = (st.dates && st.dates.length) ? card("历史记录", "点击日期查看历史快报。",
       '<div class="hist-chips">' + st.dates.map((d) => '<button class="hist-chip" onclick="App.viewNews(\'' + esc(d) + '\')">' + esc(d) + "</button>").join("") + "</div>") : "";
     const srcOpts = [["hackernews", "Hacker News"], ["github_trending", "GitHub 趋势"], ["sspai", "少数派"], ["qbitai", "量子位"], ["arxiv_ai", "arXiv AI"]];
@@ -953,13 +1060,19 @@ import {
       '<button class="btn sm" onclick="App.editInterest(' + i + ')">编辑</button>' +
       '<button class="btn sm danger" onclick="App.delInterest(' + i + ')">删除</button></div>').join("");
     const agentOpts = [["", "默认主 Agent"]].concat((cfg.agents || []).map((a) => [a.id, a.name]));
+    const blocked = (n.blocked_keywords || []).join(", ");
     const settings = card("快报设置",
       row("启用快报", "定时 / 启动时自动生成", switchCtl("news.enabled", n.enabled)) +
       row("生成语言", "", selectCtl("news.language", n.language || "zh", [["zh", "简体中文"], ["en", "English"], ["both", "中英双语"]])) +
       row("定时策略", "", selectCtl("news.schedule_mode", n.schedule_mode || "daily_startup", [["off", "关闭"], ["daily", "每日定时"], ["startup", "启动时"], ["daily_startup", "每日 + 启动补生成"]])) +
       row("定时时间", "", '<input type="time" data-bind="news.schedule_time" value="' + esc(n.schedule_time || "09:00") + '">') +
-      row("条数上限", "", numCtl("news.max_items", n.max_items || 6, { min: 3, max: 15 })) +
+      row("展示条数", "AI 摘要条数 / 标题列表条数", numCtl("news.max_items", n.max_items || 6, { min: 3, max: 20 })) +
+      row("每源抓取条数", "单个数据源最多取多少条", numCtl("news.per_source", n.per_source || 12, { min: 3, max: 30 })) +
+      row("AI 摘要条数", "送给本地 Agent 精选的条目数", numCtl("news.ai_max_items", n.ai_max_items || 6, { min: 1, max: 20 })) +
+      row("屏蔽关键词", "逗号分隔；标题/摘要命中即丢弃", '<input type="text" data-bind="news.blocked_keywords" value="' + esc(blocked) + '" placeholder="招聘, 广告, 优惠" style="width:220px">') +
+      row("历史保留天数", "超过天数的历史快报自动清理", numCtl("news.retention_days", n.retention_days || 14, { min: 3, max: 180 })) +
       row("正文字号", "应用于本页快报阅读区", numCtl("news.font_size", n.font_size || 13, { min: 11, max: 20 })) +
+      row("阅读密度", "", selectCtl("news.density", n.density || "comfortable", [["comfortable", "舒适"], ["compact", "紧凑"]])) +
       row("使用本地 AI 摘要", "关闭则仅显示标题列表（零成本离线）", switchCtl("news.use_ai", n.use_ai)) +
       row("摘要 Agent", "生成 AI 摘要使用的 Agent", selectCtl("news.agent_id", n.agent_id || "", agentOpts)) +
       row("完成后托盘通知", "", switchCtl("news.notify", n.notify)) +
@@ -970,12 +1083,11 @@ import {
       '<div style="margin-top:10px;display:flex;gap:8px">' +
       '<button class="btn primary" onclick="App.addInterest()">＋ 添加主题</button>' +
       '<button class="btn" onclick="App.addInterestPreset()">预设主题 ▾</button></div>');
-    el.innerHTML =
-      '<div class="card"><h3>生成</h3><div class="row"><div class="lbl">' +
-      (n.last_generated ? "上次生成：" + esc(n.last_generated) : "尚未生成") + "</div>" +
-      '<div class="ctl"><button class="btn primary" id="btnGen"' + (st.generating ? " disabled" : "") + ">立即生成</button></div></div>" +
-      (st.generating ? '<div class="progress"><div style="width:' + width + '"></div></div>' : "") + "</div>" +
-      reader + hist + settings + srcCard + intCard;
+    const shortcut = card("快捷键", "阅读区支持键盘操作。",
+      '<div class="desc">j / k 上下移动 · Enter 打开原文 · s 收藏 · r 标已读 · / 搜索 · Esc 清空搜索</div>');
+    const density = n.density === "compact" ? " compact" : "";
+    el.innerHTML = '<div class="news-reader' + density + '" style="--news-fs:' + (n.font_size || 13) + 'px">' +
+      gen + reader + hist + shortcut + settings + srcCard + intCard + "</div>";
     bindAll(el);
     const btnGen = $("#btnGen");
     if (btnGen) btnGen.addEventListener("click", async () => {
@@ -985,11 +1097,105 @@ import {
       try { await API.api("/api/news/generate", { method: "POST" }); toast("已开始生成快报…", "ok"); }
       catch (e) { newsState.generating = false; toast("启动生成失败：" + e.message, "err"); renderNews(el, newsState); }
     });
+    const btnCancel = $("#btnCancel");
+    if (btnCancel) btnCancel.addEventListener("click", async () => {
+      btnCancel.disabled = true;
+      try { await API.api("/api/news/cancel", { method: "POST" }); toast("已请求取消…", "ok"); }
+      catch (e) { toast("取消失败：" + e.message, "err"); }
+    });
+    const btnExport = $("#btnExport");
+    if (btnExport) btnExport.addEventListener("click", async () => {
+      try {
+        const r = await API.api("/api/news/export", { method: "POST", body: { date: st.date || null } });
+        toast(r.ok ? ("已导出：" + r.path) : ("导出失败：" + (r.error || "")), r.ok ? "ok" : "err");
+      } catch (e) { toast("导出失败：" + e.message, "err"); }
+    });
+    const btnDensity = $("#btnDensity");
+    if (btnDensity) btnDensity.addEventListener("click", () => {
+      cfg.news = cfg.news || {};
+      cfg.news.density = (cfg.news.density === "compact") ? "comfortable" : "compact";
+      refreshDirty();
+      loadNewsState();
+    });
+    const search = $("#newsSearch");
+    if (search) {
+      search.addEventListener("input", () => {
+        newsUI.search = search.value;
+        const pos = search.selectionStart;
+        renderNews(el, newsState);
+        const s2 = $("#newsSearch");
+        if (s2) { s2.focus(); try { s2.setSelectionRange(pos, pos); } catch (e) {} }
+      });
+    }
+    $$("#newsContent [data-filter]").forEach((b) => b.addEventListener("click", () => {
+      newsUI.filter = b.dataset.filter;
+      renderNews(el, newsState);
+    }));
+    $$("#newsContent [data-cat]").forEach((b) => b.addEventListener("click", () => {
+      const c = b.dataset.cat;
+      newsUI.collapsed[c] = !newsUI.collapsed[c];
+      renderNews(el, newsState);
+    }));
+    $$("#newsContent [data-star]").forEach((b) => b.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      const id = b.dataset.star;
+      try {
+        const r = await API.api("/api/news/star", { method: "POST", body: { item_id: id } });
+        (newsState.report.items || []).forEach((it) => { if (it.id === id) it.starred = !!r.starred; });
+        newsState.starred_count = (newsState.report.items || []).filter((i) => i.starred).length;
+        renderNews(el, newsState);
+      } catch (e) { toast("收藏失败：" + e.message, "err"); }
+    }));
+    $$("#newsContent [data-toggle-read]").forEach((b) => b.addEventListener("click", async () => {
+      const id = b.dataset.toggleRead;
+      const read = b.dataset.read !== "1";
+      try {
+        await API.api("/api/news/read", { method: "POST", body: { item_id: id, read: read } });
+        (newsState.report.items || []).forEach((it) => { if (it.id === id) it.read = read; });
+        newsState.unread = (newsState.report.items || []).filter((i) => !i.read).length;
+        newsState.report.unread = newsState.unread;
+        renderNews(el, newsState);
+      } catch (e) { toast("标记失败：" + e.message, "err"); }
+    }));
+    $$("#newsContent [data-retry]").forEach((b) => b.addEventListener("click", async () => {
+      b.disabled = true;
+      try {
+        const r = await API.api("/api/news/retry_source", { method: "POST", body: { source_id: b.dataset.retry } });
+        toast(r.ok ? ("已补抓 " + (r.added || 0) + " 条") : ("重试失败：" + (r.error || "")), r.ok ? "ok" : "err");
+        if (r.ok && r.added) loadNewsState();
+      } catch (e) { toast("重试失败：" + e.message, "err"); b.disabled = false; }
+    }));
     $$("#newsContent [data-src]").forEach((cb) => cb.addEventListener("change", () => {
       cfg.news.sources = $$("#newsContent [data-src]:checked").map((c) => c.dataset.src);
       refreshDirty();
     }));
+    el.scrollTop = scrollTop;
   }
+
+  // 键盘导航（仅快报页生效）
+  document.addEventListener("keydown", (e) => {
+    if (page !== "news") return;
+    const tag = (e.target && e.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") {
+      if (e.key === "Escape" && e.target.id === "newsSearch") { e.target.value = ""; newsUI.search = ""; loadNewsState(); }
+      return;
+    }
+    const items = newsFilteredItems(newsState.report || {});
+    if (!items.length) return;
+    if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); newsUI.focus = Math.min(items.length - 1, newsUI.focus + 1); renderNews($("#newsContent"), newsState); }
+    else if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); newsUI.focus = Math.max(0, newsUI.focus - 1); renderNews($("#newsContent"), newsState); }
+    else if (e.key === "/") { e.preventDefault(); const s = $("#newsSearch"); if (s) s.focus(); }
+    else if (e.key === "Enter") {
+      const it = items[Math.max(0, newsUI.focus)];
+      if (it && it.url) window.open(it.url, "_blank", "noopener");
+    } else if (e.key === "s") {
+      const it = items[Math.max(0, newsUI.focus)];
+      if (it) { const b = $('[data-star="' + it.id + '"]'); if (b) b.click(); }
+    } else if (e.key === "r") {
+      const it = items[Math.max(0, newsUI.focus)];
+      if (it) { const b = $('[data-toggle-read="' + it.id + '"]'); if (b) b.click(); }
+    }
+  });
 
   function interestModal(idx) {
     const n = cfg.news || {};
@@ -1015,6 +1221,147 @@ import {
     $("#modalBox [data-close]").addEventListener("click", closeModal);
   }
 
+  // ══════════════════ 使用指南页（v3.9.0）══════════════════
+  function guideSection(id, title, desc, body, media, mediaDesc) {
+    const img = media
+      ? '<figure class="guide-media"><img src="' + media + '" alt="' + esc(title) + '" loading="lazy">' +
+        (mediaDesc ? "<figcaption>" + esc(mediaDesc) + "</figcaption>" : "") + "</figure>"
+      : "";
+    return '<div class="card guide-section" id="' + id + '"><h3>' + esc(title) + "</h3>" +
+      (desc ? '<div class="desc">' + desc + "</div>" : "") +
+      (img ? img : "") + (body || "") + "</div>";
+  }
+
+  function renderGuide() {
+    const el = $("#guideContent");
+    if (!el) return;
+    const steps = (rows) => '<ol class="guide-steps">' +
+      rows.map((r) => "<li><b>" + r[0] + "</b>" + (r[1] ? " — " + r[1] : "") + "</li>").join("") + "</ol>";
+    const keys = (rows) => '<div class="guide-keys">' +
+      rows.map((r) => '<div class="guide-key"><kbd>' + esc(r[0]) + "</kbd><span>" + esc(r[1]) + "</span></div>").join("") + "</div>";
+    const toc = [
+      ["quick", "① 快速上手（3 分钟）"],
+      ["orb", "② 浮球怎么用"],
+      ["menu", "③ 环绕菜单"],
+      ["agent", "④ 启动你的 Agent"],
+      ["api", "⑤ API 余额监控"],
+      ["news", "⑥ AI 快报"],
+      ["vault", "⑦ 账户与密钥保险箱"],
+      ["update", "⑧ 自动更新"],
+      ["faq", "⑨ 常见问题与快捷键"],
+    ];
+
+    el.innerHTML =
+      '<div class="card guide-hero">' +
+      "<h3>欢迎使用 AgentFloat 🌀</h3>" +
+      '<div class="desc">一颗常驻桌面的小球，把繁琐的 Agent 启动、密钥管理、余额与资讯都收进来。<br>' +
+      "这份指南按「第一次使用」的顺序编排，全程约 3 分钟；也可以随时从浮球右键菜单 →「使用教程」重看浮球引导。</div>" +
+      '<div class="guide-toc">' + toc.map((t) =>
+        '<a class="guide-toc-item" href="#/guide" data-goto="' + t[0] + '">' + esc(t[1]) + "</a>").join("") + "</div>" +
+      "</div>" +
+
+      guideSection("quick", "① 快速上手（3 分钟）",
+        "三步就能开始用：",
+        steps([["安装", "下载 AgentFloat-Setup 安装包，双击（免管理员，装到用户目录）"],
+               ["启动", "启动后屏幕中央会出现浮球；第一次会有 6 步聚光灯引导"],
+               ["开始用", "单击浮球启动默认 Agent；长按唤出环绕菜单；右键是更多入口"]]) +
+        '<div class="guide-tip">💡 首次运行自动播放浮窗引导；跳过也没关系，右键浮球 →「使用教程」可随时重看。</div>',
+        "assets/guide/guide-orb.gif", "浮球：呼吸 → 点击涟漪 → 长按唤出环绕菜单") +
+
+      guideSection("orb", "② 浮球怎么用",
+        "所有交互都围绕这颗小球：",
+        steps([["单击", "启动「默认 Agent」（在 设置 → 通用 → 主 Agent 启动 里更换）"],
+               ["长按不动 2 秒", "环形进度条走满即启动（可在设置里调整时长）"],
+               ["按住向外滑", "唤出环绕菜单，滑到哪个扇区松手就执行哪个动作"],
+               ["右键", "启动具体 Agent / 设置 / 使用教程 / 复制控制台令牌 / 开机自启 / 退出"],
+               ["拖拽", "自由移动；拖到屏幕边缘会吸附，开启「贴边隐藏」后鼠标靠近边缘自动滑出"]]) +
+        '<div class="guide-tip">💡 换显示器或改分辨率后浮球会自动回到可见区域（v3.9.0 起监听显示器变化）。</div>',
+        "assets/guide/menu.png", "环绕菜单：滑到扇区松手即执行") +
+
+      guideSection("menu", "③ 环绕菜单",
+        "菜单里的每一项都能自定义：<b>设置 → 环绕菜单</b> 可调整扇区数量、每一项的图标/文字/颜色，以及「灵敏档」时延。",
+        steps([["Skills 辅助窗", "浏览与触发本地 Skills"],
+               ["API 用量", "打开余额监控页"],
+               ["AI 快报", "打开今日快报"],
+               ["剪贴板历史", "查看最近复制的内容"],
+               ["移动浮窗", "进入移动模式：左键放置、右键/Esc 取消"],
+               ["退出", "退出 AgentFloat（不会结束你已启动的 Agent 进程）"]])) +
+
+      guideSection("agent", "④ 启动你的 Agent",
+        "AgentFloat 支持一键安装与启动常见 Agent。",
+        steps([["一键安装", "设置 → Agent 安装：Claude Code / Codex CLI / Pi / DeepSeek Harness 一键装（npm 全局安装，国内镜像优先）"],
+               ["自定义 Agent", "设置 → Agent 管理：填名称、启动命令、参数、工作目录"],
+               ["Web 类型 Agent", "如 DeepSeek Harness：以 Web 方式启动并自动打开浏览器页面"]]) +
+        '<div class="guide-tip">💡 保险箱里保存的密钥会在启动 Agent 时自动注入环境变量，Agent 无需再手工配置 Key。</div>',
+        "assets/guide/install.png", "Agent 安装：一键安装 / 升级 / 卸载") +
+
+      guideSection("api", "⑤ API 余额监控",
+        "把各家 API 的余额与用量显示在浮球旁：<b>设置 → API 用量</b>。",
+        steps([["添加端点", "用预设一键添加（OpenCode Go / DeepSeek / Kimi / SiliconFlow / OpenRouter），或自定义端点"],
+               ["显示位置", "余额显示框可贴在浮球上/下方，可拖动、可调整大小与不透明度"],
+               ["显示行", "自定义显示哪些字段、小数位、后缀；支持进度条与告警阈值"],
+               ["手动拉取", "「立即拉取」不等轮询即刻刷新"]]) +
+        '<div class="guide-tip">⚠️ 密钥通过 <b>{{env:xxx}}</b> 模板注入；把 Key 存进保险箱并设为环境变量（见第 ⑦ 节）后即可自动读取。</div>',
+        "assets/guide/api-dark.png", "API 用量页（深色主题）") +
+
+      guideSection("news", "⑥ AI 快报",
+        "把 AI 行业资讯聚合成一份可读的日报：<b>设置 → AI 快报</b>（或环绕菜单 → AI 快报）。",
+        steps([["数据源", "Hacker News / GitHub 趋势 / 少数派 / 量子位 / arXiv AI 任选"],
+               ["生成", "「立即生成」会经历：抓取（逐源进度）→ 去重筛选 → AI 摘要 → 写入；随时可取消，失败的源可单独重试"],
+               ["阅读", "按分类分组、未读圆点、收藏星标、搜索过滤、舒适/紧凑密度；j/k 上下、Enter 打开、s 收藏、r 标已读、/ 搜索"],
+               ["导出", "一键导出 Markdown，方便存档或分享"],
+               ["提醒", "生成完成会弹托盘通知（点击直达），托盘提示显示未读数与下次生成时间"]]) +
+        '<div class="guide-tip">💡 「关注主题」支持权重：命中主题的条目优先收录；「屏蔽关键词」可过滤掉不关心的内容。</div>',
+        "assets/guide/guide-news.gif", "快报：阶段进度 → 分类阅读 → 收藏 → 搜索过滤") +
+
+      guideSection("vault", "⑦ 账户与密钥保险箱",
+        "本地多账户 + AES-256-GCM 加密的密钥保险箱：<b>设置 → 账户与密钥</b>。",
+        steps([["创建账户", "设置一个主口令（PBKDF2-HMAC-SHA256，60 万次迭代 + 每账户随机盐）"],
+               ["保存密钥", "密钥加密落盘、界面默认掩码；可一键添加常用名称（OPENCODE_GO_API_KEY 等）"],
+               ["自动注入", "启动 Agent 时把密钥注入环境变量，Agent 直接用，无需明文配置"],
+               ["导出/导入", "生成 .afpack 单文件（口令保护，可选是否包含密钥），换机迁移很方便"]]) +
+        '<div class="guide-tip">🔒 保险箱只在内存中解密；本机 Web 接口已加访问令牌与同源校验，浏览器里的其他网页无法读取。</div>') +
+
+      guideSection("update", "⑧ 自动更新",
+        "检测 → 下载 → 校验 → 静默安装 → 重启，全流程自动：",
+        steps([["检测", "启动后自动检查，也可在「设置 → 关于」手动检查；并行探测多个源，优先自有镜像（国内直连）"],
+               ["下载", "走镜像下载，失败自动回退 GitHub 与加速代理；下载完成校验 SHA256，不匹配直接拒绝"],
+               ["安装", "退出旧版本 → 覆盖安装（配置与密钥保留）→ 自动重启并确认启动成功"],
+               ["日志", "安装与更新日志在 %APPDATA%\\AgentFloat\\ 下（update_log.txt / install_log.txt）"]]) +
+        '<div class="guide-tip">💡 更新包校验值来自 GitHub Release 资产或官方镜像清单，镜像被篡改也会被拦下。</div>',
+        "assets/guide/guide-update.gif", "自动更新：检查（R2 优先）→ 下载 → 静默安装 → 重启") +
+
+      guideSection("faq", "⑨ 常见问题与快捷键",
+        "",
+        '<div class="guide-faq">' +
+        "<details><summary>浮球不见了怎么办？</summary>右键托盘图标 →「重置浮球位置」（或重启应用）；" +
+        "拔掉显示器后浮球会自动回到可见屏幕。</details>" +
+        "<details><summary>浏览器打开控制台提示需要访问令牌？</summary>" +
+        "浮球右键菜单 →「复制 Web 控制台令牌」，粘贴即可。令牌每次启动随机生成，仅本机有效。</details>" +
+        "<details><summary>启动 Agent 后没有注入密钥？</summary>" +
+        "确认保险箱已解锁、密钥名与环境变量名一致；Agent 需由 AgentFloat 启动才会注入。</details>" +
+        "<details><summary>快报生成很慢或失败？</summary>" +
+        "AI 摘要是本机 Agent 在跑，可关闭「使用本地 AI 摘要」用标题列表（零成本、秒出）；" +
+        "单个源失败可在快报页「重试」。</details>" +
+        "<details><summary>余额显示不更新？</summary>" +
+        "确认端点用的是 {{env:...}} 且对应环境变量已设置；「立即拉取」可手动刷新。</details>" +
+        "</div>" +
+        "<h4 style=\"margin:14px 0 6px;font-size:13px\">快捷操作</h4>" +
+        keys([["Ctrl + Alt + C", "呼出 / 聚焦浮球"],
+              ["长按 2 秒", "启动默认 Agent"],
+              ["按住外滑", "环绕菜单"],
+              ["快报页 j / k", "上下选择条目"],
+              ["快报页 Enter", "打开原文"],
+              ["快报页 s / r", "收藏 / 标已读"],
+              ["快报页 /", "聚焦搜索"],
+              ["Esc", "关闭面板 / 清空搜索 / 取消移动模式"]]));
+    $$("#guideContent [data-goto]").forEach((a) => a.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      const t = $("#" + a.dataset.goto);
+      if (t) t.scrollIntoView({ behavior: "smooth", block: "start" });
+    }));
+  }
+
   // ── 模态框 / SSE / 启动 ─────────────────────────
   function openModal(html) {
     $("#modalBox").innerHTML = html;
@@ -1023,16 +1370,37 @@ import {
   function closeModal() {
     $("#modalMask").classList.add("hidden");
   }
+  // v3.9.0：新用户横幅按钮（委托绑定，横幅在多个子页复用）
+  document.addEventListener("click", (e) => {
+    const id = e.target && e.target.id;
+    if (id === "btnGoGuide") { goPage("guide"); }
+    else if (id === "btnSkipOnboard") {
+      cfg.onboarding_done = true;
+      refreshDirty();
+      renderSettings();
+      toast("已关闭新用户提示（可在浮球右键菜单重看教程）", "ok");
+    }
+  });
+
   function wireEvents() {
     API.streamEvents((ev) => {
       if (ev.event === "news_started") { newsState.generating = true; newsState.phase = "抓取数据源…"; if (page === "news") loadNewsState(); }
+      else if (ev.event === "news_progress") {
+        // v3.9.0：阶段化进度（节流 300ms，避免刷爆渲染）
+        newsState.generating = true;
+        newsState.progress = ev.payload || {};
+        newsState.phase = (ev.payload && ev.payload.label) || newsState.phase;
+        scheduleNewsProgressRender();
+      }
+      else if (ev.event === "news_cancelling") toast("正在取消快报生成…", "ok");
       else if (ev.event === "news_done") {
         newsState.generating = false;
+        newsState.progress = {};
         toast("AI 快报已生成（" + (ev.payload.count || 0) + " 条）", "ok");
         if (cfg.news && cfg.news.auto_show_panel && page !== "news") goPage("news");
         if (page === "news") loadNewsState();
       }
-      else if (ev.event === "news_failed") { newsState.generating = false; toast("快报生成失败：" + (ev.payload.error || ""), "err"); if (page === "news") loadNewsState(); }
+      else if (ev.event === "news_failed") { newsState.generating = false; newsState.progress = {}; toast("快报生成失败：" + (ev.payload.error || ""), "err"); if (page === "news") loadNewsState(); }
       else if (ev.event === "api_updated") { if (page === "api") loadApiState(); }
       else if (ev.event === "theme_changed") { if (cfg) { cfg.theme = ev.payload.theme || cfg.theme; applyTheme(); refreshDirty(); } }
       else if (ev.event === "ai_service_done") toast("AI 自检完成：" + (ev.payload.summary || ""), "ok");
@@ -1040,6 +1408,16 @@ import {
       else if (ev.event === "auto_translate_done") toast("自动翻译：" + (ev.payload.message || ""), "ok");
       else if (ev.event === "auto_translate_failed") toast("自动翻译失败：" + (ev.payload.error || ""), "err");
     });
+  }
+
+  // 快报进度节流渲染（抓取阶段逐源回调较密）
+  let newsProgressTimer = null;
+  function scheduleNewsProgressRender() {
+    if (page !== "news" || newsProgressTimer) return;
+    newsProgressTimer = setTimeout(() => {
+      newsProgressTimer = null;
+      if (page === "news") loadNewsState();
+    }, 300);
   }
 
   async function init() {

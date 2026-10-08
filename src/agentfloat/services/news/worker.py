@@ -18,8 +18,8 @@ from PyQt5.QtCore import QThread, pyqtSignal
 
 from agentfloat.services.skills.ai_service import run_headless, build_headless_command
 from agentfloat.services.news.fetcher import (
-    DEFAULT_NEWS, fetch_all, dedupe, guess_category,
-    build_raw_markdown, save_report, news_storage_dir,
+    DEFAULT_NEWS, fetch_all_stats, dedupe, guess_category, filter_blocked,
+    build_raw_markdown, save_report, news_storage_dir, cleanup_old,
 )
 
 logger = logging.getLogger("AgentFloat.News")
@@ -129,9 +129,24 @@ def _render_ai_markdown(data, date, language):
 
 
 class NewsWorker(QThread):
-    """快报生成线程：fetch → AI 摘要（可选）→ 落盘"""
-    done = pyqtSignal(dict)     # save_report 的 payload
+    """快报生成线程（v3.9.0 重写）：阶段化进度 → 抓取 → 去重 → AI 摘要 → 落盘
+
+    新增：
+    - progress(phase, done, total, label)：阶段化进度（抓取逐源 / 去重 / AI / 保存）
+    - 可取消：每个阶段与每源之间检查 cancel，取消后不落盘
+    - 逐源结果 sources：失败源可在界面上单独重试
+    - 屏蔽关键词 / 每源条数 / AI 摘要条数上限
+    """
+    done = pyqtSignal(dict)                          # save_report 的 payload
     failed = pyqtSignal(str)
+    progress = pyqtSignal(str, int, int, str)        # phase, done, total, label
+
+    PHASES = {
+        "fetch": "抓取数据源",
+        "dedupe": "去重与筛选",
+        "ai": "AI 摘要",
+        "save": "写入快报",
+    }
 
     def __init__(self, news_cfg, agents, parent=None):
         super().__init__(parent)
@@ -141,6 +156,12 @@ class NewsWorker(QThread):
 
     def cancel(self):
         self._cancel.set()
+
+    def _emit(self, phase, done=0, total=0, label=""):
+        try:
+            self.progress.emit(phase, int(done), int(total), label or self.PHASES.get(phase, ""))
+        except Exception:  # noqa: BLE001
+            pass
 
     def run(self):
         try:
@@ -157,41 +178,60 @@ class NewsWorker(QThread):
         cfg = self._cfg
         enabled = cfg.get("sources") or DEFAULT_NEWS["sources"]
         max_items = max(1, min(20, int(cfg.get("max_items") or 6)))
+        per_source = max(3, min(30, int(cfg.get("per_source") or 12)))
+        ai_max = max(1, min(20, int(cfg.get("ai_max_items") or 6)))
+        blocked = cfg.get("blocked_keywords") or []
         language = cfg.get("language") or "zh"
         interests = cfg.get("interests") or []
         date = _cur_date()
 
-        logger.info("AI 快报开始生成: date=%s sources=%s max=%d", date, enabled, max_items)
-        items, errors = fetch_all(enabled, per_source=12)
+        logger.info("AI 快报开始生成: date=%s sources=%s max=%d per=%d",
+                    date, enabled, max_items, per_source)
+
+        self._emit("fetch", 0, len(enabled), "准备抓取 %d 个源" % len(enabled))
+        items, errors, sources = fetch_all_stats(
+            enabled, per_source=per_source,
+            progress=lambda done, total, label: self._emit("fetch", done, total, label))
         if self._cancel.is_set():
-            self.failed.emit("用户退出，生成已取消")
+            self.failed.emit("已取消生成")
             return
         if not items:
             self.failed.emit("所有数据源抓取失败：\n%s" % ("\n".join(errors[:5]) or "无数据"))
             return
+
+        self._emit("dedupe", 0, 0, "去重与筛选（原始 %d 条）" % len(items))
+        before_block = len(items)
+        items = filter_blocked(items, blocked)
+        blocked_count = before_block - len(items)
         items = dedupe(items, max_items * 3)
+        stats = {"raw": before_block, "blocked": blocked_count,
+                 "deduped": len(items), "shown": 0, "ai_max": ai_max}
 
         used_ai = False
+        data = None
         if cfg.get("use_ai", True):
             agent = _pick_agent(self._agents, cfg.get("agent_id"))
             if agent and build_headless_command(agent, "ping")[0] is not None:
+                self._emit("ai", 0, 0, "调用 %s 生成摘要…" % (agent.get("name") or "本地 Agent"))
                 try:
-                    prompt = build_ai_prompt(items, language, max_items, interests)
+                    prompt = build_ai_prompt(items, language, ai_max, interests)
                     out, err = run_headless(agent, prompt, cancel=self._cancel)
                     if out is None:
                         raise RuntimeError(err or "Agent 调用失败")
                     data = parse_ai_result(out)
-                    curated = data.get("items") or []
-                    if not curated:
+                    if not (data.get("items") or []):
                         raise RuntimeError("AI 未返回任何条目")
                     used_ai = True
                 except Exception as e:
+                    if self._cancel.is_set():
+                        self.failed.emit("已取消生成")
+                        return
                     logger.warning("AI 摘要失败，回退纯列表: %s", e)
                     data = None
             else:
-                data = None
+                self._emit("ai", 0, 0, "未找到可用的本地 Agent，跳过 AI 摘要")
         else:
-            data = None
+            self._emit("ai", 0, 0, "已关闭 AI 摘要，使用标题列表")
 
         if data:
             final_items = []
@@ -219,13 +259,23 @@ class NewsWorker(QThread):
                 "summary": "",
                 "source": it.get("source", ""),
             } for it in ranked[:max_items]]
+            headline = ""
             raw_md = build_raw_markdown(ranked[:max_items], date, language)
 
         if self._cancel.is_set():
-            self.failed.emit("用户退出，生成已取消")
+            self.failed.emit("已取消生成")
             return
-        payload = save_report(date, final_items, raw_md, language, used_ai, errors)
-        logger.info("AI 快报完成: date=%s count=%d used_ai=%s", date, len(final_items), used_ai)
+
+        self._emit("save", 0, 0, "写入快报（%d 条）" % len(final_items))
+        stats["shown"] = len(final_items)
+        payload = save_report(date, final_items, raw_md, language, used_ai, errors,
+                              sources=sources, stats=stats, headline=headline)
+        try:
+            cleanup_old(cfg.get("retention_days", 14))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("清理历史快报失败: %s", e)
+        logger.info("AI 快报完成: date=%s count=%d used_ai=%s blocked=%d",
+                    date, len(final_items), used_ai, blocked_count)
         self.done.emit(payload)
 
 

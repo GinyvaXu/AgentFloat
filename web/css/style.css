@@ -291,6 +291,59 @@ details.help code { background:rgba(120,120,128,0.16); border-radius:5px; paddin
 .progress { height: 6px; border-radius: 999px; background: rgba(120,120,128,0.18); overflow: hidden; margin-top: 10px; }
 .progress > div { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), #7A5CFF); transition: width .3s; }
 
+/* ── AI 快报 v3.9.0：阅读器 / 分组 / 每源状态 / 密度 ── */
+.news-reader { font-size: var(--news-fs, 13px); }
+.news-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.news-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.news-search {
+  border: 1px solid var(--input-border); background: var(--surface2); color: var(--text);
+  border-radius: 999px; padding: 5px 12px; font-size: 12px; min-width: 190px; outline: none;
+}
+.news-search:focus { border-color: var(--accent); }
+.news-filter { display: flex; background: var(--surface2); border-radius: 999px; padding: 2px; }
+.news-filter-btn {
+  border: 0; background: transparent; color: var(--text2); font-size: 12px;
+  padding: 4px 12px; border-radius: 999px; cursor: pointer;
+}
+.news-filter-btn.on { background: var(--accent); color: #fff; font-weight: 600; }
+.news-group { margin-top: 10px; }
+.news-group-head {
+  display: flex; align-items: center; gap: 10px; width: 100%; cursor: pointer;
+  background: transparent; border: 0; color: var(--text2); font-size: 12px; padding: 4px 2px;
+}
+.news-group-head .grow { flex: 1; text-align: left; }
+.news-group-head .caret { color: var(--hint); }
+.news-item { position: relative; }
+.news-item.unread { border-left: 3px solid var(--accent); }
+.news-item.focus { box-shadow: 0 0 0 2px rgba(10,132,255,0.35); }
+.news-line { display: flex; align-items: flex-start; gap: 9px; }
+.news-dot {
+  width: 7px; height: 7px; border-radius: 50%; margin-top: 7px; flex: 0 0 auto;
+  background: var(--border);
+}
+.news-item.unread .news-dot { background: var(--accent); }
+.news-line .t { flex: 1; }
+.news-star {
+  border: 0; background: transparent; cursor: pointer; font-size: 15px;
+  color: var(--hint); padding: 0 2px; line-height: 1.2;
+}
+.news-star.on { color: #F5A623; }
+.linklike {
+  border: 0; background: transparent; color: var(--accent); cursor: pointer;
+  font-size: 11px; padding: 0;
+}
+.news-sources { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.news-src-chip {
+  font-size: 11px; padding: 3px 9px; border-radius: 999px;
+  background: var(--surface2); color: var(--text2); border: 1px solid var(--border);
+}
+.news-src-chip.ok { border-color: rgba(52,199,89,0.4); }
+.news-src-chip.bad { border-color: rgba(255,59,48,0.45); color: var(--warn); }
+/* 紧凑密度：收紧间距与字号 */
+.news-reader.compact .news-item { padding: 8px 12px; margin-bottom: 6px; border-radius: 10px; }
+.news-reader.compact .news-item .s { font-size: 11.5px; margin-top: 3px; }
+.news-reader.compact .news-item .meta { margin-top: 4px; }
+
 /* 列表编辑 */
 .mini-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .mini-row {
@@ -351,3 +404,36 @@ details.help code { background:rgba(120,120,128,0.16); border-radius:5px; paddin
 .chip-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text2); cursor: pointer; }
 code { background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; font-size: 12px; }
 a { color: var(--accent); }
+/* ── 使用指南页（v3.9.0）── */
+.guide-hero h3 { font-size: 20px; }
+.guide-toc { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.guide-toc-item {
+  font-size: 12px; padding: 6px 12px; border-radius: 999px; text-decoration: none;
+  background: var(--surface2); color: var(--text2); border: 1px solid var(--border);
+}
+.guide-toc-item:hover { border-color: var(--accent); color: var(--accent); }
+.guide-section { scroll-margin-top: 16px; }
+.guide-media { margin: 12px 0 4px; }
+.guide-media img {
+  width: 100%; max-width: 720px; display: block; border-radius: 12px;
+  border: 1px solid var(--border); background: var(--surface2);
+}
+.guide-media figcaption { font-size: 11.5px; color: var(--hint); margin-top: 7px; text-align: center; }
+.guide-steps { margin: 6px 0 0 18px; font-size: 12.5px; color: var(--text2); line-height: 1.85; }
+.guide-steps b { color: var(--text); }
+.guide-tip {
+  margin-top: 12px; font-size: 12px; color: var(--text2); line-height: 1.7;
+  background: var(--surface2); border-left: 3px solid var(--accent);
+  border-radius: 8px; padding: 9px 12px;
+}
+.guide-faq details {
+  border-bottom: 1px solid var(--border); padding: 9px 2px; font-size: 12.5px; color: var(--text2);
+}
+.guide-faq summary { cursor: pointer; color: var(--text); font-weight: 600; font-size: 12.5px; }
+.guide-keys { display: flex; flex-wrap: wrap; gap: 8px; }
+.guide-key { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text2); }
+.guide-key kbd {
+  font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-bottom-width: 2px; border-radius: 6px; padding: 2px 7px; color: var(--text);
+}

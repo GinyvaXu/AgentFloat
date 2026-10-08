@@ -1629,6 +1629,66 @@ class FloatingWidget(QWidget):
             save_config(self.config)
             self.update()
 
+    def refresh_news_unread(self):
+        """按已读状态重算未读（v3.9.0：单条已读后同步角标）"""
+        try:
+            from agentfloat.services.news import fetcher as _nf
+            report = _nf.load_latest()
+            unread = 0
+            if isinstance(report, dict):
+                _nf.apply_state(report)
+                unread = int(report.get("unread") or 0)
+            self._news_unread = unread
+            self._news_cfg["unread_count"] = unread
+            self.config["news"] = self._news_cfg
+            save_config(self.config)
+            self.update()
+            _log().debug("AI 快报未读数更新: %d", unread)
+        except Exception as e:  # noqa: BLE001
+            _log().debug("刷新快报未读数失败: %s", e)
+
+    def news_unread_count(self):
+        """当前未读数（供托盘提示与菜单展示）"""
+        return int(getattr(self, "_news_unread", 0) or 0)
+
+    def news_next_run(self):
+        """下次自动生成时间（人类可读；供托盘提示）"""
+        try:
+            from agentfloat.services.news import fetcher as _nf
+            return _nf.next_run_time(self._news_cfg)
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def cancel_news(self):
+        """取消正在进行的快报生成（v3.9.0）"""
+        w = getattr(self, "_news_worker", None)
+        if w is None or not w.isRunning():
+            return False
+        try:
+            w.cancel()
+            _log().info("AI 快报：已请求取消生成")
+            _bridge = getattr(self, "_web_bridge", None)
+            if _bridge is not None:
+                _bridge.publish("news_cancelling", {})
+            return True
+        except Exception as e:  # noqa: BLE001
+            _log().warning("取消快报失败: %s", e)
+            return False
+
+    def _on_news_progress(self, phase, done, total, label):
+        """生成阶段进度 → Web 桥（SSE）与面板"""
+        info = {"phase": phase, "done": int(done), "total": int(total), "label": label}
+        _bridge = getattr(self, "_web_bridge", None)
+        if _bridge is not None:
+            _bridge.set_snapshot("news_phase", label or "")
+            _bridge.set_snapshot("news_progress", info)
+            _bridge.publish("news_progress", info)
+        if self._news_panel is not None and self._news_panel.isVisible():
+            try:
+                self._news_panel.set_progress(info)
+            except Exception:  # noqa: BLE001
+                pass
+
     def _generate_news(self, auto=False, pop_panel=False):
         """手动/定时/启动补生成 AI 快报（后台线程，防重入）
 
@@ -1663,6 +1723,7 @@ class FloatingWidget(QWidget):
         track(worker, "NewsWorker")
         worker.done.connect(self._on_news_done)
         worker.failed.connect(self._on_news_failed)
+        worker.progress.connect(self._on_news_progress)
         self._news_worker = worker
         worker.start()
         _log().info("AI 快报生成启动 (auto=%s, sources=%s, ai=%s)",
@@ -1677,16 +1738,16 @@ class FloatingWidget(QWidget):
         _log().info("AI 快报生成完成: %s (%d 条, ai=%s)", date, count, used_ai)
         cfg = dict(self._news_cfg or {})
         cfg["last_generated"] = payload.get("generated_at", "")
-        cfg["unread_count"] = int(cfg.get("unread_count") or 0) + 1
-        self._news_unread = cfg["unread_count"]
         self._news_cfg = cfg
         self.config["news"] = cfg
         save_config(self.config)
-        self.update()
+        # v3.9.0：未读数按「条目已读状态」重算（而非简单 +1），并同步角标
+        self.refresh_news_unread()
         _bridge = getattr(self, "_web_bridge", None)
         if _bridge is not None:
             _bridge.set_snapshot("news_report", payload)
             _bridge.set_snapshot("news_generating", False)
+            _bridge.set_snapshot("news_progress", {})
             _bridge.publish("news_done", {"date": date, "count": count, "used_ai": used_ai})
         if self._news_panel is not None and self._news_panel.isVisible():
             self._news_panel.on_generated(payload)
@@ -1707,6 +1768,7 @@ class FloatingWidget(QWidget):
         _bridge = getattr(self, "_web_bridge", None)
         if _bridge is not None:
             _bridge.set_snapshot("news_generating", False)
+            _bridge.set_snapshot("news_progress", {})
             _bridge.publish("news_failed", {"error": str(err)})
         if self._news_panel is not None and self._news_panel.isVisible():
             self._news_panel.set_generating(False)
@@ -2168,6 +2230,7 @@ class FloatingWidget(QWidget):
 
         menu.addSeparator()
         menu.addAction("设置...", self.settings_requested.emit)
+        menu.addAction("使用教程", lambda: self.start_onboarding(force=True))
         menu.addAction("复制 Web 控制台令牌", self._copy_web_token)
         menu.addSeparator()
 
@@ -2203,6 +2266,62 @@ class FloatingWidget(QWidget):
         if self._launch_toast is None:
             self._launch_toast = LaunchToast()
         self._launch_toast.show_for(self, text, self.theme)
+
+    # ── 新用户引导（v3.9.0）────────────────────────
+    def _ball_rect_global(self):
+        """浮球本体的全局矩形（引导聚光灯对准它，而非含阴影的窗口）"""
+        off = int(self._ball_offset())
+        s = int(self.current_size)
+        return QRect(self.pos().x() + off, self.pos().y() + off, s, s)
+
+    def start_onboarding(self, force=False):
+        """播放浮窗聚光灯引导；force=False 时已在播放则忽略"""
+        if getattr(self, "_onboarding", None) is not None:
+            if not force:
+                return False
+            try:
+                self._onboarding.close()
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            from agentfloat.ui.onboarding import OnboardingOverlay
+            ball = self._ball_rect_global()
+            screen = QApplication.screenAt(ball.center()) or QApplication.primaryScreen()
+            geo = screen.availableGeometry() if screen else QRect(0, 0, 1920, 1080)
+            overlay = OnboardingOverlay(ball, geo, theme=self.theme)
+            overlay.finished.connect(self._on_onboarding_finished)
+            self._onboarding = overlay
+            overlay.show()
+            _log().info("新用户引导已开始（共 6 步）")
+            return True
+        except Exception as e:  # noqa: BLE001
+            _log().warning("引导启动失败: %s", e)
+            return False
+
+    def _on_onboarding_finished(self, completed):
+        self._onboarding = None
+        cfg = dict(self.config or {})
+        cfg["onboarding_done"] = True
+        if completed:
+            cfg["onboarding_version"] = 1
+        self.config = cfg
+        try:
+            save_config(cfg)
+        except Exception as e:  # noqa: BLE001
+            _log().debug("保存引导状态失败: %s", e)
+        if completed:
+            self._show_launch_toast("引导完成 · 右键可重看")
+        _log().info("新用户引导结束（completed=%s）", completed)
+
+    def maybe_start_onboarding(self):
+        """首次运行自动播放引导（延迟到启动动画结束后由 app.py 调用）"""
+        try:
+            if bool((self.config or {}).get("onboarding_done")):
+                return False
+            return self.start_onboarding()
+        except Exception as e:  # noqa: BLE001
+            _log().debug("引导自检失败: %s", e)
+            return False
 
     def _toggle_web_agent(self, agent):
         """Web Agent 启动/终止（浮球右键菜单入口，PATCH 3.1.0）"""

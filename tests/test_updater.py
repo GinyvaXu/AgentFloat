@@ -118,6 +118,58 @@ def test_download_installer_without_hash_warns_but_works(tmp_path, monkeypatch, 
     assert os.path.isfile(p)
 
 
+def test_r2_manifest_parsing():
+    """v3.9.0：自有镜像（Cloudflare R2）作为首选更新源"""
+    r = up._result_from_r2_manifest({
+        "project": "agentfloat",
+        "tag": "v3.9.0",
+        "updatedAt": "2026-10-08T00:00:00Z",
+        "base": "https://dl.ginyva.site/releases/agentfloat/latest/",
+        "files": [{"name": "notes.txt", "size": 10, "sha256": "aaa"},
+                  {"name": "AgentFloat-Setup-3.9.0.exe", "size": 43000000,
+                   "sha256": "B24B"}],
+    }, "3.8.0")
+    assert r["version"] == "3.9.0" and r["available"] is True
+    assert r["url"] == ("https://dl.ginyva.site/releases/agentfloat/latest/"
+                        "AgentFloat-Setup-3.9.0.exe"), "应优先挑 Setup 安装包"
+    assert r["sha256"] == "b24b", "sha256 归一化小写"
+    assert r["source"] == "r2" and r["size"] == 43000000
+
+    for bad in ({}, {"tag": "v3.9.0"}, {"tag": "v3.9.0", "base": "u"}):
+        with pytest.raises(ValueError):
+            up._result_from_r2_manifest(bad, "3.8.0")
+
+
+def test_r2_source_is_first_priority():
+    """R2 必须排在源列表首位（同版本时优先命中，且免代理最快）"""
+    assert up.MANIFEST_SOURCES[0][0] == "r2"
+    assert "dl.ginyva.site" in up.MANIFEST_SOURCES[0][1]
+
+
+def test_merge_best_prefers_first_max_and_fills_fields():
+    """同版本时取先出现者（R2），并用其它源补齐 notes/sha256"""
+    r2 = {"version": "3.9.0", "available": True, "url": "https://dl/new.exe",
+          "sha256": "abc", "notes": "", "notes_zh": "", "source": "r2",
+          "current": "3.8.0", "error": None, "detail": ""}
+    raw = {"version": "3.9.0", "available": True, "url": "https://gh/new.exe",
+           "sha256": "", "notes": "N", "notes_zh": "中文更新说明", "source": "raw",
+           "current": "3.8.0", "error": None, "detail": ""}
+    m = up._merge_best([r2, raw])
+    assert m["url"].startswith("https://dl/"), "同版本应保留先出现者（R2 的 URL）"
+    assert m["sha256"] == "abc"
+    assert m["notes"] == "N" and m["notes_zh"] == "中文更新说明"
+
+    # 版本更高者胜出，即使它排在后面
+    hi = dict(raw, version="3.10.0", url="https://hi/x.exe")
+    assert up._merge_best([r2, hi])["version"] == "3.10.0"
+
+
+def test_mirror_urls_does_not_wrap_non_github():
+    """R2 直链不应被套上 GitHub 代理"""
+    r2url = "https://dl.ginyva.site/releases/agentfloat/latest/AgentFloat-Setup-3.9.0.exe"
+    assert up.mirror_urls(r2url) == [r2url]
+
+
 def test_result_from_manifest():
     r = up._result_from_manifest(
         {"version": "9.9.9", "url": "u", "notes": "a\r\nb", "notes_zh": "中\r\n文",

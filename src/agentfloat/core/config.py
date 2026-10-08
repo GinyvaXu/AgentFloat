@@ -80,6 +80,9 @@ def load_config():
         "process_panel": {"enabled": True, "hover_delay_ms": 250, "opacity": 1.0, "scale": 1.0},
         # v3.6.2：启动动画（屏幕中心光晕 + 圆环 + 放大浮球 → 飞向落点）
         "intro": {"enabled": True, "sound": True, "volume": 0.6, "greeting": ""},
+        # v3.9.0：新用户引导（首次运行自动播放；右键「使用教程」可重播）
+        "onboarding_done": False,
+        "onboarding_version": 0,
     }
     loaded = {}
     parse_error = False

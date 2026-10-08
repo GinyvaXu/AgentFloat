@@ -33,9 +33,14 @@ DEFAULT_NEWS = {
     "panel_width": 860,          # 快报窗口宽度
     "panel_height": 680,         # 快报窗口高度
     "font_size": 13,             # 快报正文字号 (px)
+    "density": "comfortable",    # v3.9.0 阅读密度：comfortable / compact
     "use_ai": True,              # False = 纯标题列表（不调用本地 Agent）
     "agent_id": "",              # 空 = 默认主 Agent
     "sources": ["hackernews", "github_trending", "sspai", "qbitai"],
+    "per_source": 12,            # v3.9.0 每源抓取条数
+    "ai_max_items": 6,           # v3.9.0 送 AI 摘要的条数上限
+    "blocked_keywords": [],      # v3.9.0 屏蔽关键词（标题命中即丢弃）
+    "retention_days": 14,        # v3.9.0 历史保留天数
     "notify": True,
     "auto_show_panel": True,
     "unread_count": 0,
@@ -206,16 +211,22 @@ SOURCES = [
 SOURCE_MAP = {s["id"]: s for s in SOURCES}
 
 
-def fetch_all(enabled_ids, per_source=12, timeout=15):
-    """并发抓取启用源；返回 (items, errors)。
+def fetch_all_stats(enabled_ids, per_source=12, timeout=15, progress=None):
+    """并发抓取启用源（v3.9.0 增强版）。
 
-    单个源超时不中断整体：as_completed 到点抛 TimeoutError 时，
-    取消剩余任务并记为错误，已抓到的部分结果照常返回。
+    返回 ``(items, errors, sources)``：
+    - items: 原始条目列表
+    - errors: 供 UI 展示的「源名：原因」字符串列表（保持旧行为）
+    - sources: 结构化的每源结果 [{id,name,ok,count,error}]，供失败源单源重试
+
+    progress(done, total, label) 每完成一个源回调一次（用于阶段化进度）。
     """
     enabled = [SOURCE_MAP[i] for i in enabled_ids if i in SOURCE_MAP]
-    items, errors = [], []
+    items, errors, stats = [], [], []
     if not enabled:
-        return items, errors
+        return items, errors, stats
+    total = len(enabled)
+    done = 0
     pool = ThreadPoolExecutor(max_workers=max(2, len(enabled)))
     futures = {pool.submit(s["fetch"], per_source): s for s in enabled}
     pending = set(futures)
@@ -226,19 +237,81 @@ def fetch_all(enabled_ids, per_source=12, timeout=15):
             try:
                 got = fut.result() or []
                 items.extend(got)
+                stats.append({"id": s["id"], "name": s["zh"], "ok": True,
+                              "count": len(got), "error": ""})
             except Exception as e:
-                errors.append("%s：%s" % (s["name"], _brief_err(e)))
+                msg = _brief_err(e)
+                errors.append("%s：%s" % (s["name"], msg))
+                stats.append({"id": s["id"], "name": s["zh"], "ok": False,
+                              "count": 0, "error": msg})
+            done += 1
+            if progress:
+                try:
+                    progress(done, total, s["zh"])
+                except Exception:  # noqa: BLE001
+                    pass
     except TimeoutError:
-        # 剩余源在限时内未完成：取消并记为超时，不向调用方抛异常
         for fut in list(pending):
             fut.cancel()
-            errors.append("%s：超时未完成" % futures[fut]["name"])
+            s = futures[fut]
+            errors.append("%s：超时未完成" % s["name"])
+            stats.append({"id": s["id"], "name": s["zh"], "ok": False,
+                          "count": 0, "error": "超时未完成"})
+            done += 1
+            if progress:
+                try:
+                    progress(done, total, s["zh"])
+                except Exception:  # noqa: BLE001
+                    pass
     finally:
         try:
             pool.shutdown(wait=False, cancel_futures=True)
         except TypeError:
             pool.shutdown(wait=False)
+    return items, errors, stats
+
+
+def fetch_all(enabled_ids, per_source=12, timeout=15):
+    """并发抓取启用源；返回 (items, errors)。
+
+    单个源超时不中断整体：as_completed 到点抛 TimeoutError 时，
+    取消剩余任务并记为错误，已抓到的部分结果照常返回。
+    """
+    items, errors, _stats = fetch_all_stats(enabled_ids, per_source, timeout)
     return items, errors
+
+
+def fetch_one(source_id, per_source=12, timeout=15):
+    """单源重试：返回 (items, error_str)。未知 id 返回空与原因。"""
+    src = SOURCE_MAP.get(source_id)
+    if src is None:
+        return [], "未知数据源：%s" % source_id
+    try:
+        return (src["fetch"](per_source) or []), ""
+    except Exception as e:  # noqa: BLE001
+        return [], _brief_err(e)
+
+
+def filter_blocked(items, keywords):
+    """按屏蔽关键词过滤（标题 + 摘要 + 来源，大小写不敏感）"""
+    words = [str(w).strip().lower() for w in (keywords or []) if str(w).strip()]
+    if not words:
+        return list(items or [])
+    out = []
+    for it in items or []:
+        text = " ".join([str(it.get("title", "")), str(it.get("summary", "")),
+                         str(it.get("source", ""))]).lower()
+        if any(w in text for w in words):
+            continue
+        out.append(it)
+    return out
+
+
+def item_id(url="", title=""):
+    """条目稳定 id（同一链接跨次生成保持同一 id → 已读/收藏可延续）"""
+    import hashlib
+    key = _norm_url(url) or (title or "").strip()
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
 
 
 def _brief_err(e):
@@ -338,17 +411,37 @@ def load_archive(date):
         return None
 
 
-def save_report(date, items, raw_md, language, used_ai, source_errors):
-    """写入 news/<date>.json + news/<date>.md + news/latest.json，返回 latest 数据"""
+def save_report(date, items, raw_md, language, used_ai, source_errors,
+                sources=None, stats=None, headline="", summary=""):
+    """写入 news/<date>.json + news/<date>.md + news/latest.json，返回 latest 数据。
+
+    v3.9.0：报告结构升级（version=2）——条目带 id/category/read/starred，
+    并记录每源结果与统计，供阅读器、失败源重试与状态展示使用。
+    旧字段（count/items/raw_md/source_errors）保持不变以兼容既有调用。
+    """
     d = news_storage_dir()
+    enriched = []
+    for it in items or []:
+        row = dict(it)
+        row.setdefault("id", item_id(row.get("url", ""), row.get("title", "")))
+        row.setdefault("category", guess_category(row.get("title", ""), row.get("url", "")))
+        row.setdefault("read", False)
+        row.setdefault("starred", False)
+        row.setdefault("summary", "")
+        enriched.append(row)
     payload = {
+        "version": 2,
         "date": date,
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "language": language,
         "used_ai": used_ai,
-        "source_errors": source_errors,
-        "count": len(items),
-        "items": items,
+        "source_errors": list(source_errors or []),
+        "sources": list(sources or []),
+        "stats": dict(stats or {}),
+        "headline": headline or "%s AI 速览" % date,
+        "summary": summary or "",
+        "count": len(enriched),
+        "items": enriched,
         "raw_md": raw_md,
     }
     with open(os.path.join(d, "%s.json" % date), "w", encoding="utf-8") as f:
@@ -358,3 +451,177 @@ def save_report(date, items, raw_md, language, used_ai, source_errors):
     with open(os.path.join(d, "latest.json"), "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
     return payload
+
+
+# ── 已读 / 收藏状态（跨次生成延续）────────────────
+def _state_path():
+    return os.path.join(news_storage_dir(), "news_state.json")
+
+
+def load_state():
+    """读取 {read:{id:ts}, starred:[id]}；损坏时返回空状态"""
+    try:
+        with open(_state_path(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {"read": {}, "starred": []}
+        return {"read": dict(data.get("read") or {}),
+                "starred": list(data.get("starred") or [])}
+    except (IOError, json.JSONDecodeError):
+        return {"read": {}, "starred": []}
+
+
+def save_state(state):
+    try:
+        with open(_state_path(), "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+        return True
+    except IOError:
+        return False
+
+
+def mark_read(iid, flag=True):
+    """标记已读/未读；返回更新后的状态"""
+    st = load_state()
+    if flag:
+        st["read"][iid] = int(time.time())
+    else:
+        st["read"].pop(iid, None)
+    save_state(st)
+    return st
+
+
+def mark_all_read(report=None):
+    """把某期（默认最新）所有条目标为已读"""
+    st = load_state()
+    for it in ((report or load_latest()) or {}).get("items") or []:
+        st["read"][it.get("id") or item_id(it.get("url", ""), it.get("title", ""))] = int(time.time())
+    save_state(st)
+    return st
+
+
+def toggle_star(iid):
+    """收藏/取消收藏；返回 (状态, 是否已收藏)"""
+    st = load_state()
+    if iid in st["starred"]:
+        st["starred"].remove(iid)
+        starred = False
+    else:
+        st["starred"].append(iid)
+        starred = True
+    save_state(st)
+    return st, starred
+
+
+def apply_state(report, state=None):
+    """把已读/收藏状态套用到报告条目上（返回同一 dict，便于链式调用）"""
+    if not isinstance(report, dict):
+        return report
+    st = state or load_state()
+    read = st.get("read") or {}
+    starred = set(st.get("starred") or [])
+    for it in report.get("items") or []:
+        iid = it.get("id") or item_id(it.get("url", ""), it.get("title", ""))
+        it["id"] = iid
+        it["read"] = iid in read
+        it["starred"] = iid in starred
+    report["unread"] = sum(1 for it in (report.get("items") or []) if not it.get("read"))
+    return report
+
+
+def cleanup_old(days=14):
+    """清理超过 N 天的历史快报（<date>.json / <date>.md）；返回删除数量"""
+    import datetime
+    try:
+        days = int(days)
+    except (TypeError, ValueError):
+        days = 14
+    if days <= 0:
+        return 0
+    cutoff = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+    removed = 0
+    for name in list(os.listdir(news_storage_dir())):
+        if name == "latest.json" or not (name.endswith(".json") or name.endswith(".md")):
+            continue
+        date = os.path.splitext(name)[0]
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", date) or date >= cutoff:
+            continue
+        try:
+            os.remove(os.path.join(news_storage_dir(), name))
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
+def export_markdown(date=None):
+    """导出某期快报为 Markdown（写入数据目录），返回 (路径, 错误)"""
+    d = news_storage_dir()
+    if date:
+        src = os.path.join(d, "%s.md" % date)
+        name = "AI快报_%s.md" % date
+    else:
+        src = os.path.join(d, "latest.md")
+        name = "AI快报_最新.md"
+    try:
+        text = open(src, "r", encoding="utf-8").read() if os.path.isfile(src) else ""
+    except IOError as e:
+        return "", str(e)
+    if not text:
+        report = load_archive(date) if date else load_latest()
+        if not report:
+            return "", "该日期没有快报数据"
+        text = build_export_markdown(report)
+    out = os.path.join(d, name)
+    try:
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(text)
+    except IOError as e:
+        return "", str(e)
+    return out, ""
+
+
+def build_export_markdown(report):
+    """把报告（v1/v2 均可）导出为带分类与链接的 Markdown"""
+    rep = report or {}
+    lines = ["# %s" % (rep.get("headline") or ("AI 速览 %s" % rep.get("date", ""))), ""]
+    if rep.get("summary"):
+        lines += [rep["summary"], ""]
+    by_cat = {}
+    for it in rep.get("items") or []:
+        by_cat.setdefault(it.get("category") or "综合", []).append(it)
+    for cat in sorted(by_cat):
+        lines.append("## %s" % cat)
+        for it in by_cat[cat]:
+            star = "⭐ " if it.get("starred") else ""
+            lines.append("- %s[%s](%s) — %s" % (star, it.get("title", "?"),
+                                                it.get("url", "#"),
+                                                it.get("source", "")))
+            if it.get("summary"):
+                lines.append("  %s" % it["summary"])
+        lines.append("")
+    lines.append("> 导出时间：%s · 共 %d 条 · 来源：AgentFloat AI 快报"
+                 % (time.strftime("%Y-%m-%d %H:%M"), len(rep.get("items") or [])))
+    return "\n".join(lines)
+
+
+def next_run_time(cfg=None, now=None):
+    """计算下次自动生成时间（人类可读）；不适用时返回 ""。
+
+    daily / daily_startup：今天 HH:MM，若已过则明天；startup：仅启动时补生成。
+    """
+    import datetime
+    cfg = cfg or {}
+    mode = str(cfg.get("schedule_mode") or "daily_startup")
+    if mode not in ("daily", "daily_startup"):
+        return "启动时" if mode == "startup" else ""
+    hhmm = str(cfg.get("schedule_time") or "09:00")
+    try:
+        hh, mm = [int(x) for x in hhmm.split(":")[:2]]
+    except (ValueError, TypeError):
+        hh, mm = 9, 0
+    now = now or datetime.datetime.now()
+    target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if target <= now:
+        target += datetime.timedelta(days=1)
+    return target.strftime("%m-%d %H:%M")

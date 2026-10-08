@@ -196,13 +196,105 @@ class WebAppHandlers(object):
         return {"ok": True, "applied": applied, "preview": info}
 
     def get_news_state(self, date=None):
+        """AI 快报状态（v3.9.0）：报告 + 每源结果 + 统计 + 已读/收藏 + 下次生成时间"""
         from agentfloat.webshell.server import _news_payload
         base = _news_payload(None, date)
         cfg = getattr(self.widget, "_news_cfg", None) or self.widget.config.get("news") or _NEWS_DEFAULTS
         base["cfg"] = cfg
         base["generating"] = bool(getattr(self.widget, "_news_generating", False))
         base["phase"] = self.bridge.get_snapshot("news_phase") or ""
+        base["progress"] = self.bridge.get_snapshot("news_progress") or {}
+        try:
+            from agentfloat.services.news import fetcher as _nf
+            report = base.get("report")
+            if isinstance(report, dict):
+                _nf.apply_state(report)
+                base["unread"] = report.get("unread", 0)
+            else:
+                base["unread"] = 0
+            base["next_run"] = _nf.next_run_time(cfg)
+            base["starred_count"] = len(_nf.load_state().get("starred") or [])
+        except Exception:  # noqa: BLE001
+            base.setdefault("unread", 0)
+            base.setdefault("next_run", "")
         return base
+
+    def news_mark_read(self, item_id=None, read=True):
+        """标记单条已读/未读；item_id 为空表示整期已读"""
+        from agentfloat.services.news import fetcher as _nf
+        if item_id:
+            _nf.mark_read(str(item_id), bool(read))
+        else:
+            _nf.mark_all_read()
+        # 未读数同步到浮球/托盘角标
+        try:
+            if hasattr(self.widget, "refresh_news_unread"):
+                self.widget.refresh_news_unread()
+        except Exception:  # noqa: BLE001
+            pass
+        return {"ok": True}
+
+    def news_star(self, item_id):
+        """收藏/取消收藏某条"""
+        from agentfloat.services.news import fetcher as _nf
+        _st, starred = _nf.toggle_star(str(item_id))
+        return {"ok": True, "starred": bool(starred)}
+
+    def news_export(self, date=None):
+        """导出某期快报为 Markdown，返回文件路径"""
+        from agentfloat.services.news import fetcher as _nf
+        path, err = _nf.export_markdown(date)
+        if err:
+            return {"ok": False, "error": err}
+        return {"ok": True, "path": path}
+
+    def news_retry_source(self, source_id):
+        """单源重试：重新抓取该源并并回当日报告（不重跑 AI）"""
+        from agentfloat.services.news import fetcher as _nf
+        cfg = getattr(self.widget, "_news_cfg", None) or self.widget.config.get("news") or {}
+        per = max(3, min(30, int(cfg.get("per_source") or 12)))
+        items, err = _nf.fetch_one(str(source_id), per_source=per)
+        if err:
+            return {"ok": False, "error": err, "added": 0}
+        report = _nf.load_latest() or {}
+        existing = report.get("items") or []
+        seen = {it.get("id") or _nf.item_id(it.get("url", ""), it.get("title", ""))
+                for it in existing}
+        added = 0
+        for it in _nf.filter_blocked(items, cfg.get("blocked_keywords")):
+            iid = _nf.item_id(it.get("url", ""), it.get("title", ""))
+            if iid in seen:
+                continue
+            seen.add(iid)
+            existing.append({
+                "id": iid, "title": it.get("title", "?"), "url": it.get("url", "#"),
+                "category": _nf.guess_category(it.get("title", ""), it.get("url", "")),
+                "summary": "", "source": it.get("source", ""), "ts": it.get("ts", 0),
+            })
+            added += 1
+        if added:
+            report["items"] = existing
+            report["count"] = len(existing)
+            report["source_errors"] = [e for e in (report.get("source_errors") or [])
+                                       if str(source_id) not in str(e)]
+            srcs = report.get("sources") or []
+            for s in srcs:
+                if s.get("id") == source_id:
+                    s["ok"] = True
+                    s["error"] = ""
+                    s["count"] = int(s.get("count") or 0) + added
+            report["sources"] = srcs
+            stats = report.get("stats") or {}
+            stats["shown"] = len(existing)
+            report["stats"] = stats
+            import time as _time
+            date = report.get("date") or _time.strftime("%Y-%m-%d")
+            _nf.save_report(date, existing, report.get("raw_md") or "",
+                            report.get("language") or "zh",
+                            bool(report.get("used_ai")), report.get("source_errors") or [],
+                            sources=srcs, stats=stats,
+                            headline=report.get("headline") or "")
+        return {"ok": True, "added": added, "error": ""}
 
     def open_url(self, url):
         _open_url(url)
