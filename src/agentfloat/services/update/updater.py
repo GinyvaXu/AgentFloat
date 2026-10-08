@@ -374,6 +374,7 @@ def download_installer(url, dest_dir=None, progress=None, timeout=_DOWNLOAD_TIME
     path = os.path.join(dest_dir, fname)
     expect = str(expected_sha256 or "").strip().lower()
     last_err = None
+    hash_err = None
 
     def _verified(p):
         """校验下载文件；返回 (ok, 错误信息)"""
@@ -393,7 +394,7 @@ def download_installer(url, dest_dir=None, progress=None, timeout=_DOWNLOAD_TIME
                 ok, why = _verified(path)
                 if ok:
                     return path
-                last_err = ValueError(why)
+                last_err = hash_err = ValueError(why)
                 _logger.error("更新包校验未通过（%s）: %s", cand, why)
                 try:
                     os.remove(path)
@@ -415,14 +416,15 @@ def download_installer(url, dest_dir=None, progress=None, timeout=_DOWNLOAD_TIME
             ok, why = _verified(path)
             if ok:
                 return path
-            last_err = ValueError(why)
+            last_err = hash_err = ValueError(why)
             try:
                 os.remove(path)
             except OSError:
                 pass
         except Exception as e:
             last_err = e
-    raise last_err
+    # 校验失败优先于后续网络错误上报（否则用户看到的是"连接被重置"而非"包被篡改"）
+    raise hash_err or last_err
 
 
 # ---- 静默重装并重启 -------------------------------------------

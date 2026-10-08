@@ -424,9 +424,14 @@ def _main():
             _release_worker(download_worker_ref)
             _log().info("更新包下载完成: %s", path)
             if updater.apply_update(path):
-                _update_box(None, QMessageBox.Information, "更新已开始",
-                    "更新已开始：程序将退出，安装完成后会自动重启。")
-                QTimer.singleShot(800, app.quit)
+                # v3.9.1：不再弹阻塞式对话框 —— 自动更新应无需人工点击即可完成
+                try:
+                    tray_icon.showMessage("AgentFloat — 正在更新",
+                                          "安装程序已启动，程序将退出并自动重启到新版本。",
+                                          QSystemTrayIcon.Information, 4000)
+                except Exception:  # noqa: BLE001
+                    pass
+                QTimer.singleShot(900, app.quit)
             else:
                 ret = _update_box(None, QMessageBox.Question, "下载完成",
                     f"新版本 {info.get('version')} 安装包已下载：\n{path}\n\n"
