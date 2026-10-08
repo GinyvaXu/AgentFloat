@@ -1,0 +1,40 @@
+- generic [ref=f1e2]:
+  - complementary [ref=f1e3]:
+    - generic [ref=f1e4]:
+      - img "AgentFloat" [ref=f1e5]
+      - generic [ref=f1e6]:
+        - generic [ref=f1e7]: AgentFloat
+        - generic [ref=f1e8]: v…
+    - navigation [ref=f1e9]:
+      - generic [ref=f1e10] [cursor=pointer]:
+        - generic [ref=f1e11]: 🧭
+        - text: 使用指南
+      - generic [ref=f1e12] [cursor=pointer]:
+        - generic [ref=f1e13]: ⚙
+        - text: 设置
+      - generic [ref=f1e14] [cursor=pointer]:
+        - generic [ref=f1e15]: ⬇
+        - text: Agent 安装
+      - generic [ref=f1e16] [cursor=pointer]:
+        - generic [ref=f1e17]: ¥
+        - text: API 用量
+      - generic [ref=f1e18] [cursor=pointer]:
+        - generic [ref=f1e19]: "N"
+        - text: AI 快报
+    - generic [ref=f1e20]:
+      - button "◐ 主题" [ref=f1e21] [cursor=pointer]
+      - generic [ref=f1e22]: ● 本地服务运行中
+  - main [ref=f1e23]:
+    - generic [ref=f1e24]:
+      - generic [ref=f1e25]: 设置
+      - generic [ref=f1e26]:
+        - generic [ref=f1e27]: 有未保存的修改
+        - button "保存" [disabled] [ref=f1e28]
+    - generic [ref=f1e30]:
+      - button "通用" [ref=f1e31] [cursor=pointer]
+      - button "Agent 管理" [ref=f1e32] [cursor=pointer]
+      - button "环绕菜单" [ref=f1e33] [cursor=pointer]
+      - button "Skills" [ref=f1e34] [cursor=pointer]
+      - button "账户与密钥" [ref=f1e35] [cursor=pointer]
+      - button "喝水助手" [ref=f1e36] [cursor=pointer]
+      - button "关于" [ref=f1e37] [cursor=pointer]

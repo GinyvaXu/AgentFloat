@@ -2197,8 +2197,7 @@ class FloatingWidget(QWidget):
             f"QMenu::separator {{ height: 1px;"
             f" background: #{sep[0]:02X}{sep[1]:02X}{sep[2]:02X}; margin: 4px 8px; }}"
         )
-        menu = QMenu(self)
-        menu.setStyleSheet(menu_css)
+        menu = self._build_context_menu(menu_css)
 
         primary = get_primary_agent(self._agents)
         pname = primary.get("name", "主 Agent") if primary else "主 Agent"
@@ -2244,6 +2243,55 @@ class FloatingWidget(QWidget):
 
         menu.exec_(QCursor.pos())
 
+    def _build_context_menu(self, menu_css):
+        """构建浮球右键菜单（v3.9.2：抽出以便引导演示用 popup 非阻塞弹出）"""
+        menu = QMenu(self)
+        menu.setStyleSheet(menu_css)
+
+        primary = get_primary_agent(self._agents)
+        pname = primary.get("name", "主 Agent") if primary else "主 Agent"
+        menu.addAction("启动 %s" % pname, self.launch_requested.emit)
+        if len(self._agents) > 1:
+            sub = menu.addMenu("启动其他 Agent")
+            for a in self._agents:
+                if a.get("id") == (primary or {}).get("id"):
+                    continue
+                sub.addAction(a.get("name"), lambda a=a: launch_agent(a, self.config))
+        menu.addAction("Skills 辅助窗", self._open_skills_panel)
+
+        # Web Agent 启动/终止（PATCH 3.1.0：浮球右键菜单入口）
+        web_agents = webagent.list_web_agents(self._agents)
+        if web_agents:
+            web_menu = menu.addMenu("Web Agent")
+            for agent, spec in web_agents:
+                st = webagent.status(agent)
+                wname = agent.get("name") or agent.get("id")
+                if st.get("running"):
+                    web_menu.addAction("终止 %s（:%d）" % (wname, spec["port"]),
+                                       lambda a=agent: self._toggle_web_agent(a))
+                    web_menu.addAction("打开 %s 页面" % wname,
+                                       lambda u=spec["url"]: _open_url(u))
+                else:
+                    web_menu.addAction("启动 %s" % wname,
+                                       lambda a=agent: self._toggle_web_agent(a))
+                web_menu.addSeparator()
+
+        menu.addSeparator()
+        menu.addAction("设置...", self.settings_requested.emit)
+        menu.addAction("使用教程", lambda: self.start_onboarding(force=True))
+        menu.addAction("复制 Web 控制台令牌", self._copy_web_token)
+        menu.addSeparator()
+
+        auto = menu.addAction("开机自启")
+        auto.setCheckable(True)
+        auto.setChecked(is_auto_start_enabled())
+        auto.triggered.connect(lambda checked: toggle_auto_start(checked))
+
+        menu.addSeparator()
+        menu.addAction("退出", self.quit_requested.emit)
+
+        return menu
+
     def _copy_web_token(self):
         """复制本地 Web 控制台访问令牌（v3.8.0：浏览器手动打开控制台时粘贴）"""
         try:
@@ -2267,15 +2315,121 @@ class FloatingWidget(QWidget):
             self._launch_toast = LaunchToast()
         self._launch_toast.show_for(self, text, self.theme)
 
-    # ── 新用户引导（v3.9.0）────────────────────────
+    # ── 新用户引导（v3.9.0 / v3.9.2 增强）────────────
     def _ball_rect_global(self):
         """浮球本体的全局矩形（引导聚光灯对准它，而非含阴影的窗口）"""
         off = int(self._ball_offset())
         s = int(self.current_size)
         return QRect(self.pos().x() + off, self.pos().y() + off, s, s)
 
+    # 每步对应的浮球状态（v3.9.2：介绍哪个功能，小球就处于那个状态）
+    ONBOARDING_DEMOS = ("hover", "ripple", "menu", "context", "snap", "restore")
+
+    def onboarding_demo(self, index):
+        """把浮球切到引导第 index 步对应的状态（仅演示，不触发真实动作）"""
+        try:
+            self._onboarding_demo_cleanup(restore_pos=False)
+        except Exception:  # noqa: BLE001
+            pass
+        name = self.ONBOARDING_DEMOS[index] if 0 <= index < len(self.ONBOARDING_DEMOS) else ""
+        try:
+            if name == "hover":
+                self.is_hovered = True
+                self._animate_scale(HOVER_SCALE, MotionTokens.SPEED)
+                self.update()
+            elif name == "ripple":
+                self._start_ripple(QPoint(int(self.width() / 2), int(self.height() / 2)))
+            elif name == "menu":
+                self._open_radial_menu_now("onboarding")
+            elif name == "context":
+                self._popup_context_menu_demo()
+            elif name == "snap":
+                self._snap_demo()
+            elif name == "restore":
+                self._onboarding_demo_cleanup()
+            _log().debug("[引导] 浮球演示状态: %s", name)
+        except Exception as e:  # noqa: BLE001
+            _log().debug("[引导] 演示状态 %s 失败: %s", name, e)
+
+    def _onboarding_demo_cleanup(self, restore_pos=True):
+        """还原引导演示造成的状态（关菜单 / 停涟漪 / 恢复位置与缩放）"""
+        # 关闭环绕菜单
+        try:
+            if self._radial_menu is not None and self._radial_menu.isVisible():
+                self._radial_menu.close_menu()
+        except Exception:  # noqa: BLE001
+            pass
+        # 关闭演示用右键菜单
+        try:
+            if getattr(self, "_demo_menu", None) is not None:
+                self._demo_menu.close()
+                self._demo_menu = None
+        except Exception:  # noqa: BLE001
+            pass
+        # 取消贴边隐藏并恢复位置
+        try:
+            if self._hidden_now:
+                self._reveal_now()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if getattr(self, "_onboarding_saved_pos", None) is not None:
+                if restore_pos:
+                    self.move(self._onboarding_saved_pos)
+                self._onboarding_saved_pos = None
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self._remove_edge_detector()
+        except Exception:  # noqa: BLE001
+            pass
+        # 缩放与悬停态还原
+        try:
+            self.is_hovered = False
+            self._animate_scale(1.0, MotionTokens.SPEED)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _popup_context_menu_demo(self):
+        """非阻塞地弹出真实右键菜单（引导演示用；下一步/结束时关闭）"""
+        menu = self._build_context_menu()
+        menu.setAttribute(Qt.WA_DeleteOnClose, True)
+        self._demo_menu = menu
+        off = int(self._ball_offset())
+        s = int(self.current_size)
+        menu.popup(self.mapToGlobal(QPoint(off + s + 8, off + s // 2)))
+
+    def _snap_demo(self):
+        """演示拖拽贴边隐藏：吸附到最近边缘 → 滑出只留一点 → 稍后自动滑回"""
+        self._onboarding_saved_pos = self.pos()
+        if not self.config.get("snap_enabled", True):
+            return
+        screens = self._screen_rects()
+        if not screens:
+            return
+        off = int(self._ball_offset())
+        s = int(self.current_size)
+        x, y = self.pos().x() + off, self.pos().y() + off
+        idx = screen_index_for(x + s / 2.0, y + s / 2.0, screens)
+        l, t, r, b = screens[idx]
+        dists = (("left", x - l), ("right", r - (x + s)),
+                 ("top", y - t), ("bottom", b - (y + s)))
+        edge = min(dists, key=lambda kv: kv[1])[0]
+        nx, ny = edge_position(edge, x, y, s, screens[idx])
+        self._snap_edge = edge
+        self._snapped = True
+        self.move(int(nx - off), int(ny - off))
+        self._setup_edge_detector()
+        # 演示「滑出隐藏」→ 2.6s 后自动滑回（避免引导期间小球一直贴着屏幕边）
+        QTimer.singleShot(700, self._do_hide)
+        QTimer.singleShot(2600, self._reveal_now)
+
     def start_onboarding(self, force=False):
-        """播放浮窗聚光灯引导；force=False 时已在播放则忽略"""
+        """播放浮窗聚光灯引导；force=False 时已在播放则忽略
+
+        v3.9.2：引导每一步会把浮球切到对应功能的状态（悬停/涟漪/环绕菜单/右键菜单/贴边隐藏），
+        结束或跳过时自动还原。
+        """
         if getattr(self, "_onboarding", None) is not None:
             if not force:
                 return False
@@ -2290,9 +2444,10 @@ class FloatingWidget(QWidget):
             geo = screen.availableGeometry() if screen else QRect(0, 0, 1920, 1080)
             overlay = OnboardingOverlay(ball, geo, theme=self.theme)
             overlay.finished.connect(self._on_onboarding_finished)
+            overlay.step_changed.connect(self.onboarding_demo)
             self._onboarding = overlay
             overlay.show()
-            _log().info("新用户引导已开始（共 6 步）")
+            _log().info("新用户引导已开始（共 6 步，浮球将同步演示各功能状态）")
             return True
         except Exception as e:  # noqa: BLE001
             _log().warning("引导启动失败: %s", e)
@@ -2300,10 +2455,14 @@ class FloatingWidget(QWidget):
 
     def _on_onboarding_finished(self, completed):
         self._onboarding = None
+        try:
+            self._onboarding_demo_cleanup()      # 还原演示造成的状态
+        except Exception:  # noqa: BLE001
+            pass
         cfg = dict(self.config or {})
         cfg["onboarding_done"] = True
         if completed:
-            cfg["onboarding_version"] = 1
+            cfg["onboarding_version"] = 2
         self.config = cfg
         try:
             save_config(cfg)

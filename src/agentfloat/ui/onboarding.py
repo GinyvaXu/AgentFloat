@@ -9,7 +9,8 @@
 
 交互：下一步 / 上一步 / 跳过；Esc=跳过，Enter/→=下一步，←=上一步；点击遮罩空白=下一步。
 """
-from PyQt5.QtCore import QRect, QRectF, Qt, pyqtSignal
+from PyQt5.QtCore import (QEasingCurve, QPointF, QPropertyAnimation, QRect, QRectF, Qt,
+                          QTimer, pyqtSignal)
 from PyQt5.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt5.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
                              QWidget)
@@ -100,9 +101,10 @@ def spotlight_rect(ball_rect):
 
 
 class OnboardingOverlay(QWidget):
-    """浮窗聚光灯引导覆盖层"""
+    """浮窗聚光灯引导覆盖层（v3.9.2：更多动画 + 浮球状态联动）"""
 
     finished = pyqtSignal(bool)      # True = 看完，False = 跳过
+    step_changed = pyqtSignal(int)   # 当前步骤下标（用于让浮球切到对应状态）
 
     def __init__(self, ball_rect, screen_rect, theme="light", parent=None):
         super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
@@ -111,10 +113,43 @@ class OnboardingOverlay(QWidget):
         self._theme = theme
         self._index = 0
         self._ball = QRect(ball_rect)
+        self._pulse = 0.0
+        self._pulse_dir = 1
+        self._fade_target = None
         geo = QRect(screen_rect)
         self.setGeometry(geo)
         self._build_bubble()
+        # 聚光灯脉冲（光环呼吸）+ 气泡淡入
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.setInterval(33)          # ~30fps，开销极小
+        self._pulse_timer.timeout.connect(self._on_pulse)
+        self._pulse_timer.start()
+        try:
+            from PyQt5.QtWidgets import QGraphicsOpacityEffect
+            self._bubble_fx = QGraphicsOpacityEffect(self._bubble)
+            self._bubble.setGraphicsEffect(self._bubble_fx)
+        except Exception:  # noqa: BLE001
+            self._bubble_fx = None
+        self._bubble_anim = QPropertyAnimation(self._bubble, b"pos", self)
+        self._bubble_anim.setDuration(260)
+        self._bubble_anim.setEasingCurve(QEasingCurve.OutCubic)
         self._apply_step()
+
+    def _on_pulse(self):
+        """光环呼吸 + 气泡淡入推进"""
+        self._pulse += 0.035 * self._pulse_dir
+        if self._pulse >= 1.0:
+            self._pulse, self._pulse_dir = 1.0, -1
+        elif self._pulse <= 0.0:
+            self._pulse, self._pulse_dir = 0.0, 1
+        if self._bubble_fx is not None and self._fade_target is not None:
+            cur = self._bubble_fx.opacity()
+            step = (self._fade_target - cur) * 0.28
+            nxt = cur + step
+            if abs(self._fade_target - nxt) < 0.01:
+                nxt = self._fade_target
+            self._bubble_fx.setOpacity(max(0.0, min(1.0, nxt)))
+        self.update()
 
     # ── 气泡 ───────────────────────────────────────
     def _build_bubble(self):
@@ -182,8 +217,27 @@ class OnboardingOverlay(QWidget):
         self._next.setText("开始使用" if self._index == len(STEPS) - 1 else "下一步")
         rect, side = bubble_geometry(self._ball, self.geometry(),
                                      (BUBBLE_W, self._bubble.sizeHint().height()))
-        self._bubble.setGeometry(rect)
         self._side = side
+        # 气泡：淡入 + 从下方滑入（每步都播，形成节奏感）
+        try:
+            self._bubble.resize(rect.size())
+            start = QRect(rect)
+            start.moveTop(rect.top() + 14)
+            self._bubble.move(start.topLeft())
+            self._bubble_anim.stop()
+            self._bubble_anim.setStartValue(start.topLeft())
+            self._bubble_anim.setEndValue(rect.topLeft())
+            self._bubble_anim.start()
+            if self._bubble_fx is not None:
+                self._bubble_fx.setOpacity(0.0)
+                self._fade_target = 1.0
+        except Exception:  # noqa: BLE001
+            self._bubble.setGeometry(rect)
+        # 通知外层：让浮球切到对应功能的状态（v3.9.2）
+        try:
+            self.step_changed.emit(self._index)
+        except Exception:  # noqa: BLE001
+            pass
         self.update()
 
     def _go(self, delta):
@@ -195,6 +249,10 @@ class OnboardingOverlay(QWidget):
         self._apply_step()
 
     def _finish(self, completed):
+        try:
+            self._pulse_timer.stop()
+        except Exception:  # noqa: BLE001
+            pass
         self.finished.emit(bool(completed))
         self.close()
 
@@ -251,11 +309,43 @@ class OnboardingOverlay(QWidget):
         inner = QPainterPath()
         inner.addRoundedRect(holef, holef.width() / 2.0, holef.height() / 2.0)
         p.fillPath(path.subtracted(inner), QColor(0, 0, 0, 150))
-        # 光环 + 呼吸圈
-        p.setPen(QPen(QColor(10, 132, 255, 220), 2.4))
+        # 聚光灯脉冲：外圈呼吸 + 内圈实环（v3.9.2 更有动感）
+        breath = 4.0 + 5.0 * self._pulse
+        glow = holef.adjusted(-breath, -breath, breath, breath)
+        p.setPen(QPen(QColor(10, 132, 255, int(46 + 60 * self._pulse)), 5))
         p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(glow, glow.width() / 2.0, glow.height() / 2.0)
+        p.setPen(QPen(QColor(10, 132, 255, 235), 2.4))
         p.drawRoundedRect(holef, holef.width() / 2.0, holef.height() / 2.0)
-        big = holef.adjusted(-6.0, -6.0, 6.0, 6.0)
-        p.setPen(QPen(QColor(10, 132, 255, 70), 6))
-        p.drawRoundedRect(big, big.width() / 2.0, big.height() / 2.0)
+        # 指向气泡的引导箭头（小三角）
+        self._draw_arrow(p, holef)
         p.end()
+
+    def _draw_arrow(self, p, holef):
+        """从光环指向气泡的小箭头（跟随气泡方向）"""
+        side = getattr(self, "_side", "right")
+        L = 14.0
+        if side == "right":
+            tip = QPointF(holef.right() + 6, holef.center().y())
+            a = QPointF(tip.x() + L, tip.y() - 7)
+            b = QPointF(tip.x() + L, tip.y() + 7)
+        elif side == "left":
+            tip = QPointF(holef.left() - 6, holef.center().y())
+            a = QPointF(tip.x() - L, tip.y() - 7)
+            b = QPointF(tip.x() - L, tip.y() + 7)
+        elif side == "bottom":
+            tip = QPointF(holef.center().x(), holef.bottom() + 6)
+            a = QPointF(tip.x() - 7, tip.y() + L)
+            b = QPointF(tip.x() + 7, tip.y() + L)
+        else:
+            tip = QPointF(holef.center().x(), holef.top() - 6)
+            a = QPointF(tip.x() - 7, tip.y() - L)
+            b = QPointF(tip.x() + 7, tip.y() - L)
+        tri = QPainterPath()
+        tri.moveTo(tip)
+        tri.lineTo(a)
+        tri.lineTo(b)
+        tri.closeSubpath()
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(10, 132, 255, int(150 + 80 * self._pulse)))
+        p.drawPath(tri)
