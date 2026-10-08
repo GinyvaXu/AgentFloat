@@ -12,7 +12,7 @@ API 余额实时监控，全部收纳在一个毛玻璃小球里。
 </p>
 
 <p align="center">
-  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.9.1-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
+  <a href="VERSION"><img src="https://img.shields.io/badge/version-v3.9.2-5B8DEF?style=for-the-badge&logo=semver" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Windows%2010%2F11-8E44AD?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"></a>
@@ -169,6 +169,7 @@ AgentFloat/
 - [x] v3.5.4 — **显示框自由调整**：滚轮/右下角拖拽/设置滑杆调整大小与不透明度；进程面板不透明度
 - [x] v3.6.0 — **本地账户 + API Key 保险箱 + 配置导出导入**：多账户（PBKDF2/AES-256-GCM/DPAPI 快速登录）、启动 Agent 自动注入密钥环境变量、`.afpack` 口令保护单文件导出导入（可选含 Key）
 - [x] v3.6.2 — **启动动画 + 代码审查清理 + Windows 安装包**：屏幕中心光晕/圆环/放大浮球 → 飞向落点（版本号+随机问候语、合成提示音、不可跳过、多屏适配）；去死代码/消重复（含球体渲染共用）；`build_installer.py` 产出免管理员安装包
+- [x] v3.9.2 — **教程体验优化**：指南页可滚动（修容器）+ 控制台禁缓存（免 Ctrl+F5）+ 引导动画增强（呼吸脉冲/箭头/气泡滑入）+ 引导时浮球同步演示各功能状态
 - [x] v3.9.1 — **自动更新全自动收尾**：更新流程去掉阻塞弹窗（改托盘通知 + 自动退出），全流程零人工交互；校验失败优先归因
 - [x] v3.9.0 — **新用户引导 + 图文教程 + 快报重写 + 更新链路打通**：首次运行浮球聚光灯引导（6 步）；Web 控制台「使用指南」页（3 段新录演示动图 + 5 张截图 + FAQ/快捷键）；AI 快报交互层完全重写（分类分组/未读收藏/搜索过滤/键盘导航 + 阶段进度可取消单源重试 + 点击通知直达 + Markdown 导出）；自动更新接入自有 R2 镜像为第一优先并强制 SHA256 校验
 - [x] v3.8.0 — **安全加固 + 体验优化**：本地接口加访问令牌 / Host 白名单 / 同源校验（修复任意网页可读走保险箱密钥）、更新包 SHA256 校验、依赖锁版本；设计令牌与空态文案统一；显示器热插拔自动收敛；进程检测提速约 15 倍

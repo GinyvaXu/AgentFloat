@@ -1460,6 +1460,8 @@ import {
 
   window.App = {
     save: save, goPage: goPage, goSub: goSub,
+    guide: renderGuide,          // v3.9.2：供调试/自动化测试直接渲染指南页
+    renderNews: renderNews,
     rangeLabel: (el, id) => {
       const t = $("#" + id);
       if (!t) return;

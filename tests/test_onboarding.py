@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 """v3.9.0 新用户引导测试：步骤模型 / 气泡定位 / 聚光灯几何 / 覆盖层烟测"""
+import io
+import re
+
 from PyQt5.QtCore import QRect
 
 from agentfloat.ui import onboarding as ob
@@ -100,3 +103,89 @@ def test_news_defaults_include_v2_fields():
                 "density"):
         assert key in DEFAULT_NEWS, "快报默认配置缺少 %s" % key
 
+
+
+# ── v3.9.2：教程体验（滚动 / 动画 / 浮球状态联动）──────────────
+def test_guide_page_has_scroll_container():
+    """指南页必须放在 .content 容器里（否则 overflow-y:auto 不生效，滚轮无法翻动）"""
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    html = io.open(os.path.join(root, "web", "index.html"), encoding="utf-8").read()
+    m = re.search(r'id="page-guide">\s*<div([^>]*)id="guideContent"', html)
+    assert m, "未找到指南页容器"
+    assert "content" in m.group(1), "指南页缺少 .content（会导致无法滚动）: %r" % m.group(1)
+
+
+def test_other_pages_also_use_content_container():
+    """其它页同样要有 .content（保持一致，避免再次出现不可滚动页）"""
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    html = io.open(os.path.join(root, "web", "index.html"), encoding="utf-8").read()
+    for pid in ("page-settings", "page-install", "page-api", "page-news", "page-guide"):
+        seg = html.split('id="%s"' % pid, 1)
+        assert len(seg) == 2, "缺少页面 %s" % pid
+        head = seg[1][:900]
+        assert "content" in head, "%s 缺少 .content 容器" % pid
+
+
+def test_steps_map_to_ball_demos():
+    """每一步都要有对应的浮球演示状态（介绍功能时小球处于该状态）"""
+    from agentfloat.ui import floatball
+    demos = floatball.FloatingWidget.ONBOARDING_DEMOS
+    assert len(demos) == len(ob.STEPS), "演示状态数量应与步骤一致"
+    assert demos[0] == "hover" and demos[-1] == "restore"
+    for name in ("ripple", "menu", "context", "snap"):
+        assert name in demos, "缺少演示状态 %s" % name
+
+
+def test_overlay_emits_step_changed(qapp):
+    """覆盖层切步时通知外层（用于驱动浮球状态）"""
+    overlay = ob.OnboardingOverlay(QRect(900, 500, 52, 52), _screen(), theme="dark")
+    seen = []
+    overlay.step_changed.connect(lambda i: seen.append(i))
+    overlay._go(1)
+    overlay._go(1)
+    overlay._go(-1)
+    assert seen == [1, 2, 1], seen
+
+
+def test_overlay_has_animations(qapp):
+    """聚光灯脉冲与气泡滑入动画就绪（v3.9.2）"""
+    overlay = ob.OnboardingOverlay(QRect(900, 500, 52, 52), _screen())
+    assert overlay._pulse_timer.isActive(), "脉冲定时器应已启动"
+    assert overlay._bubble_anim.duration() > 0, "气泡滑入动画应配置时长"
+    overlay._on_pulse()          # 单帧推进不抛异常
+    overlay._on_pulse()
+
+
+def test_onboarding_demo_cleanup_is_safe(qapp):
+    """演示还原在无菜单/无隐藏状态下也不能抛异常"""
+    from agentfloat.ui.floatball import FloatingWidget
+
+    class _Stub(object):
+        _radial_menu = None
+        _demo_menu = None
+        _hidden_now = False
+        _onboarding_saved_pos = None
+        is_hovered = True
+
+        def _reveal_now(self):
+            pass
+
+        def _remove_edge_detector(self):
+            pass
+
+        def _animate_scale(self, *a, **k):
+            pass
+
+    stub = _Stub()
+    FloatingWidget._onboarding_demo_cleanup(stub)
+    assert stub.is_hovered is False
+
+
+def test_web_console_disables_browser_cache():
+    """本地控制台静态资源禁用缓存（升级后不必等 4 小时或 Ctrl+F5）"""
+    import inspect
+    from agentfloat.webshell import server
+    src = inspect.getsource(server.create_app)
+    assert "no-store" in src, "应给本地页面/静态资源加 no-store"

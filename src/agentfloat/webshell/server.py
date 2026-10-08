@@ -446,10 +446,12 @@ def create_app(bridge, handlers):
     app.include_router(api)
 
     web_dir = _locate_web_dir()
+    # v3.9.2：本地控制台禁用浏览器缓存 —— 否则升级后前端资源要等约 4 小时或 Ctrl+F5 才更新
+    NO_CACHE = {"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"}
 
     @app.get("/")
     def index():
-        return FileResponse(os.path.join(web_dir, "index.html"))
+        return FileResponse(os.path.join(web_dir, "index.html"), headers=NO_CACHE)
 
     static_dir = os.path.join(web_dir, "static")
     if os.path.isdir(static_dir):
@@ -461,8 +463,8 @@ def create_app(bridge, handlers):
         full = os.path.join(web_dir, path)
         if os.path.isfile(full):
             ctype, _ = guess_type(full)
-            return FileResponse(full, media_type=ctype)
-        return FileResponse(os.path.join(web_dir, "index.html"))
+            return FileResponse(full, media_type=ctype, headers=NO_CACHE)
+        return FileResponse(os.path.join(web_dir, "index.html"), headers=NO_CACHE)
 
     return app
 
