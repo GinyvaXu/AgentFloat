@@ -6,7 +6,7 @@ import os
 from agentfloat.core.autostart import is_auto_start_enabled
 from agentfloat.core.config import load_config, save_config
 from agentfloat.core.sysutil import _open_url
-from agentfloat.core.version import VERSION
+from agentfloat.core.version import VERSION, version_label
 from agentfloat.services.api_monitor.config import DEFAULTS as API_MONITOR_DEFAULTS
 from agentfloat.services.dsh import is_running as dsh_running
 from agentfloat.services.news.fetcher import DEFAULT_NEWS as _NEWS_DEFAULTS
@@ -42,11 +42,15 @@ class WebAppHandlers(object):
     def get_app_state(self):
         return {
             "version": VERSION,
+            "version_label": version_label(),
+            "channel": "beta" if version_label().endswith("测试版") else "stable",
             "theme": getattr(self.widget, "theme", "light"),
             "dsh_running": dsh_running(),
             "news_generating": bool(getattr(self.widget, "_news_generating", False)),
             "auto_start": is_auto_start_enabled(),
             "api_enabled": bool((self.widget.config.get("api_monitor") or {}).get("enabled")),
+            "quote_stats": self.widget.quote_stats() if hasattr(self.widget, "quote_stats")
+            else {"total": 0, "categories": 0},
         }
 
     def get_api_state(self):

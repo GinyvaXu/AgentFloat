@@ -44,11 +44,20 @@ def test_interaction_flow(ball, qapp):
     w.launch_requested.connect(lambda: launched.append(1))
     gx, gy = w.pos().x() + 20, w.pos().y() + 20
 
-    # 单击 → 启动
+    # v3.10.0：单击默认弹语录（不启动 Agent）
     w.mousePressEvent(_mev(QEvent.MouseButtonPress, (20, 20), gx, gy))
     assert w._interaction.state == "pressed"
     w.mouseReleaseEvent(_mev(QEvent.MouseButtonRelease, (20, 20), gx, gy))
-    assert launched == [1]
+    assert launched == [], "单击应弹语录而不是启动 Agent"
+    assert w._quote_win is not None and w._quote_win.isVisible(), "语录浮窗应已显示"
+    w._quote_win.close_window()
+
+    # 关掉 on_click → 单击恢复为启动 Agent（老行为）
+    w.config["quotes"]["on_click"] = False
+    w.mousePressEvent(_mev(QEvent.MouseButtonPress, (20, 20), gx, gy))
+    w.mouseReleaseEvent(_mev(QEvent.MouseButtonRelease, (20, 20), gx, gy))
+    assert launched == [1], "关闭语录后单击应启动 Agent"
+    w.config["quotes"]["on_click"] = True
 
     # PATCH 3.3.0：按住不动 → 环形进度 → 默认启动
     w.mousePressEvent(_mev(QEvent.MouseButtonPress, (20, 20), gx, gy))

@@ -2155,9 +2155,10 @@ class FloatingWidget(QWidget):
                 save_config(self.config)
                 _log().debug("拖拽结束，悬停冷却 400ms")
             elif InteractionActions.CLICK in acts:
-                # 点击 → 涟漪 + 启动主 Agent
+                # v3.10.0：单击改为弹出语录浮窗（可在设置里关掉，恢复为启动 Agent）
                 self._start_ripple(event.pos())
-                self.launch_requested.emit()
+                if not self.show_quote_window():
+                    self.launch_requested.emit()
             self._drag_active = False
             # 同步 API 面板位置
             self._sync_api_panel_position()
@@ -2182,69 +2183,29 @@ class FloatingWidget(QWidget):
         self._ripple_timer.start()
 
     def _context_menu(self):
-        tc = get_colors(self.theme)
-        sfc = tc["SURFACE"]
-        txt = tc["TEXT"]
-        acc = tc["ACCENT"]
-        sep = tc["SEPARATOR"]
-        menu_css = (
-            f"QMenu {{ background: rgba({sfc[0]},{sfc[1]},{sfc[2]},0.95);"
-            f" border: 1px solid rgba(0,0,0,0.1); border-radius: 10px; padding: 4px 0; }}"
-            f"QMenu::item {{ padding: 7px 32px 7px 16px; font-size: 12px;"
-            f" color: #{txt[0]:02X}{txt[1]:02X}{txt[2]:02X}; }}"
-            f"QMenu::item:selected {{ background: #{acc[0]:02X}{acc[1]:02X}{acc[2]:02X};"
-            f" color: #FFF; border-radius: 4px; margin: 1px 6px; }}"
-            f"QMenu::separator {{ height: 1px;"
-            f" background: #{sep[0]:02X}{sep[1]:02X}{sep[2]:02X}; margin: 4px 8px; }}"
-        )
-        menu = self._build_context_menu(menu_css)
-
-        primary = get_primary_agent(self._agents)
-        pname = primary.get("name", "主 Agent") if primary else "主 Agent"
-        menu.addAction("启动 %s" % pname, self.launch_requested.emit)
-        if len(self._agents) > 1:
-            sub = menu.addMenu("启动其他 Agent")
-            for a in self._agents:
-                if a.get("id") == (primary or {}).get("id"):
-                    continue
-                sub.addAction(a.get("name"), lambda a=a: launch_agent(a, self.config))
-        menu.addAction("Skills 辅助窗", self._open_skills_panel)
-
-        # Web Agent 启动/终止（PATCH 3.1.0：浮球右键菜单入口）
-        web_agents = webagent.list_web_agents(self._agents)
-        if web_agents:
-            web_menu = menu.addMenu("Web Agent")
-            for agent, spec in web_agents:
-                st = webagent.status(agent)
-                wname = agent.get("name") or agent.get("id")
-                if st.get("running"):
-                    web_menu.addAction("终止 %s（:%d）" % (wname, spec["port"]),
-                                       lambda a=agent: self._toggle_web_agent(a))
-                    web_menu.addAction("打开 %s 页面" % wname,
-                                       lambda u=spec["url"]: _open_url(u))
-                else:
-                    web_menu.addAction("启动 %s" % wname,
-                                       lambda a=agent: self._toggle_web_agent(a))
-                web_menu.addSeparator()
-
-        menu.addSeparator()
-        menu.addAction("设置...", self.settings_requested.emit)
-        menu.addAction("使用教程", lambda: self.start_onboarding(force=True))
-        menu.addAction("复制 Web 控制台令牌", self._copy_web_token)
-        menu.addSeparator()
-
-        auto = menu.addAction("开机自启")
-        auto.setCheckable(True)
-        auto.setChecked(is_auto_start_enabled())
-        auto.triggered.connect(lambda checked: toggle_auto_start(checked))
-
-        menu.addSeparator()
-        menu.addAction("退出", self.quit_requested.emit)
-
+        """弹出浮球右键菜单（构建逻辑见 _build_context_menu）"""
+        menu = self._build_context_menu()
         menu.exec_(QCursor.pos())
 
-    def _build_context_menu(self, menu_css):
-        """构建浮球右键菜单（v3.9.2：抽出以便引导演示用 popup 非阻塞弹出）"""
+
+    def _build_context_menu(self, menu_css=None):
+        """构建浮球右键菜单（v3.9.2 抽出 / v3.10.0 修正重复构建；menu_css 可省略）"""
+        if not menu_css:
+            tc = get_colors(self.theme)
+            sfc, txt, acc, sep = tc["SURFACE"], tc["TEXT"], tc["ACCENT"], tc["SEPARATOR"]
+            menu_css = (
+                f"QMenu {{ background: rgba({sfc[0]},{sfc[1]},{sfc[2]},0.95);"
+                f" border: 1px solid rgba(0,0,0,0.1); border-radius: 10px; padding: 4px 0; }}"
+                f"QMenu::item {{ padding: 7px 32px 7px 16px; font-size: 12px;"
+                f" color: #{txt[0]:02X}{txt[1]:02X}{txt[2]:02X}; }}"
+                f"QMenu::item:selected {{ background: #{acc[0]:02X}{acc[1]:02X}{acc[2]:02X};"
+                f" color: #FFF; border-radius: 4px; margin: 1px 6px; }}"
+                f"QMenu::separator {{ height: 1px;"
+                f" background: #{sep[0]:02X}{sep[1]:02X}{sep[2]:02X}; margin: 4px 8px; }}"
+            )
+        menu = QMenu(self)
+        menu.setStyleSheet(menu_css)
+
         menu = QMenu(self)
         menu.setStyleSheet(menu_css)
 
@@ -2279,6 +2240,7 @@ class FloatingWidget(QWidget):
         menu.addSeparator()
         menu.addAction("设置...", self.settings_requested.emit)
         menu.addAction("使用教程", lambda: self.start_onboarding(force=True))
+        menu.addAction("换一条语录", lambda: self.show_quote_window(next_one=True))
         menu.addAction("复制 Web 控制台令牌", self._copy_web_token)
         menu.addSeparator()
 
@@ -2314,6 +2276,56 @@ class FloatingWidget(QWidget):
         if self._launch_toast is None:
             self._launch_toast = LaunchToast()
         self._launch_toast.show_for(self, text, self.theme)
+
+    # ── 语录浮窗（v3.10.0）────────────────────────
+    def quote_cfg(self):
+        """语录配置（含默认值合并）"""
+        cfg = dict((self.config or {}).get("quotes") or {})
+        cfg.setdefault("enabled", True)
+        cfg.setdefault("on_click", True)
+        cfg.setdefault("categories", ["nietzsche", "philosophy", "code", "anime", "tips"])
+        cfg.setdefault("auto_close_s", 12)
+        cfg.setdefault("opacity", 0.95)
+        cfg.setdefault("font_size", 15)
+        return cfg
+
+    def show_quote_window(self, next_one=False):
+        """显示语录浮窗；返回是否已处理（False 时调用方回退到启动 Agent）"""
+        cfg = self.quote_cfg()
+        if not cfg.get("enabled") or not cfg.get("on_click"):
+            return False
+        try:
+            from agentfloat.ui.quote_window import QuoteBank, QuoteWindow
+            if getattr(self, "_quote_bank", None) is None:
+                self._quote_bank = QuoteBank()
+            if getattr(self, "_quote_win", None) is None:
+                win = QuoteWindow(self._quote_bank, cfg, theme=self.theme)
+                win.closed.connect(self._on_quote_closed)
+                self._quote_win = win
+            win = self._quote_win
+            win._cfg = cfg
+            win._theme = self.theme
+            quote = self._quote_bank.pick(cfg.get("categories")) if next_one else None
+            ok = win.show_quote(quote, anchor_rect=self._ball_rect_global())
+            if ok:
+                _log().debug("[语录] 已显示（分类=%s）", (win._quote or {}).get("c"))
+            return ok
+        except Exception as e:  # noqa: BLE001
+            _log().warning("语录浮窗显示失败: %s", e)
+            return False
+
+    def _on_quote_closed(self):
+        _log().debug("[语录] 浮窗已关闭")
+
+    def quote_stats(self):
+        """语录库统计（设置页展示用）"""
+        try:
+            if getattr(self, "_quote_bank", None) is None:
+                from agentfloat.ui.quote_window import QuoteBank
+                self._quote_bank = QuoteBank()
+            return self._quote_bank.stats()
+        except Exception:  # noqa: BLE001
+            return {"total": 0, "categories": 0}
 
     # ── 新用户引导（v3.9.0 / v3.9.2 增强）────────────
     def _ball_rect_global(self):
@@ -2473,9 +2485,13 @@ class FloatingWidget(QWidget):
         _log().info("新用户引导结束（completed=%s）", completed)
 
     def maybe_start_onboarding(self):
-        """首次运行自动播放引导（延迟到启动动画结束后由 app.py 调用）"""
+        """首次运行自动播放引导（延迟到启动动画结束后由 app.py 调用）
+
+        测试版通道：忽略已看标记，每次打开都当第一次打开（用户策略 2026-10-09）。
+        """
         try:
-            if bool((self.config or {}).get("onboarding_done")):
+            from agentfloat.core.version import is_beta
+            if not is_beta() and bool((self.config or {}).get("onboarding_done")):
                 return False
             return self.start_onboarding()
         except Exception as e:  # noqa: BLE001

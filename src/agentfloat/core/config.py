@@ -83,6 +83,15 @@ def load_config():
         # v3.9.0：新用户引导（首次运行自动播放；右键「使用教程」可重播）
         "onboarding_done": False,
         "onboarding_version": 0,
+        # v3.10.0：语录浮窗（单击浮球弹出随机语录/建议）
+        "quotes": {
+            "enabled": True,
+            "on_click": True,      # 单击浮球显示语录；关闭则单击仍启动 Agent
+            "categories": ["nietzsche", "philosophy", "code", "anime", "tips"],
+            "auto_close_s": 12,
+            "opacity": 0.95,
+            "font_size": 15,
+        },
     }
     loaded = {}
     parse_error = False

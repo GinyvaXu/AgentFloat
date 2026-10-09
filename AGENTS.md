@@ -12,6 +12,10 @@ AgentFloat：通用 AI Agent 桌面悬浮助手，毛玻璃小球一键启动任
 - 每次变更同步更新 `CHANGELOG.md` 更新日志（## [版本] - 日期 + ### Added/Fixed/Changed 分组）
 - 构建产物归档到 `versions/vX.Y.Z/dist/`（仅本地、不上传、只增不删、不覆盖旧产物）
 - 语义化版本：Bug 修复=PATCH、新功能/UI=MINOR、不兼容大改=MAJOR
+- **发布通道（2026-10-09 用户策略，详见 `docs/发布与版本策略.md`）**：
+  - 默认**测试版**：构建 + **每版本地安装** + push 源码；**不打 tag、不建 Release、不同步官网**；
+    UI 显示「测试版」；测试版**每次打开都当第一次打开**（引导重播）
+  - 仅当用户明确说「发布正式版」时才切 `CHANNEL=stable`，走 tag + Release + 官网宣发流程
 
 ## Git 规范
 - 单 main 分支直接开发与发布，不建 develop/feature 分支

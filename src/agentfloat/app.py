@@ -24,7 +24,7 @@ from agentfloat.core.single_instance import (
 )
 from agentfloat.core.sysutil import _open_url, ensure_utf8_stdio
 from agentfloat.core.theme import FONT_FAMILY, get_colors
-from agentfloat.core.version import VERSION
+from agentfloat.core.version import VERSION, version_label
 from agentfloat.services.dsh import status as dsh_status, stop as stop_dsh
 from agentfloat.services.skills.ai_service import ensure_translator_skill
 from agentfloat.services.update import updater
@@ -242,7 +242,7 @@ def _main():
         if intro_cfg.get("enabled", True):
             from agentfloat.ui.intro_animation import IntroAnimation
             intro = IntroAnimation(
-                version=VERSION,
+                version=version_label(),
                 theme=config.get("theme", "light"),
                 greeting=intro_cfg.get("greeting", ""),
                 sound=bool(intro_cfg.get("sound", True)),
@@ -471,12 +471,13 @@ def _main():
                 if info is not None and info.get("error"):
                     _update_box(None, QMessageBox.Warning, "检查更新失败", _friendly_update_error(info))
                 else:
-                    _update_box(None, QMessageBox.Information, "检查更新", f"当前已是最新版本 v{VERSION}。")
+                    _update_box(None, QMessageBox.Information, "检查更新",
+                               f"当前已是最新版本 {version_label()}。")
             return
         detail = (info.get("notes_zh") or info.get("notes") or "前往 GitHub Releases 查看更新说明。")[:400]
         ret = _update_box(
             None, QMessageBox.Question, "发现新版本",
-            f"发现新版本 {info['version']}（当前 v{VERSION}）。\n\n更新内容:\n{detail}\n\n"
+            f"发现新版本 {info['version']}（当前 {version_label()}）。\n\n更新内容:\n{detail}\n\n"
             "是否立即下载并更新？",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
         if ret == QMessageBox.Yes:
@@ -717,6 +718,23 @@ def _main():
             _log().debug("引导启动检查失败", exc_info=True)
 
     QTimer.singleShot(4200, _maybe_onboarding)
+
+    # 开发预览：AGENTFLOAT_QUOTE_PREVIEW=1 时自动轮播语录（便于截图/验收，生产无影响）
+    if os.environ.get("AGENTFLOAT_QUOTE_PREVIEW"):
+        _log().info("语录预览模式：每 4 秒切换一条")
+        QTimer.singleShot(4000, widget.show_quote_window)
+
+        def _cycle_quote():
+            try:
+                widget.show_quote_window(next_one=True)
+            except Exception:  # noqa: BLE001
+                pass
+
+        _qt = QTimer()
+        _qt.setInterval(4000)
+        _qt.timeout.connect(_cycle_quote)
+        _qt.start()
+        widget._quote_preview_timer = _qt
 
     # 启动后延迟自动检查更新（不阻塞启动）
     if config.get("check_updates", True):

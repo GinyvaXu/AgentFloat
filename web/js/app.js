@@ -20,6 +20,7 @@ import {
   let version = "";
   let apiState = { results: [], testing: {}, error: "", presets: null, rowPresets: null, badgePreview: [], fetchedAt: null };
   let newsState = { report: null, dates: [], generating: false, phase: "" };
+  let stateInfo = {};      // v3.10.0：/api/state 快照（含语录库统计）
 
   // ── 配置绑定 ────────────────────────────────────
   function bindRead(el) {
@@ -249,6 +250,7 @@ import {
     else if (sub === "radial") renderRadial(el);
     else if (sub === "skills") renderSkills(el);
     else if (sub === "water") renderWater(el);
+    else if (sub === "quotes") renderQuotes(el);
     else if (sub === "vault") { renderVault(el); loadVault(); }
     else if (sub === "about") renderAbout(el);
   }
@@ -1362,6 +1364,41 @@ import {
     }));
   }
 
+  // ══════════════════ 语录（v3.10.0）══════════════════
+  const QUOTE_CATS = [
+    ["nietzsche", "尼采", "#8E44AD"],
+    ["philosophy", "哲学", "#5B4B8A"],
+    ["code", "代码与工程", "#0A84FF"],
+    ["anime", "影视与动漫", "#E8555F"],
+    ["tips", "Agent 使用建议", "#16A085"],
+  ];
+
+  function renderQuotes(el) {
+    if (!cfg) return;
+    const q = cfg.quotes || {};
+    const enabled = q.categories || QUOTE_CATS.map((c) => c[0]);
+    const cats = QUOTE_CATS.map((c) =>
+      '<label class="chip-check" style="border-color:' + c[2] + '55">' +
+      '<input type="checkbox" data-qcat="' + c[0] + '"' + (enabled.indexOf(c[0]) >= 0 ? " checked" : "") + "> " +
+      '<span style="color:' + c[2] + ';font-weight:600">' + c[1] + "</span></label>").join("");
+    el.innerHTML = _guideBanner + card("语录浮窗", "单击浮球时弹出一张半透明卡片，随机展示名言、台词与 Agent 使用建议。",
+      row("启用语录", "关闭后单击浮球不再弹出", switchCtl("quotes.enabled", q.enabled !== false)) +
+      row("单击显示语录", "关闭则恢复为「单击启动 Agent」", switchCtl("quotes.on_click", q.on_click !== false)) +
+      row("自动关闭", "鼠标悬停时会暂停计时", numCtl("quotes.auto_close_s", q.auto_close_s || 12, { min: 3, max: 60 }) + " 秒") +
+      row("卡片不透明度", "", selectCtl("quotes.opacity", String(q.opacity || 0.95), [["0.85", "85%"], ["0.92", "92%"], ["0.95", "95%"], ["1", "100%（不透明）"]])) +
+      row("正文字号", "", numCtl("quotes.font_size", q.font_size || 15, { min: 12, max: 22 }) + " px")) +
+      card("语录分类", "勾选要参与随机的分类；未勾选的不会出现。", '<div class="src-grid">' + cats + "</div>") +
+      card("语录库", "内容来自 docs/浮窗语录库-审核稿.md（审核定稿后生成内置数据）。",
+        '<div class="desc">当前内置 <b>' + ((stateInfo && stateInfo.quote_stats) ? stateInfo.quote_stats.total : "—") + "</b> 条语录；" +
+        "单击浮球即可预览效果，卡片上的「换一条」可连续换句。</div>") +
+      card("小提示", "", '<div class="desc">右键浮球 →「换一条语录」也能直接弹出；卡片可拖动、可复制、Esc 关闭。</div>');
+    $$("#settingsContent [data-qcat]").forEach((cb) => cb.addEventListener("change", () => {
+      cfg.quotes = cfg.quotes || {};
+      cfg.quotes.categories = $$("#settingsContent [data-qcat]:checked").map((c) => c.dataset.qcat);
+      refreshDirty();
+    }));
+  }
+
   // ── 模态框 / SSE / 启动 ─────────────────────────
   function openModal(html) {
     $("#modalBox").innerHTML = html;
@@ -1450,7 +1487,9 @@ import {
     cfg = cfgResp.config;
     baseStr = JSON.stringify(cfg);
     version = stateResp.version || "";
-    $("#verText").textContent = "v" + version;
+    stateInfo = stateResp || {};      // v3.10.0：语录库统计等
+    $("#verText").textContent = (stateInfo && stateInfo.version_label)
+      ? stateInfo.version_label : ("v" + version);
     applyTheme();
     refreshDirty();
     const h = (location.hash || "").replace(/^#\/?/, "");
