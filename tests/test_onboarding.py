@@ -134,7 +134,7 @@ def test_steps_map_to_ball_demos():
     demos = floatball.FloatingWidget.ONBOARDING_DEMOS
     assert len(demos) == len(ob.STEPS), "演示状态数量应与步骤一致"
     assert demos[0] == "hover" and demos[-1] == "restore"
-    for name in ("ripple", "menu", "context", "snap"):
+    for name in ("ripple", "hold", "menu", "context", "snap"):
         assert name in demos, "缺少演示状态 %s" % name
 
 

@@ -88,7 +88,7 @@ def load_config():
             "enabled": True,
             "on_click": True,      # 单击浮球显示语录；关闭则单击仍启动 Agent
             "categories": ["nietzsche", "philosophy", "code", "anime", "tips"],
-            "auto_close_s": 12,
+            "auto_close_s": 8,
             "opacity": 0.95,
             "font_size": 15,
         },

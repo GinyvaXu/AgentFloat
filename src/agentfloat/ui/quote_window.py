@@ -127,9 +127,9 @@ class QuoteWindow(QWidget):
     # ── 构建 ──────────────────────────────────────
     def _build(self):
         lay = QVBoxLayout(self)
-        m = SPACE.lg
-        lay.setContentsMargins(m, m, m, SPACE.md)
-        lay.setSpacing(SPACE.sm)
+        m = SPACE.md + 2
+        lay.setContentsMargins(m, SPACE.md, m, SPACE.sm)
+        lay.setSpacing(SPACE.xs + 2)
         head = QHBoxLayout()
         self._chip = QLabel("❝")
         self._chip.setObjectName("quoteChip")
@@ -137,7 +137,7 @@ class QuoteWindow(QWidget):
         head.addStretch(1)
         self._close = QPushButton("✕")
         self._close.setObjectName("quoteClose")
-        self._close.setFixedSize(24, 24)
+        self._close.setFixedSize(20, 20)
         self._close.clicked.connect(self.close_window)
         head.addWidget(self._close)
         lay.addLayout(head)
@@ -153,13 +153,15 @@ class QuoteWindow(QWidget):
         self._author.setAlignment(Qt.AlignRight)
         lay.addWidget(self._author)
 
+        # 控件极简：仅两个纯文字动作（无边框、低对比），点击正文也能复制
         row = QHBoxLayout()
-        row.setSpacing(SPACE.sm)
+        row.setSpacing(SPACE.md)
         row.addStretch(1)
         self._btn_next = QPushButton("换一条")
         self._btn_copy = QPushButton("复制")
         for b in (self._btn_next, self._btn_copy):
-            b.setObjectName("quoteBtn")
+            b.setObjectName("quoteLink")
+            b.setCursor(Qt.PointingHandCursor)
         self._btn_next.clicked.connect(self.next_quote)
         self._btn_copy.clicked.connect(self.copy_quote)
         row.addWidget(self._btn_next)
@@ -174,18 +176,18 @@ class QuoteWindow(QWidget):
         hint = "#%02X%02X%02X" % tuple(c["HINT"])
         fs = int(self._cfg.get("font_size") or 15)
         return (
-            "QLabel#quoteChip { color: %(acc)s; font-size: 17px; font-weight: 700; }"
-            "QLabel#quoteText { color: %(tx)s; font-size: %(fs)dpx; line-height: 1.75; }"
+            "QLabel#quoteChip { color: %(acc)s; font-size: 14px; font-weight: 600;"
+            " letter-spacing: 0.3px; }"
+            "QLabel#quoteText { color: %(tx)s; font-size: %(fs)dpx; line-height: 1.7; }"
             "QLabel#quoteAuthor { color: %(hint)s; font-size: %(fa)dpx; }"
-            "QPushButton#quoteBtn { background: transparent; color: %(hint)s;"
-            " border: 1px solid rgba(255,255,255,0.16); border-radius: %(r)dpx;"
-            " padding: 5px 13px; font-size: %(fb)dpx; }"
-            "QPushButton#quoteBtn:hover { color: %(tx)s; border-color: %(acc)s; }"
+            "QPushButton#quoteLink { background: transparent; border: none;"
+            " color: %(hint)s; padding: 0px 2px; font-size: %(fb)dpx; }"
+            "QPushButton#quoteLink:hover { color: %(acc)s; }"
             "QPushButton#quoteClose { background: transparent; border: none; color: %(hint)s;"
             " font-size: 12px; }"
             "QPushButton#quoteClose:hover { color: #FF5F57; }"
             % {"tx": tx, "hint": hint, "acc": self._accent_hex(), "fs": fs,
-               "fa": FONT.caption, "fb": FONT.body, "r": RADIUS.sm}
+               "fa": FONT.caption, "fb": FONT.caption}
         )
 
     def _accent_hex(self):
@@ -210,7 +212,7 @@ class QuoteWindow(QWidget):
         self._place(anchor_rect, screen_rect)
         self._paused = False
         self._progress = 0.0
-        secs = max(3, int(self._cfg.get("auto_close_s") or 12))
+        secs = max(3, int(self._cfg.get("auto_close_s") or 8))
         self._auto.start(secs * 1000)
         self._ptimer.start()
         self.show()
@@ -260,12 +262,39 @@ class QuoteWindow(QWidget):
         except Exception:  # noqa: BLE001
             pass
 
-    def close_window(self):
+    def close_window(self, animated=True):
+        """关闭：默认播淡出 + 下沉动画后再隐藏（v3.10.0）"""
         self._auto.stop()
         self._ptimer.stop()
+        if not animated or not self.isVisible():
+            self.hide()
+            self.closed.emit()
+            return
         try:
             self._fade.stop()
+            self._slide.stop()
+            start = self.pos()
+            self._slide.setDuration(180)
+            self._slide.setStartValue(start)
+            self._slide.setEndValue(QPoint(start.x(), start.y() + 10))
+            self._slide.start()
+            self._fade.setDuration(180)
+            self._fade.setStartValue(self.windowOpacity())
+            self._fade.setEndValue(0.0)
+            try:
+                self._fade.finished.disconnect()
+            except TypeError:
+                pass
+            self._fade.finished.connect(self._after_close)
+            self._fade.start()
         except Exception:  # noqa: BLE001
+            self.hide()
+            self.closed.emit()
+
+    def _after_close(self):
+        try:
+            self._fade.finished.disconnect(self._after_close)
+        except TypeError:
             pass
         self.hide()
         self.closed.emit()
@@ -287,7 +316,7 @@ class QuoteWindow(QWidget):
     def leaveEvent(self, event):
         self._hover = False
         self._paused = False
-        secs = max(3, int(self._cfg.get("auto_close_s") or 12))
+        secs = max(3, int(self._cfg.get("auto_close_s") or 8))
         self._auto.start(int(secs * (1.0 - self._progress) * 1000))
         self.update()
         super().leaveEvent(event)
@@ -344,24 +373,23 @@ class QuoteWindow(QWidget):
         grad.setColorAt(1.0, c2)
         p.setBrush(grad)
         p.drawRoundedRect(r, rad, rad)
-        # 分类色描边 + 顶部高光
+        # 分类色：只留极淡的一圈（存在感更弱），靠徽章与引号传达配色
         acc = QColor(self._accent_hex())
-        pen = QPen(QColor(acc.red(), acc.green(), acc.blue(), 150), 1.2)
-        p.setPen(pen)
+        p.setPen(QPen(QColor(acc.red(), acc.green(), acc.blue(), 52), 1.0))
         p.setBrush(Qt.NoBrush)
         p.drawRoundedRect(r, rad, rad)
         # 左上角装饰大引号（分类色，低透明度）
-        p.setPen(QColor(acc.red(), acc.green(), acc.blue(), 46))
+        p.setPen(QColor(acc.red(), acc.green(), acc.blue(), 38))
         f = QFont()
-        f.setPointSizeF(46.0)
+        f.setPointSizeF(40.0)
         f.setBold(True)
         p.setFont(f)
-        p.drawText(QRectF(10, -6, 120, 90), Qt.AlignLeft | Qt.AlignTop, "“")
-        # 自动关闭进度线（底部，悬停时高亮）
-        line_w = (self.width() - 24) * (1.0 - self._progress)
+        p.drawText(QRectF(9, -8, 110, 84), Qt.AlignLeft | Qt.AlignTop, "“")
+        # 自动关闭进度线（底部，悬停时更亮）
+        line_w = (self.width() - 20) * (1.0 - self._progress)
         if line_w > 1:
             p.setPen(Qt.NoPen)
-            a = 120 if self._hover else 70
+            a = 110 if self._hover else 58
             p.setBrush(QColor(acc.red(), acc.green(), acc.blue(), a))
-            p.drawRoundedRect(QRectF(12, self.height() - 5.0, line_w, 2.0), 1.0, 1.0)
+            p.drawRoundedRect(QRectF(10, self.height() - 4.0, line_w, 2.0), 1.0, 1.0)
         p.end()

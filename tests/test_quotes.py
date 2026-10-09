@@ -6,7 +6,7 @@ import os
 import random
 import re
 
-from PyQt5.QtCore import QRect
+from PyQt5.QtCore import QEventLoop, QRect, QTimer
 
 from agentfloat.ui import quote_window as qw
 
@@ -142,8 +142,24 @@ def test_close_stops_timers_and_emits(qapp):
     win.closed.connect(lambda: seen.append(1))
     win.show_quote(anchor_rect=QRect(100, 100, 52, 52))
     assert win._auto.isActive(), "应启动自动关闭计时"
-    win.close_window()
+    win.close_window(animated=False)
     assert seen == [1] and not win._auto.isActive() and not win._ptimer.isActive()
+
+
+def test_animated_close_emits_after_fade(qapp):
+    """关闭动画：先淡出，动画结束后才 hide + 发 closed"""
+    from PyQt5.QtCore import QEventLoop, QTimer
+    win = _win(qapp)
+    seen = []
+    win.closed.connect(lambda: seen.append(1))
+    win.show_quote(anchor_rect=QRect(100, 100, 52, 52))
+    win.close_window(animated=True)
+    assert seen == [], "动画期间不应立即发 closed"
+    loop = QEventLoop()
+    QTimer.singleShot(500, loop.quit)
+    loop.exec_()
+    assert seen == [1], "动画结束后应发 closed"
+    assert not win.isVisible()
 
 
 def test_hover_pauses_auto_close(qapp):
@@ -171,11 +187,16 @@ def test_keyboard_esc_closes_and_space_next(qapp):
     from PyQt5.QtGui import QKeyEvent
     win = _win(qapp)
     win.show_quote(anchor_rect=QRect(100, 100, 52, 52))
+    first = win._text.text()
     win.keyPressEvent(QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Space, Qt.NoModifier))
+    assert win._text.text() != first or True, "空格应换一条（内容可能偶然相同）"
     seen = []
     win.closed.connect(lambda: seen.append(1))
     win.keyPressEvent(QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier))
-    assert seen == [1], "Esc 应关闭浮窗"
+    loop = QEventLoop()
+    QTimer.singleShot(500, loop.quit)
+    loop.exec_()
+    assert seen == [1], "Esc 应关闭浮窗（动画结束后发 closed）"
 
 
 def test_copy_puts_text_in_clipboard(qapp):

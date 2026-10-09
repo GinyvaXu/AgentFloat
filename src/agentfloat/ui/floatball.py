@@ -2334,8 +2334,8 @@ class FloatingWidget(QWidget):
         s = int(self.current_size)
         return QRect(self.pos().x() + off, self.pos().y() + off, s, s)
 
-    # 每步对应的浮球状态（v3.9.2：介绍哪个功能，小球就处于那个状态）
-    ONBOARDING_DEMOS = ("hover", "ripple", "menu", "context", "snap", "restore")
+    # 每步对应的浮球状态（v3.10.0：与 7 步引导一一对应）
+    ONBOARDING_DEMOS = ("hover", "ripple", "hold", "menu", "context", "snap", "restore")
 
     def onboarding_demo(self, index):
         """把浮球切到引导第 index 步对应的状态（仅演示，不触发真实动作）"""
@@ -2351,6 +2351,10 @@ class FloatingWidget(QWidget):
                 self.update()
             elif name == "ripple":
                 self._start_ripple(QPoint(int(self.width() / 2), int(self.height() / 2)))
+            elif name == "hold":
+                # 长按演示：显示环形进度（约 60%，不触发启动）
+                self._hold_progress = 0.6
+                self.update()
             elif name == "menu":
                 self._open_radial_menu_now("onboarding")
             elif name == "context":

@@ -1272,8 +1272,8 @@ import {
 
       guideSection("orb", "② 浮球怎么用",
         "所有交互都围绕这颗小球：",
-        steps([["单击", "启动「默认 Agent」（在 设置 → 通用 → 主 Agent 启动 里更换）"],
-               ["长按不动 2 秒", "环形进度条走满即启动（可在设置里调整时长）"],
+        steps([["单击", "弹出一张半透明**语录卡片**：名人名言 / 影视台词 / Agent 使用建议（设置 → 语录 可关）"],
+               ["长按不动 2 秒", "环形进度条走满即**启动默认 Agent**（可在设置里调整时长）"],
                ["按住向外滑", "唤出环绕菜单，滑到哪个扇区松手就执行哪个动作"],
                ["右键", "启动具体 Agent / 设置 / 使用教程 / 复制控制台令牌 / 开机自启 / 退出"],
                ["拖拽", "自由移动；拖到屏幕边缘会吸附，开启「贴边隐藏」后鼠标靠近边缘自动滑出"]]) +
@@ -1350,6 +1350,7 @@ import {
         "</div>" +
         "<h4 style=\"margin:14px 0 6px;font-size:13px\">快捷操作</h4>" +
         keys([["Ctrl + Alt + C", "呼出 / 聚焦浮球"],
+              ["单击", "弹出语录（空格/回车换一条，Esc 关闭）"],
               ["长按 2 秒", "启动默认 Agent"],
               ["按住外滑", "环绕菜单"],
               ["快报页 j / k", "上下选择条目"],
@@ -1384,7 +1385,7 @@ import {
     el.innerHTML = _guideBanner + card("语录浮窗", "单击浮球时弹出一张半透明卡片，随机展示名言、台词与 Agent 使用建议。",
       row("启用语录", "关闭后单击浮球不再弹出", switchCtl("quotes.enabled", q.enabled !== false)) +
       row("单击显示语录", "关闭则恢复为「单击启动 Agent」", switchCtl("quotes.on_click", q.on_click !== false)) +
-      row("自动关闭", "鼠标悬停时会暂停计时", numCtl("quotes.auto_close_s", q.auto_close_s || 12, { min: 3, max: 60 }) + " 秒") +
+      row("自动关闭", "鼠标悬停时会暂停计时", numCtl("quotes.auto_close_s", q.auto_close_s || 8, { min: 3, max: 60 }) + " 秒") +
       row("卡片不透明度", "", selectCtl("quotes.opacity", String(q.opacity || 0.95), [["0.85", "85%"], ["0.92", "92%"], ["0.95", "95%"], ["1", "100%（不透明）"]])) +
       row("正文字号", "", numCtl("quotes.font_size", q.font_size || 15, { min: 12, max: 22 }) + " px")) +
       card("语录分类", "勾选要参与随机的分类；未勾选的不会出现。", '<div class="src-grid">' + cats + "</div>") +
