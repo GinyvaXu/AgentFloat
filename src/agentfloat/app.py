@@ -242,7 +242,7 @@ def _main():
         if intro_cfg.get("enabled", True):
             from agentfloat.ui.intro_animation import IntroAnimation
             intro = IntroAnimation(
-                version=version_label(),
+                version=version_label(),   # 形如 v3.10.1 测试版（intro 不再重复加 v）
                 theme=config.get("theme", "light"),
                 greeting=intro_cfg.get("greeting", ""),
                 sound=bool(intro_cfg.get("sound", True)),

@@ -47,6 +47,8 @@ GREETINGS = (
 )
 
 SPARKLE_COUNT = 18
+# v3.11.0：是否整屏压暗（性能开关，默认关；开回可恢复暗角观感）
+INTRO_SCREEN_DIM = False
 RIPPLE_COUNT = 3
 
 
@@ -58,8 +60,11 @@ def pick_greeting(custom="", rng=None):
 
 
 def intro_title(version, custom_greeting="", rng=None):
-    """中心文字：版本号 + 随机问候语"""
-    return "v%s · %s" % (version, pick_greeting(custom_greeting, rng))
+    """中心文字：版本号 + 随机问候语（v3.11.0：版本标签自带 v/测试版后缀时不重复加 v）"""
+    label = str(version)
+    if not label.lower().startswith("v"):
+        label = "v" + label
+    return "%s · %s" % (label, pick_greeting(custom_greeting, rng))
 
 
 def ease_out_back(t, s=1.35):
@@ -181,6 +186,9 @@ class IntroAnimation(QWidget):
         self._big = 0.0
         self._target_size = 0.0
         self._center = QPointF()
+        # v3.11.0：位图缓存（暗角/光晕），避免每帧重建径向渐变
+        self._cache_vig = {}
+        self._glow_pm = None
         self._tick = QTimer(self)
         self._tick.setInterval(16)
         self._tick.timeout.connect(self._on_tick)
@@ -294,6 +302,68 @@ class IntroAnimation(QWidget):
         self._paint_state(p, self.width(), self.height(), state)
         p.end()
 
+    def _vignette_pixmap(self, width, height):
+        """边缘渐暗带位图（v3.11.0 性能）
+
+        此前是整屏径向渐变（2560x1600 下每帧约 10ms，占满一帧预算导致卡顿）。
+        径向暗角本来就是「中心透明、边缘变暗」，因此改为四条边缘渐暗带：
+        绘制面积降到约 1/3，视觉几乎一致。
+        """
+        key = (int(width), int(height))
+        pm = self._cache_vig.get(key)
+        if pm is None:
+            w, h = key
+            band = max(80, min(220, int(min(w, h) * 0.14)))
+            pm = QPixmap(w, h)
+            pm.fill(Qt.transparent)
+            p = QPainter(pm)
+            p.setPen(Qt.NoPen)
+            strips = (
+                (QRectF(0, 0, w, band), QPointF(0, 0), QPointF(0, band)),            # 上
+                (QRectF(0, h - band, w, band), QPointF(0, h), QPointF(0, h - band)),  # 下
+                (QRectF(0, 0, band, h), QPointF(0, 0), QPointF(band, 0)),            # 左
+                (QRectF(w - band, 0, band, h), QPointF(w, 0), QPointF(w - band, 0)),  # 右
+            )
+            for rect, g0, g1 in strips:
+                g = QLinearGradient(g0, g1)
+                g.setColorAt(0.0, QColor(0, 0, 0, 255))
+                g.setColorAt(0.55, QColor(0, 0, 0, 90))
+                g.setColorAt(1.0, QColor(0, 0, 0, 0))
+                p.setBrush(g)
+                p.drawRect(rect)
+            p.end()
+            if len(self._cache_vig) > 4:
+                self._cache_vig.clear()
+            self._cache_vig[key] = pm
+        return pm
+
+    def _glow_pixmap(self):
+        """外圈光晕位图（v3.11.0：只渲染一张固定分辨率，按需缩放绘制）
+
+        之前按半径/呼吸缓存，飞行阶段半径连续变化导致几乎每帧都重新渲染
+        600px 级径向渐变（单帧 +2~3ms，表现为卡顿）。
+        """
+        if self._glow_pm is not None:
+            return self._glow_pm
+        R = 400.0
+        size = int(R * 2) + 2
+        pm = QPixmap(size, size)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        c = QPointF(size / 2.0, size / 2.0)
+        grad = QRadialGradient(c, R)
+        a = self._accent
+        grad.setColorAt(0.0, QColor(a.red(), a.green(), a.blue(), 96))
+        grad.setColorAt(0.55, QColor(a.red(), a.green(), a.blue(), 34))
+        grad.setColorAt(1.0, QColor(a.red(), a.green(), a.blue(), 0))
+        p.setPen(Qt.NoPen)
+        p.setBrush(grad)
+        p.drawEllipse(c, R, R)
+        p.end()
+        self._glow_pm = pm
+        return pm
+
     def _paint_state(self, p, width, height, state):
         """把某个时刻的视觉状态画到 painter（离屏/窗口共用）"""
         accent = self._accent
@@ -301,25 +371,20 @@ class IntroAnimation(QWidget):
         diameter = self._ball_diameter(state)
         radius = max(6.0, diameter / 2.0)
 
-        # 轻微暗角：让光晕更立体
-        if state["overlay_a"] > 0:
-            grad = QRadialGradient(center, max(width, height) * 0.75)
-            grad.setColorAt(0.0, QColor(0, 0, 0, 0))
-            grad.setColorAt(1.0, QColor(0, 0, 0, state["overlay_a"]))
-            p.setPen(Qt.NoPen)
-            p.setBrush(grad)
-            p.drawRect(0, 0, width, height)
+        # 轻微暗角（v3.11.0：默认关闭 —— 整屏压暗在 2560x1600 下每帧 7~10ms，
+        # 是启动动画卡顿的主因；文字自带半透明胶囊底，去掉压暗不影响可读性）
+        if INTRO_SCREEN_DIM and state["overlay_a"] > 0:
+            p.setOpacity(min(1.0, state["overlay_a"] / 255.0))
+            p.drawPixmap(0, 0, self._vignette_pixmap(width, height))
+            p.setOpacity(1.0)
 
         # 外圈光晕（呼吸；涟漪阶段交给真浮球，不再绘制大球光晕）
         if state["phase"] != "ripple":
             glow_r = radius * 2.4 * state["glow"]
-            glow = QRadialGradient(center, glow_r)
-            glow.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 96))
-            glow.setColorAt(0.55, QColor(accent.red(), accent.green(), accent.blue(), 34))
-            glow.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 0))
-            p.setBrush(glow)
-            p.setPen(Qt.NoPen)
-            p.drawEllipse(center, glow_r, glow_r)
+            pm = self._glow_pixmap()
+            p.drawPixmap(QRectF(center.x() - glow_r, center.y() - glow_r,
+                                glow_r * 2.0, glow_r * 2.0), pm,
+                         QRectF(0, 0, pm.width(), pm.height()))
 
         # 扩散圆环
         for key in ("ring1", "ring2"):

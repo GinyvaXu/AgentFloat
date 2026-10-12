@@ -25,22 +25,47 @@ from agentfloat.services.news.fetcher import (
 logger = logging.getLogger("AgentFloat.News")
 
 NEWS_TIMEOUT_SECONDS = 420  # 生成一整期快报的宽限超时
+AI_SUMMARY_TIMEOUT_S = 180  # v3.11.0：AI 摘要单次上限（原来跟随 600s，等待过久）
 
 
 def _cur_date():
     return time.strftime("%Y-%m-%d")
 
 
+def is_headless_capable(agent):
+    """能否用于 headless 调用（v3.11.0）
+
+    GUI 型（launcher == "app"）与 Web 型（launcher == "web"）都不能当 CLI 跑：
+    - app：会启动一个桌面应用实例，超时后被 kill → 用户正在用的程序会被关掉；
+    - web：会拉起一个 Web 服务，不适合一次性问答。
+    """
+    if not agent:
+        return False
+    if str(agent.get("launcher") or "terminal").lower() in ("app", "web"):
+        return False
+    return bool((agent.get("command") or "").strip())
+
+
 def _pick_agent(agents, agent_id):
-    """按 agent_id 选 Agent；空 / 找不到 → 默认主 Agent"""
+    """选用于 headless 的 Agent（v3.11.0 修正）
+
+    1) 指定了 agent_id → 仅当它可 headless 时使用；
+    2) 否则优先主 Agent（需可 headless）；
+    3) 再否则挑第一个可 headless 的 Agent；
+    4) 都不行 → None（调用方跳过 AI 摘要，绝不去启动 GUI 程序）。
+    """
+    agents = [a for a in (agents or []) if a]
     if agent_id:
-        for a in agents or []:
+        for a in agents:
             if a.get("id") == agent_id:
-                return a
-    for a in agents or []:
-        if a.get("primary"):
+                return a if is_headless_capable(a) else None
+    for a in agents:
+        if a.get("primary") and is_headless_capable(a):
             return a
-    return (agents or [None])[0]
+    for a in agents:
+        if is_headless_capable(a):
+            return a
+    return None
 
 
 def _interests_block(interests):
@@ -215,7 +240,8 @@ class NewsWorker(QThread):
                 self._emit("ai", 0, 0, "调用 %s 生成摘要…" % (agent.get("name") or "本地 Agent"))
                 try:
                     prompt = build_ai_prompt(items, language, ai_max, interests)
-                    out, err = run_headless(agent, prompt, cancel=self._cancel)
+                    out, err = run_headless(agent, prompt, cancel=self._cancel,
+                                            timeout=AI_SUMMARY_TIMEOUT_S)
                     if out is None:
                         raise RuntimeError(err or "Agent 调用失败")
                     data = parse_ai_result(out)
@@ -229,7 +255,8 @@ class NewsWorker(QThread):
                     logger.warning("AI 摘要失败，回退纯列表: %s", e)
                     data = None
             else:
-                self._emit("ai", 0, 0, "未找到可用的本地 Agent，跳过 AI 摘要")
+                self._emit("ai", 0, 0, "未找到可用于 headless 的 CLI Agent（桌面/Web 型不可用），跳过 AI 摘要")
+                logger.info("AI 摘要跳过：主 Agent 为 GUI/Web 型，改用标题列表（避免启动并关闭用户程序）")
         else:
             self._emit("ai", 0, 0, "已关闭 AI 摘要，使用标题列表")
 

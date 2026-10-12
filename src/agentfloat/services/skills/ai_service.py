@@ -113,12 +113,15 @@ def build_headless_command(agent, prompt):
     return args, None
 
 
-def run_headless(agent, prompt, cancel=None):
-    """公共封装：以 headless 模式调用本地 Agent（供 AI 快报等模块复用）"""
-    return _run_headless(agent, prompt, cancel=cancel)
+def run_headless(agent, prompt, cancel=None, timeout=None):
+    """公共封装：以 headless 模式调用本地 Agent（供 AI 快报等模块复用）
+
+    timeout：单次调用上限（秒）；None 时用 SERVICE_TIMEOUT_SECONDS。
+    """
+    return _run_headless(agent, prompt, cancel=cancel, timeout=timeout)
 
 
-def _run_headless(agent, prompt, cancel=None):
+def _run_headless(agent, prompt, cancel=None, timeout=None):
     """执行 headless 命令；cancel 为可选 threading.Event，置位时终止子进程"""
     args, err = build_headless_command(agent, prompt)
     if args is None:
@@ -134,7 +137,8 @@ def _run_headless(agent, prompt, cancel=None):
         proc = subprocess.Popen(args, **flags)
     except Exception as e:
         return None, str(e)
-    deadline = time.time() + SERVICE_TIMEOUT_SECONDS
+    limit = int(timeout or SERVICE_TIMEOUT_SECONDS)
+    deadline = time.time() + limit
     try:
         while proc.poll() is None:
             if cancel is not None and cancel.is_set():
@@ -150,7 +154,7 @@ def _run_headless(agent, prompt, cancel=None):
                     proc.wait(5)
                 except Exception:
                     pass
-                return None, "执行超时（%d 秒）" % SERVICE_TIMEOUT_SECONDS
+                return None, "执行超时（%d 秒）" % limit
             time.sleep(0.3)
     except Exception as e:
         try:
