@@ -1,21 +1,16 @@
 # -*- coding: utf-8 -*-
-"""剪贴板历史 — 轻量记录 + 极简面板
+"""剪贴板历史 — 轻量记录 + 极简面板（v3.12.0 用 panel_kit 重做）
 
 - 记录纯文本剪贴内容（上限 60 条，去重相邻重复），持久化到 config.json
-- 面板无边框毛玻璃风格，与 Skills 辅助窗一致
-- 点击条目即可再次复制；右键可删除单条；支持一键清空
+- 面板外观统一由 ui/panel_kit 提供（玻璃底 / 品牌渐变标题栏 / 统一列表与空态）
+- 新增搜索；点击条目再次复制；右键删除单条；底部一键清空
 """
 import time
 
-from PyQt5.QtCore import Qt, pyqtSignal, QSize, QTimer
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QListWidget, QListWidgetItem, QMenu, QApplication,
-)
-from PyQt5.QtGui import QFont
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer
+from PyQt5.QtWidgets import QMenu, QApplication
 
-from agentfloat.core.theme import get_colors
-from agentfloat.ui.panel_style import FadePanelMixin, panel_css
+from agentfloat.ui import panel_kit as kit
 
 HISTORY_KEY = "clipboard_history"
 MAX_ITEMS = 60
@@ -63,117 +58,99 @@ class ClipboardHistory(object):
         self.save()
 
 
-class ClipboardPanel(FadePanelMixin, QDialog):
-    """剪贴板历史面板：点击条目复制回剪贴板"""
+class ClipboardPanel(kit.PanelShell):
+    """剪贴板历史面板（panel_kit 样板实现）：点击条目复制回剪贴板"""
 
     copied = pyqtSignal(str)
 
     def __init__(self, history, theme="light", parent=None):
-        super().__init__(parent)
-        self._history = history
-        self._theme = theme
+        super().__init__("剪贴板历史", "", theme=theme, width=440, height=580, parent=parent)
         self.setWindowTitle("AgentFloat — 剪贴板历史")
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setMinimumSize(460, 480)
-        self._setup_ui()
-        self.refresh()
+        self._history = history
+        self._query = ""
 
-    # ── UI ────────────────────────────────────
-    def _css(self):
-        c = get_colors(self._theme)
-        is_dark = self._theme == "dark"
-        sf = "#%02X%02X%02X" % c["SURFACE"]
-        tx = "#%02X%02X%02X" % c["TEXT"]
-        ac = "#%02X%02X%02X" % c["ACCENT"]
-        bd = "#%02X%02X%02X" % c["SEPARATOR"]
-        card = "#333336" if is_dark else "#FFFFFF"
-        hover = "rgba(255,255,255,0.09)" if is_dark else "rgba(120,120,128,0.10)"
-        banner = "rgba(255,255,255,0.06)" if is_dark else "rgba(255,255,255,0.62)"
-        return (
-            "QDialog { background: %s; border: 1px solid %s; border-radius: 14px; }" % (sf, bd) +
-            "QFrame#titleBar { background: %s; border-top-left-radius: 14px;"
-            " border-top-right-radius: 14px; border-bottom: 1px solid %s; }" % (banner, bd) +
-            "QLabel { color: %s; font-size: 12px; }" % tx +
-            "QPushButton { background: %s; color: %s; border: 1px solid %s;"
-            " border-radius: 8px; padding: 5px 12px; font-size: 12px; }" % (card, ac, bd) +
-            "QPushButton:hover { background: %s; }" % sf +
-            "QListWidget { background: %s; color: %s; border: 1px solid %s;"
-            " border-radius: 8px; padding: 4px; font-size: 12px; }" % (card, tx, bd) +
-            "QListWidget::item { padding: 8px 8px; border-radius: 8px; margin: 2px; }" +
-            "QListWidget::item:hover { background: %s; }" % hover +
-            "QListWidget::item:selected { background: %s; color: #FFF; border-radius: 8px; }" % ac
-        )
+        self.search = kit.search_box("搜索剪贴板内容…", on_change=self._on_search)
+        self.body.addWidget(self.search)
 
-    def _setup_ui(self):
-        self.setStyleSheet(self._css() + panel_css(self._theme))
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 12)
-        root.setSpacing(8)
-
-        bar = QHBoxLayout()
-        bar.setContentsMargins(14, 10, 14, 4)
-        title = QLabel("剪贴板历史")
-        f = QFont("Microsoft YaHei", 13, QFont.Bold)
-        title.setFont(f)
-        bar.addWidget(title)
-        self.lbl_count = QLabel("")
-        bar.addWidget(self.lbl_count)
-        bar.addStretch()
-        self.btn_clear = QPushButton("清空")
-        self.btn_clear.clicked.connect(self._clear_all)
-        self.btn_close = QPushButton("关闭")
-        self.btn_close.clicked.connect(self.accept)
-        bar.addWidget(self.btn_clear)
-        bar.addWidget(self.btn_close)
-        root.addLayout(bar)
-
-        self.lbl_status = QLabel("")
-        self.lbl_status.setStyleSheet("color: #%02X%02X%02X;" % get_colors(self._theme)["ACCENT"])
-        self.lbl_status.setVisible(False)
-        root.addWidget(self.lbl_status)
-
-        self.list = QListWidget()
-        self.list.setWordWrap(True)
+        self.list = kit.ListView()
         self.list.itemClicked.connect(self._copy_item)
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._context_menu)
-        root.addWidget(self.list, 1)
+        self.body.addWidget(self.list, 1)
+
+        self.empty = kit.empty_state("剪贴板记录", "复制任意文本后会自动收录", theme)
+        self.body.addWidget(self.empty)
+
+        self.status = kit.empty_state("", "", theme)     # 复用样式做一行提示
+        self.status.setObjectName("stateHint")
+        self.status.setVisible(False)
+        self.body.addWidget(self.status)
+
+        self.btn_clear = kit.ghost_button("清空全部", danger=True, on_click=self._clear_all)
+        self.btn_close = kit.ghost_button("关闭", on_click=self.close)
+        self.footer.insertWidget(0, self.btn_clear)
+        self.footer.addWidget(self.btn_close)
+        self.show_footer(True)
+
+        self.refresh()
+
+    # ── 数据 → 列表 ────────────────────────────
+    def _on_search(self, text):
+        self._query = (text or "").strip().lower()
+        self.refresh()
+
+    def _visible_entries(self):
+        rows = self._history.entries()
+        if not self._query:
+            return rows
+        return [e for e in rows if self._query in (e.get("text") or "").lower()]
 
     def refresh(self):
         self.list.clear()
-        entries = self._history.entries()
+        entries = self._visible_entries()
+        total = len(self._history.entries())
         for e in entries:
             text = e.get("text") or ""
             ts = e.get("ts") or ""
-            preview = text.replace("\n", " ").replace("\r", " ")
-            if len(preview) > 200:
-                preview = preview[:200] + "…"
-            it = QListWidgetItem(("[%s]  %s" % (ts, preview)) if ts else preview)
-            it.setData(Qt.UserRole, text)
-            it.setToolTip(text[:1000])
-            it.setSizeHint(QSize(0, 46))
+            preview = text.replace("\n", " ").replace("\r", " ").strip()
+            if len(preview) > 120:
+                preview = preview[:120] + "…"
+            meta = "%s · %d 字符" % (ts, len(text)) if ts else "%d 字符" % len(text)
+            kind = "代码" if any(k in text for k in ("def ", "class ", "{", "};", "=>")) else "文本"
+            it, w = kit.item_for(
+                kit.list_row(preview, meta, kind, "#0A84FF" if kind == "代码" else "#7F8C8D"),
+                data=text)
             self.list.addItem(it)
-        self.lbl_count.setText("共 %d 条" % len(entries))
-        if not entries:
-            from agentfloat.ui import states
-            self.list.addItem(states.empty("剪贴板记录", "复制任意文本后会自动收录"))
+            self.list.setItemWidget(it, w)
+        has = bool(entries)
+        self.list.setVisible(has)
+        self.empty.setVisible(not has)
+        if self._query and not has:
+            self.empty.setText("匹配的剪贴板记录\n换个关键词试试")
+        else:
+            self.empty.setText("暂无剪贴板记录\n复制任意文本后会自动收录")
+        self.set_subtitle("共 %d 条%s" % (total, ("，命中 %d 条" % len(entries)) if self._query else ""))
 
+    # ── 交互 ──────────────────────────────────
     def _copy_item(self, item):
         text = item.data(Qt.UserRole)
         if not text:
             return
         QApplication.clipboard().setText(text)
         self.copied.emit(text)
-        self.lbl_status.setText("✓ 已复制到剪贴板")
-        self.lbl_status.setVisible(True)
-        QTimer.singleShot(1500, lambda: self.lbl_status.setVisible(False))
+        self._flash("✓ 已复制到剪贴板")
+
+    def _flash(self, text):
+        self.status.setText(text)
+        self.status.setVisible(True)
+        QTimer.singleShot(1500, lambda: self.status.setVisible(False))
 
     def _context_menu(self, pos):
         item = self.list.itemAt(pos)
         if item is None:
             return
         menu = QMenu(self)
+        menu.setStyleSheet(self.styleSheet())
         act_copy = menu.addAction("复制")
         act_del = menu.addAction("删除此条")
         act = menu.exec_(self.list.mapToGlobal(pos))
@@ -188,6 +165,4 @@ class ClipboardPanel(FadePanelMixin, QDialog):
     def _clear_all(self):
         self._history.clear()
         self.refresh()
-        self.lbl_status.setText("已清空")
-        self.lbl_status.setVisible(True)
-        QTimer.singleShot(1500, lambda: self.lbl_status.setVisible(False))
+        self._flash("已清空")
