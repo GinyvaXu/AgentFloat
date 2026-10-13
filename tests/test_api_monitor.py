@@ -169,11 +169,12 @@ def test_fetcher_default_ua_and_numeric_total(monkeypatch):
         def read(self):
             return b'{"usage": {"rolling": {"percent": 4}}}'
 
-    def fake_urlopen(req, context=None, timeout=None):
+    def fake_open_url(req, ssl_ctx=None, timeout=None, proxy=""):
         captured["headers"] = {k.lower(): v for k, v in req.header_items()}
+        captured["proxy"] = proxy
         return FakeResp()
 
-    monkeypatch.setattr(fetcher.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(fetcher, "_open_url", fake_open_url)
     res = fetcher.fetch_endpoint({
         "name": "t", "url": "https://example.com/x",
         "headers": {"Authorization": "Bearer k"},

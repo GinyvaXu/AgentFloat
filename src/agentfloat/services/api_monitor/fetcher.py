@@ -32,6 +32,42 @@ class FetchResult:
         self.raw_response = raw_response
 
 
+def _friendly_net_error(err):
+    """把底层网络异常翻译成可读提示（v3.12.1）
+
+    典型场景：系统代理未开 → TLS 握手超时（_ssl.c:1064 handshake operation timed out）。
+    """
+    msg = str(err or "").strip()
+    low = msg.lower()
+    if "handshake" in low or "timed out" in low or "timeout" in low:
+        return "连接超时（检查网络或代理是否已开启）"
+    if "refused" in low:
+        return "连接被拒绝（代理端口未监听？）"
+    if "getaddrinfo" in low or "name or service not known" in low:
+        return "域名解析失败（DNS 或代理配置问题）"
+    if "certificate" in low or "ssl" in low:
+        return "证书校验失败：%s" % msg[:80]
+    return msg[:120] or "未知网络错误"
+
+
+def _open_url(req, ssl_ctx, timeout, proxy=""):
+    """统一的请求入口（v3.12.1）
+
+    - 独立函数便于测试替换（tests 里 patch 它即可，不必碰 urllib 内部）
+    - 每次调用重新构建 opener → 动态读取系统代理（Windows 注册表）：
+      用户中途开关代理（day8 / Clash 等）无需重启应用即可生效
+    - endpoint 显式给了 proxy 时优先使用
+    """
+    handlers = []
+    if proxy:
+        handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    else:
+        handlers.append(urllib.request.ProxyHandler())     # 空参 = 每次重新读取系统代理
+    handlers.append(urllib.request.HTTPSHandler(context=ssl_ctx))
+    opener = urllib.request.build_opener(*handlers)
+    return opener.open(req, timeout=timeout)
+
+
 def fetch_endpoint(endpoint: dict, verify_ssl: bool = True) -> FetchResult:
     """
     对单个端点发起 HTTP 请求，解析 JSON 并提取字段。
@@ -67,10 +103,13 @@ def fetch_endpoint(endpoint: dict, verify_ssl: bool = True) -> FetchResult:
         data = data.encode("utf-8")
 
     ssl_ctx = _SSL_CONTEXT_VERIFY if verify else _SSL_CONTEXT_NO_VERIFY
+    timeout = float(endpoint.get("timeout") or 15)
 
     try:
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
-        with urllib.request.urlopen(req, context=ssl_ctx, timeout=15) as resp:
+        # v3.12.1：统一走 _open_url（动态读取系统代理；测试可直接 patch 该函数）
+        proxy = str(endpoint.get("proxy") or "").strip()
+        with _open_url(req, ssl_ctx, timeout, proxy) as resp:
             raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
         body_text = ""
@@ -83,9 +122,9 @@ def fetch_endpoint(endpoint: dict, verify_ssl: bool = True) -> FetchResult:
             status_code=e.code
         )
     except urllib.error.URLError as e:
-        raise FetchError(f"连接失败: {e.reason}")
+        raise FetchError("连接失败: %s" % _friendly_net_error(e.reason))
     except Exception as e:
-        raise FetchError(f"请求异常: {e}")
+        raise FetchError("请求异常: %s" % _friendly_net_error(e))
 
     # 解析 JSON
     try:

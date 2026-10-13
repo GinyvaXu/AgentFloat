@@ -20,13 +20,24 @@ class SkillInfo(object):
 
 
 def default_skill_roots():
-    """默认扫描根：本机常用 agent skills 目录（含 Codex 插件缓存）"""
+    """默认扫描根：本机常用 agent skills 目录（各 Agent 客户端 + 插件缓存）
+
+    v3.12.1：补上 OpenCode / Claude Code 的 skills 目录（此前只扫 Codex，
+    导致用户看到「skills 不全」——本机 .config/opencode/skills 下 12 个 skill 全被漏掉）。
+    """
     import glob
     home = os.path.expanduser("~")
     roots = [
         os.path.join(home, ".agents", "skills"),
         os.path.join(home, ".codex", "skills"),
         os.path.join(home, ".codex", "skills", ".system"),
+        # OpenCode（全局 skills：Windows 下为 ~/.config/opencode/skills）
+        os.path.join(home, ".config", "opencode", "skills"),
+        os.path.join(home, ".opencode", "skills"),
+        # Claude Code
+        os.path.join(home, ".claude", "skills"),
+        # 通用 XDG 位置
+        os.path.join(home, ".local", "share", "opencode", "skills"),
     ]
     # 插件缓存（版本目录随插件更新变化，用 glob 匹配）
     roots += sorted(glob.glob(os.path.join(home, ".codex", "plugins", "cache", "*", "*", "*", "skills")))
@@ -210,7 +221,7 @@ def categorize_skills(skills):
     """
     order = [
         "Godot 游戏开发", "网页抓取", "办公文档", "浏览器自动化",
-        "设计 / 动画", "Codex 系统", "开发辅助", "其他",
+        "设计 / 动画", "Codex 系统", "OpenCode 技能", "开发辅助", "其他",
     ]
     cats = {k: [] for k in order}
 
@@ -231,6 +242,8 @@ def categorize_skills(skills):
             cats["设计 / 动画"].append(s)
         elif ".system" in root.replace("\\", "/"):
             cats["Codex 系统"].append(s)
+        elif _root_has(root, "opencode", "claude"):
+            cats["OpenCode 技能"].append(s)          # v3.12.1：OpenCode / Claude Code 目录
         elif s.name in _DEV_SKILLS or key.startswith(("skill-", "create-", "find-", "karpathy",
                                                       "review-", "plugin-", "template-",
                                                       "grill", "caveman", "claudefloat", "workspace")):

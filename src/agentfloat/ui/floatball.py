@@ -219,7 +219,7 @@ class FloatingWidget(QWidget):
         region = QRegion(path.toFillPolygon().toPolygon())
         self.setMask(region)
 
-    def _render_pixmaps(self):
+    def _render_pixmaps(self, dpr=None):
         """预渲染球体位图（idle / hover）：固定窗口 + 位图缩放，动画零重建
 
         P2 性能方案：悬停/按压动画只绘制缩放后的位图，不再每帧
@@ -228,10 +228,12 @@ class FloatingWidget(QWidget):
         c = get_colors(self.theme)
         accent = QColor(*c["ACCENT"])
         side = self._window_side()
-        try:
-            dpr = max(1.0, float(self.devicePixelRatioF()))
-        except Exception:
-            dpr = 1.0
+        if dpr is None:
+            try:
+                dpr = max(1.0, float(self.devicePixelRatioF()))
+            except Exception:
+                dpr = 1.0
+        dpr = max(1.0, float(dpr))
         self._pixmap_dpr = dpr
         cache = {"side": side, "accent": accent}
         for name, hovered in (("idle", False), ("hover", True)):
@@ -849,8 +851,8 @@ class FloatingWidget(QWidget):
 
     # ── 边缘吸附系统 ────────────────────────────────
     def _screen_geometry(self):
-        """获取当前屏幕的工作区域"""
-        screen = QApplication.screenAt(self.pos()) or QApplication.primaryScreen()
+        """获取当前屏幕的工作区域（v3.12.1：用球体中心判定，贴边/跨屏不再取错屏）"""
+        screen = QApplication.screenAt(self.geometry().center()) or QApplication.primaryScreen()
         if screen:
             return screen.availableGeometry()
         return QRect(0, 0, 1920, 1080)
@@ -1133,16 +1135,47 @@ class FloatingWidget(QWidget):
         return True
 
     def _ensure_dpr(self):
-        """PATCH 3.4.0：跨屏（不同 DPI/分辨率）时重建位图与掩码，避免副屏绘制错乱"""
+        """PATCH 3.4.0：跨屏（不同 DPI/分辨率）时重建位图与掩码，避免副屏绘制错乱
+
+        v3.12.1：改为按「球心所在屏幕」取 DPR。此前用 self.devicePixelRatioF()，
+        而 Qt 要等窗口真正换屏后才更新该值 → 跨屏途中仍按旧 DPR 渲染，
+        表现就是拖到另一块屏时一直画错（错位/模糊/尺寸不对）。
+        """
         try:
-            dpr = max(1.0, float(self.devicePixelRatioF()))
+            scr = QApplication.screenAt(self.geometry().center()) or QApplication.primaryScreen()
+            if scr is not None:
+                dpr = max(1.0, float(scr.devicePixelRatio()))
+            else:
+                dpr = max(1.0, float(self.devicePixelRatioF()))
         except Exception:  # noqa: BLE001
             return
         if abs(dpr - getattr(self, "_pixmap_dpr", 0.0)) > 0.01:
-            self._render_pixmaps()
+            self._render_pixmaps(dpr=dpr)
             self._update_mask()
             self.update()
             _log().debug("屏幕 DPR 变化 → 重建浮球位图: %.2f", dpr)
+
+    def _virtual_geometry(self):
+        """所有屏幕工作区的并集（多屏拼接），用于把浮球限制在桌面范围内"""
+        rects = self._screen_rects()
+        if not rects:
+            return QRect(0, 0, 1920, 1080)
+        left = min(r[0] for r in rects)
+        top = min(r[1] for r in rects)
+        right = max(r[2] for r in rects)
+        bottom = max(r[3] for r in rects)
+        return QRect(left, top, right - left + 1, bottom - top + 1)
+
+    def _clamp_to_desktop(self, pos):
+        """把窗口位置夹进虚拟桌面
+
+        v3.12.1：跨屏拖动此前不夹取，浮球会被 move 到屏幕外 →
+        系统拒绝 setGeometry（日志里一串 Unable to set geometry）且画面错乱。
+        """
+        vg = self._virtual_geometry()
+        x = max(vg.left(), min(int(pos.x()), vg.right() - self.width() + 1))
+        y = max(vg.top(), min(int(pos.y()), vg.bottom() - self.height() + 1))
+        return QPoint(x, y)
 
     @pyqtProperty(int)
     def slide_pos(self):
@@ -2091,7 +2124,8 @@ class FloatingWidget(QWidget):
             return
         cur = QCursor.pos()
         side = self._window_side()
-        self.move(int(cur.x() - side / 2.0), int(cur.y() - side / 2.0))
+        self.move(self._clamp_to_desktop(
+            QPoint(int(cur.x() - side / 2.0), int(cur.y() - side / 2.0))))
 
     def _register_move_hotkey(self):
         """移动模式临时注册全局 Esc（退出即注销）"""
@@ -2137,7 +2171,7 @@ class FloatingWidget(QWidget):
                 self._close_radial_menu()
         if self._drag_active:
             new_pos = self._window_origin + (event.globalPos() - self._drag_origin)
-            self.move(new_pos)
+            self.move(self._clamp_to_desktop(new_pos))    # v3.12.1：夹进虚拟桌面，跨屏拖动不再越界
 
     def mouseReleaseEvent(self, event):
         if self._quitting or self._move_mode:
@@ -2166,6 +2200,8 @@ class FloatingWidget(QWidget):
                 self.config["window_x"] = self.pos().x() + off
                 self.config["window_y"] = self.pos().y() + off
                 self._check_snap()
+                self._ensure_dpr()
+                self.move(self._clamp_to_desktop(self.pos()))   # v3.12.1：吸附后仍保证在桌面内
                 # 无论是否吸附都保存位置
                 self.config["window_x"] = self.pos().x() + off
                 self.config["window_y"] = self.pos().y() + off

@@ -43,12 +43,15 @@ class ApiMonitorWorker(QThread):
                       len(self._endpoints), self._interval_ms // 1000)
 
         import time
+        backoff = 1.0                      # v3.12.1：连续失败时退避倍数
         while self._running:
             results = []
+            ok_count = 0
             for ep in self._endpoints:
                 try:
                     result = fetch_endpoint(ep, verify_ssl=self._verify_ssl)
                     results.append(result)
+                    ok_count += 1
                     _logger.debug("API 端点 [%s] 获取成功: %d 字段",
                                   ep.get("name", "?"), len(result.fields))
                 except FetchError as e:
@@ -64,9 +67,18 @@ class ApiMonitorWorker(QThread):
 
             self.data_ready.emit(results)
 
+            # 全部失败 → 逐步退避（1x → 2x → 4x → 8x，上限 10 分钟），恢复后回到正常间隔
+            if results and ok_count == 0:
+                backoff = min(backoff * 2.0, 10.0)
+                wait_ms = int(self._interval_ms * backoff)
+                _logger.info("API 监控：全部端点失败，退避到 %ds 后重试", wait_ms // 1000)
+            else:
+                backoff = 1.0
+                wait_ms = self._interval_ms
+
             # 分段睡眠，以便能及时响应 stop / 手动立即拉取
             slept = 0
-            while self._running and slept < self._interval_ms and not self._refresh_now:
+            while self._running and slept < wait_ms and not self._refresh_now:
                 time.sleep(0.5)
                 slept += 500
             self._refresh_now = False
