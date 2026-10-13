@@ -37,36 +37,76 @@ def panel_qss(theme="light"):
     hint = "#%02X%02X%02X" % tuple(c["HINT"])
     return panel_css(theme) + (
         # 面板头
-        "QLabel#pkTitle { font-size: %(ft)dpx; font-weight: 700; }"
-        "QLabel#pkSubtitle { color: %(hint)s; font-size: %(fc)dpx; }"
-        "QFrame#pkHeader { background: transparent; }"
+        "QLabel#pkTitle { font-size: %(fb)dpx; font-weight: 700; }"
+        "QLabel#pkSubtitle { color: %(hint)s; font-size: %(fm)dpx; padding-left: 6px; }"
+        "QPushButton#pkClose { background: none; border: none; color: %(hint)s;"
+        " font-size: %(fm)dpx; border-radius: %(r)dpx; }"
+        "QPushButton#pkClose:hover { background: %(hover)s; color: %(acc)s; }"
+        "QFrame#pkHeader { background: none; }"
         # 搜索框
         "QLineEdit#pkSearch { background: %(card)s; border: 1px solid %(bd)s;"
         " border-radius: %(r)dpx; padding: 6px 10px; font-size: %(fb)dpx; }"
         "QLineEdit#pkSearch:focus { border-color: %(acc)s; }"
+        # 下拉框 / 详情区
+        "QComboBox#pkCombo { background: %(card)s; color: %(tx)s; border: 1px solid %(bd)s;"
+        " border-radius: %(r)dpx; padding: 3px 8px; font-size: %(fc)dpx; }"
+        "QComboBox#pkCombo::drop-down { border: none; width: 16px; }"
+        "QComboBox#pkCombo QAbstractItemView { background: %(card)s; color: %(tx)s;"
+        " border: 1px solid %(bd)s; selection-background-color: %(acc)s; }"
+        "QTextBrowser#pkDetail { background: %(card)s; color: %(tx)s; border: 1px solid %(bd)s;"
+        " border-radius: %(r)dpx; padding: 8px; font-size: %(fb)dpx; }"
         # 列表：统一密度与悬停
-        "QListWidget#pkList { background: transparent; border: none; padding: 2px; }"
-        "QListWidget#pkList::item { padding: 8px 10px; border-radius: %(r)dpx;"
-        " margin: 2px 0px; }"
+        "QListWidget#pkList { background: none; border: none; padding: 2px; }"
+        "QListWidget#pkList::item { padding: 5px 8px; border-radius: %(r)dpx;"
+        " margin: 1px 0px; }"
         "QListWidget#pkList::item:hover { background: %(hover)s; }"
-        "QListWidget#pkList::item:selected { background: %(acc)s; color: #FFF; }"
+        "QListWidget#pkList::item:selected { background: %(sel)s; }"
         # 底部操作条
-        "QFrame#pkFooter { background: transparent; border-top: 1px solid %(bd)s; }"
-        "QPushButton#pkGhost { background: transparent; color: %(acc)s;"
-        " border: 1px solid %(bd)s; border-radius: %(r)dpx; padding: 5px 12px;"
-        " font-size: %(fb)dpx; }"
+        "QFrame#pkFooter { background: none; border-top: 1px solid %(bd)s; }"
+        "QPushButton#pkGhost { background: none; color: %(acc)s;"
+        " border: 1px solid %(bd)s; border-radius: %(r)dpx; padding: 3px 10px;"
+        " font-size: %(fc)dpx; }"
         "QPushButton#pkGhost:hover { background: %(hover)s; }"
         "QPushButton#pkDanger { color: #FF453A; }"
         "QPushButton#pkPrimary { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
         " stop:0 %(acc)s, stop:1 #AF52DE); color: #FFF; border: none;"
-        " border-radius: %(r)dpx; padding: 6px 14px; font-size: %(fb)dpx;"
+        " border-radius: %(r)dpx; padding: 4px 12px; font-size: %(fc)dpx;"
         " font-weight: 600; }"
-        % {"hint": hint, "ft": FONT.title, "fc": FONT.caption, "fb": FONT.body,
-           "r": RADIUS.sm, "card": "#2C2C31" if theme == "dark" else "#FFFFFF",
+        % {"hint": hint, "fc": FONT.caption, "fb": FONT.body,
+           "fm": FONT.micro, "r": RADIUS.sm, "card": "#2C2C31" if theme == "dark" else "#FFFFFF",
            "bd": "rgba(255,255,255,0.10)" if theme == "dark" else "rgba(60,60,67,0.12)",
            "hover": "rgba(255,255,255,0.08)" if theme == "dark" else "rgba(120,120,128,0.10)",
-           "acc": "#%02X%02X%02X" % tuple(c["ACCENT"])}
+           "acc": "#%02X%02X%02X" % tuple(c["ACCENT"]),
+           "tx": "#%02X%02X%02X" % tuple(c["TEXT"]),
+           "sel": "rgba(10,132,255,0.22)" if theme == "dark" else "rgba(10,132,255,0.14)"}
     )
+
+
+class _Header(QFrame):
+    """面板头：可按住拖动整个面板（无边框窗口的移动方式）"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._drag = None
+        self.setCursor(Qt.SizeAllCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag = event.globalPos() - self.window().frameGeometry().topLeft()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag is not None and (event.buttons() & Qt.LeftButton):
+            self.window().move(event.globalPos() - self._drag)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag = None
+        event.accept()
 
 
 class PanelShell(QDialog):
@@ -77,7 +117,7 @@ class PanelShell(QDialog):
 
     closed = pyqtSignal()
 
-    def __init__(self, title, subtitle="", theme="light", width=420, height=560,
+    def __init__(self, title, subtitle="", theme="light", width=360, height=460,
                  parent=None):
         super().__init__(parent)
         self._theme = theme
@@ -87,44 +127,46 @@ class PanelShell(QDialog):
         self.setStyleSheet(panel_qss(theme))
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(SPACE.md, SPACE.sm + 2, SPACE.md, SPACE.md)
-        root.setSpacing(SPACE.sm)
+        root.setContentsMargins(SPACE.sm + 2, SPACE.sm, SPACE.sm + 2, SPACE.sm)
+        root.setSpacing(SPACE.xs + 2)
 
-        head = QFrame()
+        head = _Header(self)
         head.setObjectName("pkHeader")
+        head.setAttribute(Qt.WA_TranslucentBackground, True)
         h = QHBoxLayout(head)
         h.setContentsMargins(2, 0, 2, 0)
         h.setSpacing(SPACE.sm)
-        box = QVBoxLayout()
-        box.setSpacing(1)
         self._title = QLabel(title)
         self._title.setObjectName("pkTitle")
-        box.addWidget(self._title)
+        self._title.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        h.addWidget(self._title)
         self._subtitle = QLabel(subtitle)
         self._subtitle.setObjectName("pkSubtitle")
+        self._subtitle.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         self._subtitle.setVisible(bool(subtitle))
-        box.addWidget(self._subtitle)
-        h.addLayout(box)
+        h.addWidget(self._subtitle)      # 单行：副标题跟在标题右侧（更轻）
         h.addStretch(1)
         self._close = QPushButton("✕")
-        self._close.setObjectName("pkGhost")
-        self._close.setFixedSize(24, 24)
+        self._close.setObjectName("pkClose")
+        self._close.setFixedSize(20, 20)
         self._close.clicked.connect(self.close)
         h.addWidget(self._close)
         root.addWidget(head)
 
         sep = QFrame()
-        sep.setFixedHeight(2)
+        sep.setFixedHeight(1)
         sep.setStyleSheet("background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-                          " stop:0 #0A84FF, stop:1 #AF52DE); border: none;")
+                          " stop:0 rgba(10,132,255,0.85), stop:1 rgba(175,82,222,0.85));"
+                          " border: none;")
         root.addWidget(sep)
 
         self.body = QVBoxLayout()
-        self.body.setSpacing(SPACE.sm)
+        self.body.setSpacing(SPACE.xs + 2)
         root.addLayout(self.body, 1)
 
         self._footer = QFrame()
         self._footer.setObjectName("pkFooter")
+        self._footer.setAttribute(Qt.WA_TranslucentBackground, True)
         self.footer = QHBoxLayout(self._footer)
         self.footer.setContentsMargins(0, SPACE.sm, 0, 0)
         self.footer.setSpacing(SPACE.sm)
@@ -153,9 +195,9 @@ class PanelShell(QDialog):
         base = QColor(28, 28, 33) if dark else QColor(252, 252, 255)
         grad = QLinearGradient(r.topLeft(), r.bottomLeft())
         a = base
-        a.setAlpha(250 if dark else 246)
+        a.setAlpha(232 if dark else 238)
         b = QColor(base)
-        b.setAlpha(238 if dark else 234)
+        b.setAlpha(214 if dark else 222)
         grad.setColorAt(0.0, a)
         grad.setColorAt(1.0, b)
         p.setPen(Qt.NoPen)
@@ -219,38 +261,52 @@ class ListView(QListWidget):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setFrameShape(QFrame.NoFrame)
         self.setSpacing(0)
+        # 透明窗里，子控件若用"透明背景"填充会把父级玻璃擦成透明洞 → 显式声明不绘背景
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.viewport().setAttribute(Qt.WA_TranslucentBackground, True)
 
 
-def list_row(primary, secondary="", badge="", badge_color=None):
-    """统一的列表项（主标题 + 次要说明 + 可选角标）"""
+def list_row(primary, secondary="", badge="", badge_color=None, compact=True):
+    """统一的列表项（默认单行紧凑：主文本 + 右侧次要信息 + 可选淡角标）
+
+    compact=False 时退化为两行（主文本一行、次要信息一行），适合说明较长的面板。
+    """
     w = QWidget()
     v = QVBoxLayout(w)
-    v.setContentsMargins(2, 1, 2, 1)
-    v.setSpacing(2)
+    v.setContentsMargins(2, 0, 2, 0)
+    v.setSpacing(1)
     top = QHBoxLayout()
     top.setSpacing(6)
-    t = QLabel(primary)
     from PyQt5.QtGui import QFont as _QFont
+    t = QLabel(primary)
     _f = _QFont(t.font())
     _f.setPixelSize(FONT.body)
-    _f.setBold(True)
     t.setFont(_f)
+    t.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
     top.addWidget(t, 1)
     if badge:
         b = QLabel(badge)
-        b.setStyleSheet("font-size: %dpx; font-weight: 600; padding: 1px 7px;"
-                        " border-radius: 999px; color: #FFF; background: %s;"
-                        % (FONT.micro, badge_color or "#7F8C8D"))   # 角标自带配色（不继承）
+        _bc = badge_color or "#7F8C8D"
+        b.setStyleSheet("font-size: %dpx; font-weight: 600; padding: 0px 6px;"
+                        " border-radius: 999px; color: %s;"
+                        " background: rgba(%d,%d,%d,0.16);"
+                        " border: 1px solid rgba(%d,%d,%d,0.34);"
+                        % (FONT.micro, _bc, int(_bc[1:3], 16), int(_bc[3:5], 16),
+                           int(_bc[5:7], 16), int(_bc[1:3], 16), int(_bc[3:5], 16),
+                           int(_bc[5:7], 16)))
         top.addWidget(b)
     v.addLayout(top)
     if secondary:
-        s = QLabel(secondary)
-        _f2 = _QFont(s.font())
-        _f2.setPixelSize(FONT.caption)
-        s.setFont(_f2)
-        s.setWordWrap(False)
-        s.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        v.addWidget(s)
+        _f2 = _QFont(t.font())
+        _f2.setPixelSize(FONT.micro)
+        sec = QLabel(secondary)
+        sec.setFont(_f2)
+        sec.setWordWrap(False)
+        if compact:
+            top.addWidget(sec, 0)          # 单行：次要信息靠右
+        else:
+            sec.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            v.addWidget(sec)
     return w
 
 
