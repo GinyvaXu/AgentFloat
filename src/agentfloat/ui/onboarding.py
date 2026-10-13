@@ -9,12 +9,16 @@
 
 交互：下一步 / 上一步 / 跳过；Esc=跳过，Enter/→=下一步，←=上一步；点击遮罩空白=下一步。
 """
+import math
+import time as _time
+
 from PyQt5.QtCore import (QEasingCurve, QPointF, QPropertyAnimation, QRect, QRectF, Qt,
                           QTimer, pyqtSignal)
 from PyQt5.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt5.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
                              QWidget)
 
+from agentfloat.ui import motion
 from agentfloat.ui.tokens import FONT, RADIUS, SPACE
 
 # 步骤定义：anchor="ball" 表示高亮浮球本体（几何由调用方给出）
@@ -121,6 +125,7 @@ class OnboardingOverlay(QWidget):
         self._ball = QRect(ball_rect)
         self._pulse = 0.0
         self._pulse_dir = 1
+        self._pulse_last = _time.monotonic()      # v3.13.0：呼吸按真实时间推进
         self._fade_target = None
         geo = QRect(screen_rect)
         self.setGeometry(geo)
@@ -142,16 +147,34 @@ class OnboardingOverlay(QWidget):
         self._apply_step()
 
     def _on_pulse(self):
-        """光环呼吸 + 气泡淡入推进"""
-        self._pulse += 0.035 * self._pulse_dir
-        if self._pulse >= 1.0:
-            self._pulse, self._pulse_dir = 1.0, -1
-        elif self._pulse <= 0.0:
-            self._pulse, self._pulse_dir = 0.0, 1
+        """光环呼吸 + 气泡淡入推进
+
+        v3.13.0：呼吸与淡入都改为按真实时间推进（原来 33ms 固定 ±0.035/帧、每帧 0.28 系数，
+        帧率一变呼吸速度就变）。`motion.legacy_motion()` 打开时走原始实现。
+        """
+        now = _time.monotonic()
+        dt = max(0.0, min(now - getattr(self, "_pulse_last", now), 0.25))
+        self._pulse_last = now
+        if motion.legacy_motion():
+            self._pulse += 0.035 * self._pulse_dir              # 原始实现（回退用）
+            if self._pulse >= 1.0:
+                self._pulse, self._pulse_dir = 1.0, -1
+            elif self._pulse <= 0.0:
+                self._pulse, self._pulse_dir = 0.0, 1
+        else:
+            # 呼吸：全周期 2.4s（1.2s 起、1.2s 落），帧率无关
+            self._pulse += (dt / 1.2) * self._pulse_dir
+            if self._pulse >= 1.0:
+                self._pulse, self._pulse_dir = 1.0, -1
+            elif self._pulse <= 0.0:
+                self._pulse, self._pulse_dir = 0.0, 1
         if self._bubble_fx is not None and self._fade_target is not None:
             cur = self._bubble_fx.opacity()
-            step = (self._fade_target - cur) * 0.28
-            nxt = cur + step
+            if motion.legacy_motion():
+                nxt = cur + (self._fade_target - cur) * 0.28   # 原始实现（回退用）
+            else:
+                # 指数平滑（speed 12/s），与呼吸共用真实 dt
+                nxt = cur + (self._fade_target - cur) * (1.0 - math.exp(-12.0 * dt))
             if abs(self._fade_target - nxt) < 0.01:
                 nxt = self._fade_target
             self._bubble_fx.setOpacity(max(0.0, min(1.0, nxt)))

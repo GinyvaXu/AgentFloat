@@ -23,7 +23,7 @@ from PyQt5.QtWidgets import QApplication, QWidget
 
 from agentfloat.core.logging_setup import _log
 from agentfloat.core.theme import get_colors
-from agentfloat.ui import ball_render, chime
+from agentfloat.ui import ball_render, chime, motion
 
 FADE_IN_END = 260
 POP_END = 900
@@ -203,7 +203,10 @@ class IntroAnimation(QWidget):
 
     # ── 生命周期 ──────────────────────────────────
     def start(self, screen=None):
-        """显示并开始动画（返回是否成功）"""
+        """显示并开始动画（返回是否成功）
+
+        v3.13.0：支持点击/按键跳过；系统开启"减少动画"时直接落位不播飞行。
+        """
         screen = screen or QApplication.primaryScreen()
         if screen is None:
             return False
@@ -217,9 +220,16 @@ class IntroAnimation(QWidget):
         except Exception:  # noqa: BLE001
             dpr = 1.0
         self._ensure_ball_pixmap(dpr)
+        self._finished = False
         self.setWindowOpacity(1.0)
         self.show()
         self.raise_()
+        if motion.reduced_motion():                 # v3.13.0：reduced-motion 直接落位
+            _log().info("[启动动画] reduced-motion 已开启 → 跳过飞行，直接落位")
+            self._landed_emitted = True
+            self.landed.emit()
+            self._finish(0.0)
+            return True
         self._t0.start()
         self._tick.start()
         _log().info("[启动动画] 开始：%s（音效=%s 音量=%.2f）", self._title, self._sound, self._volume)
@@ -249,10 +259,45 @@ class IntroAnimation(QWidget):
             _log().info("[启动动画] 浮球落位 @%.0fms（进入涟漪阶段）", t)
             self.landed.emit()
         if state["phase"] == "done":
-            self._tick.stop()
-            self.hide()
-            _log().info("[启动动画] 完成（%.0fms）", t)
-            self.finished.emit()
+            self._finish(t)
+
+    def skip(self, reason="用户跳过"):
+        """v3.13.0：跳过动画 —— 直接落到完成态（点击/按键触发）
+
+        启动动画最长约 7s，此前完全不可跳过；现在任意点击/按键立即结束，
+        落位涟漪由浮球自身的点击反馈承接。
+        """
+        if getattr(self, "_finished", False):
+            return
+        _log().info("[启动动画] %s，直接完成（%.0fms）", reason, self._t0.elapsed())
+        self._finish(self._t0.elapsed())
+
+    def _finish(self, t):
+        if getattr(self, "_finished", False):
+            return
+        self._finished = True
+        self._tick.stop()
+        self.hide()
+        _log().info("[启动动画] 完成（%.0fms）", t)
+        self.finished.emit()
+        # v3.13.0：释放全屏位图与光晕缓存（原来只 hide，对象与缓存常驻）
+        try:
+            self.deleteLater()
+        except Exception:  # noqa: BLE001
+            pass
+
+    # ── 跳过交互（点击/按键）────────────────────────
+    def mousePressEvent(self, event):
+        self.skip("点击跳过")
+        event.accept()
+
+    def keyPressEvent(self, event):
+        self.skip("按键跳过")
+        event.accept()
+
+    def wheelEvent(self, event):
+        self.skip("滚轮跳过")
+        event.accept()
 
     # ── 绘制 ─────────────────────────────────────
     def render_frame(self, elapsed_ms, size=None):

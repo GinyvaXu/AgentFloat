@@ -7,6 +7,7 @@
 - 从当前值起步、可随时打断重定向（速度继承）——「跟手」的关键
 - reduced-motion 开关（降级为直接跳变）
 """
+import math as _math
 import time as _time
 
 try:
@@ -32,12 +33,39 @@ class Tokens(object):
     # PATCH 3.3.0：窗口/面板渐入渐出时长（ms）
     PANEL_IN_MS = 200
     PANEL_OUT_MS = 150
+    # ── v3.13.0 动效方案（motion-ui-design 守则）新增令牌 ──────────
+    # 弹簧统一按 (刚度 k, 阻尼 c)，mass=1 时 k=ω²、c=2ζω：
+    UI = (484.0, 33.0)            # ω22 ζ0.75：列表项 / 卡片 / 选中条
+    PAGE = (256.0, 27.2)          # ω16 ζ0.85：页面 / 分栏切换
+    TAP = (2025.0, 90.0)          # ω45 ζ1.0：按下压入（快、不回弹）
+    RELEASE = (121.0, 8.8)        # ω11 ζ0.4：松开回弹（回弹只留给松开）
+    POP = (676.0, 23.4)           # ω26 ζ0.45：角标 / 收藏弹入
+    UI_COLLAPSE = (484.0, 44.0)   # ω22 ζ1.0：列表项收拢（防"翻出来"）
+    # 指数平滑速度（1/s）：跟随类（无过冲）
+    FOLLOW_SPEED = 14.0           # 位置跟随（移动模式、光标高亮、涟漪）
+    TEXT_SPEED = 16.0             # 进度线 / 滚动偏移 / 文字
+    # 时长（ms）
+    DUR_TAP_MS = 90               # 按压反馈（与收合对齐）
+    DUR_FLASH_MS = 150            # 状态文案淡出
+    # 距离（px，桌面端克制在 1~8px；大元素最多 2 倍）
+    DIST_TAP = 2
+    DIST_OVERPULL = 6
+    DIST_OVERPULL_BIG = 10
+    DIST_PEEK = 8
+    # 波浪 / 级联
+    STAGGER_LIST = 0.20
+    STAGGER_ROW = 0.15
+    CASCADE_LIST = 10
+    CASCADE_ROW = 6
+    SETTLE_HOLD_S = 0.8           # 滚动条收缩等闲置判定
 
 
 SNAP_EPS = 0.0015        # 到位判定：值差
 SNAP_VEL = 0.02          # 到位判定：速度
+SMOOTH_EPS = 0.01        # 平滑值到位判定：值差（像素取整后不可见）
 MAX_DT = 1.0 / 30.0      # 积分步长上限（避免卡顿后跳变）
 _REDUCED = False
+_LEGACY = False          # v3.13.0：动效回退开关（True = 用原始动效实现）
 
 
 def set_reduced_motion(flag):
@@ -47,6 +75,19 @@ def set_reduced_motion(flag):
 
 def reduced_motion():
     return _REDUCED
+
+
+def set_legacy_motion(flag):
+    """动效回退开关：True 时各调用点走原始（v3.12.x）动效实现
+
+    用途：新版动效若在实机上不稳定，设置里切回经典动效即可，无需回退版本。
+    """
+    global _LEGACY
+    _LEGACY = bool(flag)
+
+
+def legacy_motion():
+    return _LEGACY
 
 
 class SpringState(object):
@@ -75,6 +116,18 @@ class SpringState(object):
         self.goal = float(goal)
         return self
 
+    def kick(self, px):
+        """给弹簧一记冲量（px 级位移）：甩出 / 落地抖动 / 无路可退的推挤
+
+        impulse = px · ω · e，ω = sqrt(k/m)
+        """
+        try:
+            omega = _math.sqrt(max(1e-6, self.stiffness / self.mass))
+            self.velocity += float(px) * omega * _math.e
+        except Exception:  # noqa: BLE001
+            pass
+        return self
+
     def jump(self, value):
         """立即设值（同时清除速度）"""
         self.value = float(value)
@@ -98,8 +151,46 @@ class SpringState(object):
         return True
 
 
+class SmoothState(object):
+    """指数平滑值（跟随类，永不越界/振荡）
+
+        current += (target - current) * (1 - e^(-speed·dt))
+
+    speed 单位 1/s：speed 秒后走完约 63%，3/speed 秒后约 95%。
+    适合：位置跟随、滚动偏移、光标移动、进度线、跑马灯。
+    与 SpringState 接口一致（to/jump/step/value），可交给同一个 MotionDriver。
+    """
+    __slots__ = ("value", "goal", "speed")
+
+    def __init__(self, initial=0.0, speed=14.0):
+        self.value = float(initial)
+        self.goal = float(initial)
+        self.speed = max(0.01, float(speed))
+
+    def to(self, goal):
+        self.goal = float(goal)
+        return self
+
+    def jump(self, value):
+        self.value = float(value)
+        self.goal = float(value)
+        return self
+
+    def step(self, dt):
+        """推进一帧；返回是否仍在运动（帧率无关，dt 有上限）"""
+        if _REDUCED:
+            self.jump(self.goal)
+            return False
+        dt = min(max(float(dt), 0.0), MAX_DT) or (1.0 / 60.0)
+        self.value += (self.goal - self.value) * (1.0 - _math.exp(-self.speed * dt))
+        if abs(self.goal - self.value) <= SMOOTH_EPS:
+            self.jump(self.goal)
+            return False
+        return True
+
+
 class MotionDriver(QObject):
-    """全局弹簧驱动器：单一定时器批量推进所有活动弹簧。"""
+    """全局动效驱动器：单一定时器批量推进所有活动弹簧与平滑值。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -169,3 +260,18 @@ def spring(initial=0.0, params=None):
     """快捷创建：spring(0.0, Tokens.SPEED)"""
     p = params or (Tokens.SPEED[0], Tokens.SPEED[1])
     return SpringState(initial, p[0], p[1])
+
+
+def follow(initial=0.0, speed=None):
+    """快捷创建指数平滑值：follow(0.0, Tokens.FOLLOW_SPEED)"""
+    return SmoothState(initial, speed or Tokens.FOLLOW_SPEED)
+
+
+def drive(state, on_change, on_done=None):
+    """把任意动画值（弹簧或平滑值）交给全局驱动器；返回取消函数"""
+    return motion().animate(state, on_change, on_done)
+
+
+def settle(callback, state):
+    """便捷：等动画值静息后回调（等价于 drive 的 on_done）"""
+    return motion().animate(state, lambda _v: None, callback)

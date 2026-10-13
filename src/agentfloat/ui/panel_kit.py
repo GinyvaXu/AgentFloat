@@ -19,7 +19,7 @@
 
 设计令牌统一取自 ui/tokens，配色取自 core/theme，状态文案取自 ui/states。
 """
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, QSize, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
                              QListWidget, QListWidgetItem, QPushButton, QSizePolicy,
                              QVBoxLayout, QWidget)
@@ -27,6 +27,7 @@ from PyQt5.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
 from agentfloat.core.theme import get_colors
 from agentfloat.ui import states
 from agentfloat.ui.anim import fade_in, fade_out
+from agentfloat.ui.motion import Tokens, drive, legacy_motion, reduced_motion, spring
 from agentfloat.ui.panel_style import panel_css
 from agentfloat.ui.tokens import FONT, RADIUS, SPACE
 
@@ -182,6 +183,54 @@ class PanelShell(QDialog):
     def show_footer(self, visible=True):
         self._footer.setVisible(visible)
 
+    # ── v3.13.0：统一状态提示（显示 → 150ms 淡出，不再硬切）──────────
+    def _flash_label(self):
+        lab = getattr(self, "_flash", None)
+        if lab is None:
+            lab = QLabel("")
+            lab.setObjectName("pkSubtitle")        # 复用副标题样式（hint 色 / micro 字号）
+            self.footer.insertWidget(0, lab)
+            self._flash = lab
+        return lab
+
+    def _ensure_flash_anim(self, lab):
+        if getattr(lab, "_flash_anim", None) is not None:
+            return
+        from PyQt5.QtCore import QEasingCurve, QPropertyAnimation
+        from PyQt5.QtWidgets import QGraphicsOpacityEffect
+        fx = QGraphicsOpacityEffect(lab)
+        lab.setGraphicsEffect(fx)
+        anim = QPropertyAnimation(fx, b"opacity", lab)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.0)
+        anim.setEasingCurve(QEasingCurve.InCubic)
+        anim.finished.connect(lambda: lab.setVisible(False))     # 只连一次
+        lab._flash_anim = anim
+        timer = QTimer(lab)
+        timer.setSingleShot(True)
+        timer.timeout.connect(anim.start)
+        lab._flash_timer = timer
+
+    def flash(self, text, label=None, duration_ms=1600):
+        """统一状态提示：显示 text，duration_ms 后 150ms 淡出
+
+        v3.13.0：替代各面板 singleShot(1500/1800) 的瞬间隐藏；
+        `motion.legacy_motion()` 打开时回退为立即隐藏（原始观感）。
+        """
+        lab = label or self._flash_label()
+        self._ensure_flash_anim(lab)
+        lab.setText(text)
+        lab.setVisible(True)
+        try:
+            lab.graphicsEffect().setOpacity(1.0)
+        except Exception:  # noqa: BLE001
+            pass
+        lab._flash_anim.stop()
+        lab._flash_anim.setDuration(1 if legacy_motion() else Tokens.DUR_FLASH_MS)
+        lab._flash_timer.stop()
+        lab._flash_timer.start(max(200, int(duration_ms)))
+        return lab
+
     def paintEvent(self, event):
         """玻璃底 + 圆角 + 描边（透明窗上样式表背景不可靠，这里显式绘制）"""
         from PyQt5.QtGui import QColor, QLinearGradient, QPainter, QPen
@@ -264,6 +313,73 @@ class ListView(QListWidget):
         # 透明窗里，子控件若用"透明背景"填充会把父级玻璃擦成透明洞 → 显式声明不绘背景
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.viewport().setAttribute(Qt.WA_TranslucentBackground, True)
+
+    # ── v3.13.0：增删开合动画（列表项从 0 高度展开 / 收拢到 0 静息后释放）───
+    def insert_animated(self, widget, data=None, delay_ms=0):
+        """带开合动画插入一行；返回 (item, widget)
+
+        - 新项从 0 高度"展开"，其后项同步让位（布局按目标高度算）
+        - delay_ms：错峰延迟（配合 stagger_delay() 形成波浪）
+        - legacy 模式或 reduced-motion 下直接落位
+        """
+        it, w = item_for(widget, data=data)
+        self.addItem(it)
+        self.setItemWidget(it, w)
+        if legacy_motion() or reduced_motion() or delay_ms < 0:
+            return it, w
+        target = max(1, int(w.sizeHint().height()))
+
+        def _apply(v):
+            h = int(max(0, min(target, v)))
+            it.setSizeHint(QSize(0, h))
+            w.setMaximumHeight(h)
+
+        def _begin():
+            if self.row(it) < 0:
+                return
+            st = spring(0.0, Tokens.UI)
+            drive(st.to(float(target)), _apply)
+
+        _apply(0)
+        if delay_ms:
+            QTimer.singleShot(int(delay_ms), _begin)
+        else:
+            _begin()
+        return it, w
+
+    def remove_animated(self, item, on_done=None):
+        """收拢到 0 后再真正删除（静息后才释放，避免闪跳）"""
+        w = self.itemWidget(item)
+        row = self.row(item)
+        if w is None or row < 0:
+            return
+        if legacy_motion() or reduced_motion():
+            self.takeItem(row)
+            if on_done:
+                on_done()
+            return
+        start = float(max(1, w.height() or w.sizeHint().height()))
+
+        def _apply(v):
+            h = int(max(0, v))
+            item.setSizeHint(QSize(0, h))
+            w.setMaximumHeight(h)
+
+        def _done():
+            r = self.row(item)
+            if r >= 0:
+                self.takeItem(r)
+            if on_done:
+                on_done()
+
+        st = spring(start, Tokens.UI_COLLAPSE)
+        drive(st.to(0.0), _apply, _done)
+
+    def stagger_delay(self, index, selected_index=-1, factor=None):
+        """波浪错峰：离选中项越远，延迟越大（list 0.20 / row 0.15）"""
+        f = Tokens.STAGGER_ROW if factor is None else float(factor)
+        rel = abs(int(index) - int(selected_index)) if selected_index >= 0 else int(index)
+        return int(rel * f * 100)
 
 
 def list_row(primary, secondary="", badge="", badge_color=None, compact=True):

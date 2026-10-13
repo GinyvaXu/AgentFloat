@@ -51,7 +51,7 @@ from agentfloat.core.single_instance import activate_message_id
 from agentfloat.core.qtutil import release_thread_later, track
 from agentfloat.core.sysutil import _open_url, process_running
 from agentfloat.ui.interaction import Actions as InteractionActions, BallInteraction
-from agentfloat.ui.motion import Tokens as MotionTokens, motion, spring
+from agentfloat.ui.motion import Tokens as MotionTokens, legacy_motion, motion, spring
 from agentfloat.ui.placement import (
     EDGE_MARGIN, VALID_EDGES, clamp_visible, edge_position, normalize_edge,
     ring_room_position, screen_index_for,
@@ -645,7 +645,14 @@ class FloatingWidget(QWidget):
 
     # ── 按压 + 涟漪属性 ────────────────────────────
     def _tick_ripple(self):
-        self._ripple_progress += 0.04
+        """v3.13.0：涟漪按真实时间推进（原来固定 +0.04/帧 → 卡顿就整体变慢）
+
+        全长 380ms；legacy 模式保留原始的按帧步进。
+        """
+        now = time.monotonic()
+        dt = max(0.0, min(now - getattr(self, "_ripple_last", now), 0.1))
+        self._ripple_last = now
+        self._ripple_progress += 0.04 if legacy_motion() else dt / 0.38
         if self._ripple_progress >= 1.0:
             self._ripple_progress = 0.0
             self._ripple_timer.stop()
@@ -1083,8 +1090,14 @@ class FloatingWidget(QWidget):
         self._do_hide()
 
     def _animate_slide(self, target, edge, bounce=False):
-        """滑动动画（PATCH 3.4.0：bounce=True 用 OutBack 呈现贴边「弹出」回弹）"""
-        anim = QPropertyAnimation(self, b"slide_pos")
+        """滑动动画（PATCH 3.4.0：bounce=True 用 OutBack 呈现贴边「弹出」回弹）
+
+        v3.13.0：新建动画前先 stop 旧动画、给动画设 parent（此前二者皆无 →
+        PyQt 下旧动画可能被 GC 中断，出现"滑到一半停住"）。
+        """
+        if self._slide_anim is not None:
+            self._slide_anim.stop()
+        anim = QPropertyAnimation(self, b"slide_pos", self)
         anim.setDuration(150 if bounce else 120)
         anim.setEasingCurve(QEasingCurve.OutBack if bounce else QEasingCurve.InOutCubic)
         anim.setStartValue(self.pos().x() if edge in ("left", "right") else self.pos().y())
@@ -1094,10 +1107,13 @@ class FloatingWidget(QWidget):
         self._slide_anim = anim
 
     def _animate_move_to(self, target, duration=170):
-        """通用位置动画（PATCH 3.4.0：贴边弹出/贴边让位，OutBack 回弹）"""
+        """通用位置动画（PATCH 3.4.0：贴边弹出/贴边让位，OutBack 回弹）
+
+        v3.13.0：补 stop + parent（同 _animate_slide）。
+        """
         if self._slide_anim is not None:
             self._slide_anim.stop()
-        anim = QPropertyAnimation(self, b"pos")
+        anim = QPropertyAnimation(self, b"pos", self)
         anim.setDuration(int(duration))
         anim.setStartValue(self.pos())
         anim.setEndValue(QPoint(int(target.x()), int(target.y())))
@@ -1233,12 +1249,22 @@ class FloatingWidget(QWidget):
 
     # ── 环绕菜单（按住外滑 / 长按确认，状态机裁决）────────
     def _on_hold_tick(self):
-        """按住启动进度（PATCH 3.3.0）：环形进度实时更新，满 → 默认启动"""
+        """按住启动进度（PATCH 3.3.0）：环形进度实时更新，满 → 默认启动
+
+        v3.13.0：显示值用指数平滑跟随真实进度（speed 18/s ≈ 55ms 追平），
+        比原来的线性映射更「有质量」；legacy 模式保留原始线性显示。
+        """
         if self._move_mode:
             return
         now = time.monotonic()
         acts = self._interaction.hold_tick(now)
-        self._hold_progress = self._interaction.hold_progress(now)
+        raw = self._interaction.hold_progress(now)
+        if legacy_motion():
+            self._hold_progress = raw
+        else:
+            dt = max(0.0, min(now - getattr(self, "_hold_last", now), 0.1))
+            self._hold_last = now
+            self._hold_progress += (raw - self._hold_progress) * (1.0 - math.exp(-18.0 * dt))
         self.update()
         if InteractionActions.LAUNCH_HOLD in acts:
             self._hold_timer.stop()
@@ -2084,6 +2110,7 @@ class FloatingWidget(QWidget):
             return
         self._move_mode = True
         self._move_origin = self.pos()
+        self._move_smooth = None                 # v3.13.0：进入时从当前位置起步做平滑跟随
         self._hold_timer.stop()
         self._hold_progress = 0.0
         self._hide_proc_panel()                           # PATCH 3.5.0：移动模式只可移动
@@ -2119,13 +2146,29 @@ class FloatingWidget(QWidget):
         self.update()
 
     def _on_move_tick(self):
-        """移动模式：浮窗居中跟随光标（只响应移动）"""
+        """移动模式：浮窗居中跟随光标
+
+        v3.13.0：改为指数平滑跟随（speed 24/s ≈ 40ms 追平）——原来在 16ms 定时器里
+        直接 move，光标抖动会 1:1 传到窗口上；legacy 模式保留 1:1。
+        """
         if not self._move_mode:
             return
         cur = QCursor.pos()
         side = self._window_side()
+        target = QPoint(int(cur.x() - side / 2.0), int(cur.y() - side / 2.0))
+        if legacy_motion():
+            self.move(self._clamp_to_desktop(target))
+            return
+        now = time.monotonic()
+        dt = max(0.0, min(now - getattr(self, "_move_last", now), 0.1))
+        self._move_last = now
+        if getattr(self, "_move_smooth", None) is None:
+            self._move_smooth = [float(self.pos().x()), float(self.pos().y())]
+        k = 1.0 - math.exp(-24.0 * dt)
+        self._move_smooth[0] += (target.x() - self._move_smooth[0]) * k
+        self._move_smooth[1] += (target.y() - self._move_smooth[1]) * k
         self.move(self._clamp_to_desktop(
-            QPoint(int(cur.x() - side / 2.0), int(cur.y() - side / 2.0))))
+            QPoint(int(self._move_smooth[0]), int(self._move_smooth[1]))))
 
     def _register_move_hotkey(self):
         """移动模式临时注册全局 Esc（退出即注销）"""
@@ -2233,6 +2276,7 @@ class FloatingWidget(QWidget):
     def _start_ripple(self, pos):
         self._ripple_pos = pos
         self._ripple_progress = 0.01
+        self._ripple_last = time.monotonic()          # v3.13.0：按真实时间推进
         self._ripple_timer.start()
 
     def _context_menu(self):

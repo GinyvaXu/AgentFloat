@@ -64,7 +64,7 @@ class ClipboardPanel(kit.PanelShell):
     copied = pyqtSignal(str)
 
     def __init__(self, history, theme="light", parent=None):
-        super().__init__("剪贴板历史", "", theme=theme, width=440, height=580, parent=parent)
+        super().__init__("剪贴板历史", "", theme=theme, width=360, height=460, parent=parent)
         self.setWindowTitle("AgentFloat — 剪贴板历史")
         self._history = history
         self._query = ""

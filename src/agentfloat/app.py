@@ -94,6 +94,38 @@ def _exit_process(code):
     os._exit(int(code))
 
 
+def _start_intro_skip_watcher(app, intro):
+    """启动动画期间轮询「左键 / Esc」→ 立即跳过（v3.13.0）
+
+    动画窗口本身是 WindowTransparentForInput（点击穿透、不抢焦点），收不到鼠标键盘
+    事件，所以用 GetAsyncKeyState 轮询（80ms，开销可忽略）。
+    """
+    try:
+        user32 = ctypes.windll.user32
+        VK_LBUTTON, VK_ESCAPE, VK_RETURN, VK_SPACE = 0x01, 0x1B, 0x0D, 0x20
+        if getattr(intro, "_intro_skip_timer", None) is not None:
+            return
+        timer = QTimer(app)
+        timer.setInterval(80)
+
+        def _poll():
+            try:
+                pressed = any(user32.GetAsyncKeyState(vk) & 0x8000
+                              for vk in (VK_LBUTTON, VK_ESCAPE, VK_RETURN, VK_SPACE))
+                if pressed:
+                    timer.stop()
+                    intro.skip("点击/按键跳过")
+            except Exception:  # noqa: BLE001
+                timer.stop()
+
+        timer.timeout.connect(_poll)
+        timer.start()
+        intro._intro_skip_timer = timer          # 由 intro 持有引用，避免被 GC
+        intro.finished.connect(timer.stop)
+    except Exception:  # noqa: BLE001
+        _log().debug("启动动画跳过监听不可用", exc_info=True)
+
+
 def main():
     ensure_utf8_stdio()
     # ── 启动日志 ──
@@ -234,8 +266,24 @@ def _main():
 
     config = load_config()
 
+    # ── 动效开关（v3.13.0）──────────────────────────────────
+    # motion.legacy: 动效回退（True = 用原始动效实现，随时可切回）
+    # reduced-motion: 跟随系统「显示动画」设置（可用 config.motion.reduced 覆盖）
+    try:
+        from agentfloat.ui import motion as _motion
+        _mcfg = config.get("motion") or {}
+        _motion.set_legacy_motion(bool(_mcfg.get("legacy", False)))
+        _red = _mcfg.get("reduced")
+        if _red is None:
+            _red = not bool(ctypes.windll.user32.SystemParametersInfoW(0x1042, 0, None, 0))
+        _motion.set_reduced_motion(bool(_red))
+        _log().info("动效开关：legacy=%s reduced-motion=%s",
+                    _motion.legacy_motion(), _motion.reduced_motion())
+    except Exception:  # noqa: BLE001
+        _log().debug("动效开关读取失败，使用默认值", exc_info=True)
+
     # ── 启动动画（v3.6.2）：屏幕中心的光晕 + 圆环 + 放大浮球 → 缩小飞向落点 ──
-    # 取代旧的「正在启动 AgentFloat…」小窗；动画期间不抢焦点、点击可穿透、不可跳过。
+    # 取代旧的「正在启动 AgentFloat…」小窗；v3.13.0 起支持点击/按键跳过与 reduced-motion。
     intro = None
     try:
         intro_cfg = config.get("intro") or {}
@@ -258,6 +306,8 @@ def _main():
                 screen = None
             if not intro.start(screen or app.primaryScreen()):
                 intro = None
+            else:
+                _start_intro_skip_watcher(app, intro)     # v3.13.0：点击/ Esc 可跳过
     except Exception:  # noqa: BLE001
         _log().warning("启动动画初始化失败，直接显示浮球", exc_info=True)
         intro = None

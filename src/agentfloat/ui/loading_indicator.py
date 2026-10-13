@@ -7,9 +7,13 @@
 - error：红色叹号，展示后自动淡出
 - 出现/消失均有淡入淡出动画
 """
+import time as _time
+
 from PyQt5.QtCore import Qt, QTimer, QPointF, QRectF, QPropertyAnimation, QEasingCurve
 from PyQt5.QtGui import QPainter, QColor, QPen, QFont, QPainterPath, QLinearGradient
 from PyQt5.QtWidgets import QWidget, QApplication
+
+from agentfloat.ui import motion
 
 _ACCENT = QColor(77, 107, 254)     # 品牌蓝
 _OK = QColor(48, 209, 88)          # 成功绿
@@ -92,6 +96,7 @@ class LoadingIndicator(QWidget):
         self._fade.setEndValue(1.0)
         self._fade.start()
         if self._phase == "loading":
+            self._last_tick = _time.monotonic()      # v3.13.0：按真实时间推进
             self._anim_timer.start()
 
     def _fade_out(self):
@@ -108,8 +113,19 @@ class LoadingIndicator(QWidget):
         self._fade.start()
 
     def _on_tick(self):
-        self._angle = (self._angle + 5) % 360
-        self._progress_off = (self._progress_off + 2.2) % 100.0
+        """v3.13.0：旋转与不确定进度条改为按真实时间推进（帧率无关）
+
+        原来固定 +5°/帧、+2.2/帧：定时器一延迟（卡顿、低功耗、高负载）动画就整体变慢。
+        """
+        now = _time.monotonic()
+        dt = max(0.0, min(now - getattr(self, "_last_tick", now), 0.25))
+        self._last_tick = now
+        if motion.legacy_motion():
+            self._angle = (self._angle + 5) % 360            # 原始实现（回退用）
+            self._progress_off = (self._progress_off + 2.2) % 100.0
+        else:
+            self._angle = (self._angle + 300.0 * dt) % 360.0            # 1.2s 一圈
+            self._progress_off = (self._progress_off + 50.0 * dt) % 100.0   # 2s 一循环
         self.update()
 
     def _reposition(self):

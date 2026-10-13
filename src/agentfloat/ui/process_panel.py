@@ -226,6 +226,8 @@ class ProcessPanel(QDialog):
         self.move(int(x + (12 if side == "right" else -12)), int(y))
         self.show()
         self.raise_()
+        # v3.13.0：显示代次 +1（让进行中的收起动画失效，防止刚弹出又被藏掉）
+        self._show_gen = int(getattr(self, "_show_gen", 0)) + 1
         group = QParallelAnimationGroup(self)
         pa = QPropertyAnimation(self, b"pos", self)
         pa.setDuration(180)
@@ -263,16 +265,30 @@ class ProcessPanel(QDialog):
         self._hide_timer.stop()
 
     def hide_panel(self):
+        """收起面板（v3.13.0：加"显示代次"防竞态）
+
+        原来 140ms 渐出结束后直接 hide()：若渐出期间又被 show_for 弹出，
+        旧动画的结束回调会把刚显示的面板藏掉（鼠标在浮球与面板间快速移动时常见）。
+        """
         if self._popup_open:
             return
         self._refresh_timer.stop()
         self._hide_timer.stop()
         if not self.isVisible():
             return
+        self._show_gen = int(getattr(self, "_show_gen", 0)) + 1
+        gen = self._show_gen
         from agentfloat.ui.anim import fade_out
-        fade_out(self, duration=140)
+        fade_out(self, duration=140,
+                 on_done=lambda: self._hide_if_current(gen))
         if self._on_hide:
             self._on_hide()
+
+    def _hide_if_current(self, gen):
+        """仅当没有更新的显示请求时才真正隐藏（代次不符 = 期间又被弹出过）"""
+        if int(getattr(self, "_show_gen", 0)) != int(gen):
+            return
+        self.hide()
 
     def enterEvent(self, event):
         self.cancel_hide()

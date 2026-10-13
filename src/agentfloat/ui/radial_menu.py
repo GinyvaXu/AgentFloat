@@ -81,7 +81,9 @@ class RadialMenu(QWidget):
         self._press_idx = -1
         self._press_progress = 0.0
         self._press_anim = QVariantAnimation(self)
-        self._press_anim.setDuration(120)
+        # v3.13.0：脉冲时长与收合延迟共用同一令牌（原来 120ms vs 90ms 错配 →
+        # 脉冲还没播完就开始收拢，观感"被打断"）
+        self._press_anim.setDuration(MotionTokens.DUR_TAP_MS)
         self._press_anim.setEasingCurve(QEasingCurve.OutCubic)
         self._press_anim.valueChanged.connect(self._on_press_anim_value)
         self._press_anim.finished.connect(self._on_press_anim_finished)
@@ -151,7 +153,7 @@ class RadialMenu(QWidget):
                 return
             self.close_menu(on_closed=lambda: self.action_triggered.emit(item.id))
 
-        QTimer.singleShot(90, _collapse)       # 先让确认脉冲被看到，再顺滑收合
+        QTimer.singleShot(MotionTokens.DUR_TAP_MS, _collapse)   # 先让确认脉冲播完，再顺滑收合
 
     def update_hold_pos(self, global_pos):
         """按住选环期间由浮球转发鼠标位置：零延迟更新高亮（PATCH 3.2.1）

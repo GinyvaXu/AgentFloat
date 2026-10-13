@@ -11,8 +11,10 @@
 纯逻辑（选句/去重/加权）与绘制分离，便于单测。
 """
 import json
+import math
 import os
 import random
+import time as _time
 
 from PyQt5.QtCore import (QEasingCurve, QPoint, QPropertyAnimation, QRect, QRectF, Qt,
                           QTimer, pyqtSignal)
@@ -22,6 +24,7 @@ from PyQt5.QtWidgets import (QApplication, QHBoxLayout, QLabel, QPushButton,
 
 from agentfloat.core.paths import _resolve_path
 from agentfloat.core.theme import get_colors
+from agentfloat.ui import motion
 from agentfloat.ui.tokens import FONT, RADIUS, SPACE
 
 CARD_W = 420
@@ -120,6 +123,8 @@ class QuoteWindow(QWidget):
         self._slide.setDuration(260)
         self._slide.setEasingCurve(QEasingCurve.OutCubic)
         self._progress = 0.0
+        self._elapsed = 0.0                     # v3.13.0：真实时间进度（帧率无关）
+        self._last_tick = _time.monotonic()
         self._ptimer = QTimer(self)
         self._ptimer.setInterval(50)
         self._ptimer.timeout.connect(self._tick_progress)
@@ -212,6 +217,8 @@ class QuoteWindow(QWidget):
         self._place(anchor_rect, screen_rect)
         self._paused = False
         self._progress = 0.0
+        self._elapsed = 0.0                     # v3.13.0：真实时间进度（帧率无关）
+        self._last_tick = _time.monotonic()
         secs = max(3, int(self._cfg.get("auto_close_s") or 8))
         self._auto.start(secs * 1000)
         self._ptimer.start()
@@ -301,10 +308,30 @@ class QuoteWindow(QWidget):
 
     # ── 自动关闭进度 + 悬停暂停 ────────────────────
     def _tick_progress(self):
+        """v3.13.0：进度线从「固定步进」改为「真实时间目标 + 指数平滑跟随」
+
+        - 用真实 dt 累计已过时间 → 卡顿/丢帧不再让进度条变慢（帧率无关）
+        - 平滑只负责观感（speed 16/s），目标始终由时钟决定 → 不会漂移
+        - 悬停暂停只停时钟；`motion.legacy_motion()` 打开时走原始固定步进
+        """
         if self._paused:
+            self._last_tick = _time.monotonic()
             return
-        self._progress = min(1.0, self._progress + 0.05 / max(1.0, (self._cfg.get("auto_close_s") or 12)))
-        self.update()
+        dur = max(1.0, float(self._cfg.get("auto_close_s") or 8))     # 默认值统一为 8（原 12/8 不一致）
+        if motion.legacy_motion():
+            self._progress = min(1.0, self._progress + 0.05 / dur)    # 原始实现（回退用）
+            self.update()
+            return
+        now = _time.monotonic()
+        dt = max(0.0, min(now - getattr(self, "_last_tick", now), 0.25))
+        self._last_tick = now
+        self._elapsed = min(dur, getattr(self, "_elapsed", 0.0) + dt)
+        target = self._elapsed / dur
+        self._progress += (target - self._progress) * (1.0 - math.exp(-motion.Tokens.TEXT_SPEED * dt))
+        if abs(target - self._progress) <= motion.SMOOTH_EPS:
+            self._progress = target
+        # 只重绘底部 3px 进度线（原来整窗 50ms 重绘一次）
+        self.update(0, max(0, self.height() - 4), self.width(), 4)
 
     def enterEvent(self, event):
         self._hover = True
