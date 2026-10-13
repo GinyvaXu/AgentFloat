@@ -1,5 +1,47 @@
 # 更新日志
 
+## [3.13.1] - 2026-10-13（测试版 · 修复动效被误判为「系统已关闭动画」）
+### Fixed
+- **环形菜单等所有弹簧动画「完全不播」**（v3.13.0 引入的严重回归）：
+  - 根因：启动时读取 Windows「显示动画」开关用的是
+    `SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, None, 0)` —— 该 API 的
+    `pvParam` 必须是 **BOOL 指针**，传 `None` 会让调用直接失败并返回 0，
+    于是被判定为「系统关闭了动画」→ 全局 reduced-motion 被打开 →
+    弹簧引擎把所有动画**瞬间跳到终点**（环形菜单展开/收拢、浮球悬停缩放等全部无动画）
+  - 修复：改为传 `ctypes.byref(BOOL)`，**仅在 API 调用成功时**才采信结果；
+    调用失败时一律按「动画开启」处理（安全默认值）
+  - 实测：正确调用返回 系统动画=开 → reduced-motion=False（恢复正常播放）
+### Tests
+- 全量测试通过；实机日志确认 `动效开关：legacy=False reduced-motion=False`
+
+## [3.13.0] - 2026-10-13（测试版 · 动效方案全量实施）
+### Added
+- **动效引擎升级（`ui/motion.py`）**：
+  - 新增**指数平滑值** `SmoothState`（跟随类：位置/滚动/光标/进度线，永不越界振荡），与弹簧共用同一个 60fps 驱动器与 dt 上限
+  - 弹簧新增 `kick(px)` 冲量，静息判定收紧（平滑值 ≤0.01、弹簧 |Δ|≤0.0015 且 |v|≤0.02 即停）
+  - 令牌扩充：六组弹簧（`UI/PAGE/TAP/RELEASE/POP/UI_COLLAPSE`，按 ω/ζ 换算）、`FOLLOW_SPEED/TEXT_SPEED`、`DUR_TAP_MS/DUR_FLASH_MS`、`DIST_*`、`STAGGER_*`、`CASCADE_*`
+- **组件库动效 API（`ui/panel_kit.py`）**：`ListView.insert_animated` / `remove_animated`（列表项从 0 高度展开、收拢到 0 静息后才释放）、`stagger_delay()` 波浪错峰、`PanelShell.flash()` 统一状态提示（150ms 淡出，替代 1500/1800ms 硬切）
+### Changed
+- **6 处「按帧固定步进」动画改为按真实 dt 推进**（此前定时器一延迟，动画整体变慢）：
+  - 语录浮窗自动关闭进度线（50ms 固定 +0.05/s → 真实时间目标 + 指数平滑；统一 12s/8s 默认值不一致；只重绘底部 3px，不再整窗重绘）
+  - 加载指示器旋转与不确定进度（每帧 +5°/+2.2 → 300°/s、50%/s）
+  - 引导聚光灯呼吸与气泡淡入（33ms ±0.035/帧 → 1.2s 半周期 + 指数平滑）
+  - 浮球单击涟漪（每帧 +0.04 → 380ms 真实时长）
+  - 浮球长按启动环（线性映射 → 指数平滑跟随真实进度）
+  - 浮球移动模式跟随（16ms 直接 move → 指数平滑 + 桌面范围夹取）
+- **环形菜单**：确认脉冲与收合延迟统一到 `DUR_TAP_MS`（原 120ms 脉冲 vs 90ms 收合错配，脉冲常被"打断"）
+- **贴边滑动/让位**：`QPropertyAnimation` 补 `stop()` 与 parent（此前旧动画可能被 GC 中断，出现"滑到一半停住"）
+- **进程面板**：新增「显示代次」防竞态（140ms 收起动画期间又被弹出时，旧回调不会再把它藏掉）
+- **启动动画**：支持**点击 / 按键 / 滚轮跳过**（窗口点击穿透收不到事件 → 用 `GetAsyncKeyState` 轮询 80ms）；结束时 `deleteLater()` 释放全屏位图与光晕缓存；跟随系统 reduced-motion（直接落位，不播飞行）
+- **Web 端**：新增 `--dur-* / --ease-*` 动效令牌（与 Qt 同源），transition 全部令牌化；新增 `prefers-reduced-motion` 降级（关闭位移与循环动画，只保留 ≤80ms 透明度变化）
+### Rollback（随时可退回原始动效）
+- **运行时开关**：配置 `motion.legacy = true` → 所有改动走原始实现（无需回退版本）
+- **reduced-motion 覆盖**：`motion.reduced = true/false`（默认跟随系统「显示动画」设置）
+- **代码回退点**：git tag `pre-motion`；**二进制回退**：重装 `versions/v3.12.1/dist/AgentFloat-Setup-3.12.1.exe`
+### Tests
+- 全量测试通过、pyflakes 零告警
+- 注：本轮后期本机会话无法创建窗口（连最小 QWidget 都阻塞），实机视觉验证需在桌面侧确认（见交付报告）
+
 ## [3.12.1] - 2026-10-13（测试版 · 修复 Skills 不全 / 余额报错 / 跨屏绘制）
 ### Fixed
 - **Skills 辅助窗里的 skill 不全**：默认扫描根只覆盖 Codex 目录（`.agents` / `.codex`），漏掉 OpenCode 与 Claude Code 的 skills 目录 → 本机 12 个 skill 完全没被扫到。现在补上 `~/.config/opencode/skills`、`~/.opencode/skills`、`~/.claude/skills`、`~/.local/share/opencode/skills`，并新增「OpenCode 技能」分类（实测 8 → **20 个**）

@@ -266,7 +266,7 @@ def _main():
 
     config = load_config()
 
-    # ── 动效开关（v3.13.0）──────────────────────────────────
+    # ── 动效开关（v3.13.0 / 修正于 v3.13.1）──────────────────
     # motion.legacy: 动效回退（True = 用原始动效实现，随时可切回）
     # reduced-motion: 跟随系统「显示动画」设置（可用 config.motion.reduced 覆盖）
     try:
@@ -275,7 +275,17 @@ def _main():
         _motion.set_legacy_motion(bool(_mcfg.get("legacy", False)))
         _red = _mcfg.get("reduced")
         if _red is None:
-            _red = not bool(ctypes.windll.user32.SystemParametersInfoW(0x1042, 0, None, 0))
+            # 注意：SystemParametersInfoW 的 pvParam 必须是 BOOL 指针。
+            # v3.13.0 传了 None → 调用失败返回 0 → 被误判成「系统已关闭动画」，
+            # 于是全局 reduced-motion 打开、所有弹簧动画瞬间跳变（环形菜单像"没有动画"）。
+            _red = False
+            try:
+                from ctypes import byref, windll, wintypes as _wt
+                _flag = _wt.BOOL(1)
+                if windll.user32.SystemParametersInfoW(0x1042, 0, byref(_flag), 0):
+                    _red = not bool(_flag.value)      # 调用成功才采信
+            except Exception:  # noqa: BLE001
+                _red = False
         _motion.set_reduced_motion(bool(_red))
         _log().info("动效开关：legacy=%s reduced-motion=%s",
                     _motion.legacy_motion(), _motion.reduced_motion())
