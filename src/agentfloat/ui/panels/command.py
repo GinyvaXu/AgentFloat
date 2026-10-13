@@ -9,16 +9,16 @@ import os
 import subprocess
 import time
 
-from PyQt5.QtCore import Qt, pyqtSignal, QSize as _QSize
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QListWidget, QListWidgetItem, QLineEdit, QComboBox, QFormLayout,
-    QMessageBox, QFileDialog,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
+    QComboBox, QFormLayout, QMessageBox, QFileDialog,
 )
 from PyQt5.QtGui import QFont
 
 from agentfloat.core.theme import get_colors
-from agentfloat.ui.panel_style import FadePanelMixin, panel_css
+from agentfloat.ui import panel_kit as kit
+from agentfloat.ui.tokens import FONT
 
 PRESET_COLORS = ["#5B8DEF", "#16A085", "#E67E22", "#8E44AD", "#2E86C1", "#27AE60"]
 PRESET_CHARS = ["⚙", "▶", "⌘", "▣", "◈", "✎"]
@@ -76,19 +76,7 @@ class CommandEditDialog(QDialog):
         self._load()
 
     def _setup_ui(self):
-        c = get_colors(self._theme)
-        sf = "#%02X%02X%02X" % c["SURFACE"]
-        tx = "#%02X%02X%02X" % c["TEXT"]
-        ac = "#%02X%02X%02X" % c["ACCENT"]
-        bd = "#%02X%02X%02X" % c["SEPARATOR"]
-        self.setStyleSheet(
-            "QDialog { background: %s; }" % sf +
-            "QLabel { color: %s; font-size: 12px; }" % tx +
-            "QLineEdit, QComboBox { background: #FFFFFF; color: %s; border: 1px solid %s;"
-            " border-radius: 8px; padding: 5px 8px; font-size: 12px; }" % (tx, bd) +
-            "QPushButton { background: #FFFFFF; color: %s; border: 1px solid %s;"
-            " border-radius: 8px; padding: 5px 14px; font-size: 12px; }" % (ac, bd)
-        )
+        self.setStyleSheet(kit.panel_qss(self._theme))    # 与面板统一配色/密度
         lay = QVBoxLayout(self)
         form = QFormLayout()
         self.ed_name = QLineEdit()
@@ -161,90 +149,43 @@ class CommandEditDialog(QDialog):
         return self._entry
 
 
-class CommandPanel(FadePanelMixin, QDialog):
+class CommandPanel(kit.PanelShell):
     """命令面板：列表 + 运行 / 新建 / 编辑 / 删除 / 预设"""
 
     commands_changed = pyqtSignal(list)
 
     def __init__(self, commands, theme="light", parent=None):
-        super().__init__(parent)
+        super().__init__("命令面板", "", theme=theme, width=560, height=500, parent=parent)
         self._theme = theme
         self._commands = [dict(c) for c in (commands or [])]
         self.setWindowTitle("AgentFloat — 命令面板")
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setMinimumSize(560, 500)
         self._setup_ui()
         self.refresh()
 
-    def _css(self):
-        c = get_colors(self._theme)
-        is_dark = self._theme == "dark"
-        sf = "#%02X%02X%02X" % c["SURFACE"]
-        tx = "#%02X%02X%02X" % c["TEXT"]
-        ac = "#%02X%02X%02X" % c["ACCENT"]
-        bd = "#%02X%02X%02X" % c["SEPARATOR"]
-        card = "#333336" if is_dark else "#FFFFFF"
-        hover = "rgba(255,255,255,0.09)" if is_dark else "rgba(120,120,128,0.10)"
-        banner = "rgba(255,255,255,0.06)" if is_dark else "rgba(255,255,255,0.62)"
-        return (
-            "QDialog { background: %s; border: 1px solid %s; border-radius: 14px; }" % (sf, bd) +
-            "QFrame#titleBar { background: %s; border-top-left-radius: 14px;"
-            " border-top-right-radius: 14px; border-bottom: 1px solid %s; }" % (banner, bd) +
-            "QLabel { color: %s; font-size: 12px; }" % tx +
-            "QPushButton { background: %s; color: %s; border: 1px solid %s;"
-            " border-radius: 8px; padding: 5px 12px; font-size: 12px; }" % (card, ac, bd) +
-            "QPushButton:hover { background: %s; }" % sf +
-            "QListWidget { background: %s; color: %s; border: 1px solid %s;"
-            " border-radius: 8px; padding: 4px; font-size: 12px; }" % (card, tx, bd) +
-            "QListWidget::item { padding: 8px 8px; border-radius: 8px; margin: 2px; }" +
-            "QListWidget::item:hover { background: %s; }" % hover +
-            "QListWidget::item:selected { background: %s; color: #FFF; border-radius: 8px; }" % ac
-        )
-
     def _setup_ui(self):
-        self.setStyleSheet(self._css() + panel_css(self._theme))
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 12)
-        root.setSpacing(8)
-
-        bar = QHBoxLayout()
-        bar.setContentsMargins(14, 10, 14, 4)
-        title = QLabel("命令面板")
-        f = QFont("Microsoft YaHei", 13, QFont.Bold)
-        title.setFont(f)
-        bar.addWidget(title)
-        bar.addStretch()
-        self.btn_preset = QPushButton("添加示例")
-        self.btn_preset.clicked.connect(self._add_presets)
-        self.btn_add = QPushButton("＋ 新建")
-        self.btn_add.clicked.connect(self._add_cmd)
-        self.btn_edit = QPushButton("编辑")
-        self.btn_edit.clicked.connect(self._edit_cmd)
-        self.btn_del = QPushButton("删除")
-        self.btn_del.clicked.connect(self._del_cmd)
-        self.btn_close = QPushButton("关闭")
-        self.btn_close.clicked.connect(self.accept)
-        for b in (self.btn_preset, self.btn_add, self.btn_edit, self.btn_del, self.btn_close):
-            bar.addWidget(b)
-        root.addLayout(bar)
-
         self.lbl_status = QLabel("")
+        f = QFont("Microsoft YaHei")
+        f.setPixelSize(FONT.micro)
+        self.lbl_status.setFont(f)
         self.lbl_status.setStyleSheet("color: #%02X%02X%02X;" % get_colors(self._theme)["ACCENT"])
         self.lbl_status.setVisible(False)
-        root.addWidget(self.lbl_status)
 
-        self.list = QListWidget()
+        self.list = kit.ListView()
         self.list.itemDoubleClicked.connect(lambda _i: self._run_current())
-        root.addWidget(self.list, 1)
+        self.body.addWidget(self.list, 1)
 
-        run_bar = QHBoxLayout()
-        run_bar.addStretch()
-        self.btn_run = QPushButton("▶ 运行")
-        self.btn_run.setObjectName("primary")      # PATCH 3.3.1：统一品牌渐变主按钮
-        self.btn_run.clicked.connect(self._run_current)
-        run_bar.addWidget(self.btn_run)
-        root.addLayout(run_bar)
+        self.btn_preset = kit.ghost_button("添加示例", on_click=self._add_presets)
+        self.btn_add = kit.ghost_button("＋ 新建", on_click=self._add_cmd)
+        self.btn_edit = kit.ghost_button("编辑", on_click=self._edit_cmd)
+        self.btn_del = kit.ghost_button("删除", on_click=self._del_cmd, danger=True)
+        self.btn_run = kit.ghost_button("▶ 运行", on_click=self._run_current)
+        self.btn_close = kit.ghost_button("关闭", on_click=self.close)
+        # 左组（逆序插入到最前）：状态 / 添加示例 / 新建 / 编辑 / 删除；右侧：运行 / 关闭
+        for b in (self.btn_del, self.btn_edit, self.btn_add, self.btn_preset, self.lbl_status):
+            self.footer.insertWidget(0, b)
+        self.footer.addWidget(self.btn_run)
+        self.footer.addWidget(self.btn_close)
+        self.show_footer(True)
 
     def refresh(self):
         self.list.clear()
@@ -253,12 +194,20 @@ class CommandPanel(FadePanelMixin, QDialog):
             cmd = e.get("command") or ""
             mode = e.get("launch_mode") or "window"
             mode_txt = {"window": "窗口", "console": "终端", "background": "后台"}.get(mode, "窗口")
-            it = QListWidgetItem("%d. %s\n%s  ·  %s" % (i + 1, name, cmd or "（无命令）", mode_txt))
-            it.setData(Qt.UserRole, i)
-            it.setSizeHint(_QSize(0, 52))
+            it, w = kit.item_for(
+                kit.list_row(name, "%s · %s" % (cmd or "（无命令）", mode_txt),
+                             str(i + 1), "#0A84FF"),
+                data=i)
             self.list.addItem(it)
+            self.list.setItemWidget(it, w)
         if not self._commands:
-            self.list.addItem("暂无自定义命令，点击「＋ 新建」或「添加示例」")
+            it, w = kit.item_for(
+                kit.list_row("暂无自定义命令", "点「＋ 新建」或「添加示例」开始", "", None),
+                data=None)
+            it.setFlags(Qt.ItemIsEnabled)
+            self.list.addItem(it)
+            self.list.setItemWidget(it, w)
+        self.set_subtitle("共 %d 条" % len(self._commands))
 
     def _current_index(self):
         it = self.list.currentItem()

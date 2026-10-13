@@ -10,7 +10,7 @@ import os
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
-    QLabel, QLineEdit, QComboBox, QTextBrowser, QSplitter, QPushButton,
+    QLabel, QLineEdit, QComboBox, QTextBrowser, QSplitter,
     QHBoxLayout, QVBoxLayout, QWidget, QApplication,
 )
 
@@ -20,41 +20,6 @@ from agentfloat.services.skills.translations import get_zh
 from agentfloat.ui import panel_kit as kit
 from agentfloat.ui import states
 from agentfloat.ui.tokens import FONT, SPACE
-
-
-class _TitleBar(kit._Header):
-    """兼容旧调用（喝水面板等）：可拖动标题栏 + lbl_count 计数标签
-
-    新面板请直接用 panel_kit.PanelShell（自带标题栏），不要再用本类。
-    """
-
-    def __init__(self, parent, title):
-        super().__init__(parent)
-        self.setObjectName("titleBar")
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(14, 8, 10, 8)
-        lay.setSpacing(8)
-        t = QLabel(title)
-        t.setObjectName("pkTitle")
-        f = QFont(t.font())
-        f.setPixelSize(FONT.body)
-        f.setBold(True)
-        t.setFont(f)
-        lay.addWidget(t)
-        lay.addStretch(1)
-        self.lbl_count = QLabel("")
-        f2 = QFont(self.lbl_count.font())
-        f2.setPixelSize(FONT.micro)
-        self.lbl_count.setFont(f2)
-        self.lbl_count.setStyleSheet("color: #%02X%02X%02X;" % get_colors(getattr(parent, "_theme", "light"))["HINT"])
-        lay.addWidget(self.lbl_count)
-        btn = QPushButton("✕")
-        btn.setObjectName("pkClose")
-        btn.setFixedSize(20, 20)
-        btn.setToolTip("关闭")
-        btn.setFocusPolicy(Qt.NoFocus)
-        btn.clicked.connect(parent.close)
-        lay.addWidget(btn)
 
 
 class SkillsPanel(kit.PanelShell):

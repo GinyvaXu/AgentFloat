@@ -17,8 +17,7 @@ from PyQt5.QtWidgets import (
 )
 
 from agentfloat.core.theme import get_colors
-from agentfloat.ui.panel_style import FadePanelMixin, panel_css
-from agentfloat.ui.panels.skills import _TitleBar
+from agentfloat.ui import panel_kit as kit
 from agentfloat.services.water.reminder import STATE_CN
 
 
@@ -35,69 +34,48 @@ def _hex(c):
     return "#%02X%02X%02X" % (c[0], c[1], c[2])
 
 
-class WaterPanel(FadePanelMixin, QDialog):
+class WaterPanel(kit.PanelShell):
     """喝水助手主面板：今日杯数 + 三个循环计时器"""
 
     open_settings_requested = pyqtSignal()
 
     def __init__(self, manager, theme="dark", parent=None):
-        super().__init__(parent)
+        super().__init__("喝水助手", "", theme=theme, width=380, height=468, parent=parent)
         self._manager = manager
         self._theme = theme
         self._cfg = manager.config()
         self._c = get_colors(theme)
         self._rows = {}
         self.setWindowTitle("AgentFloat — 喝水助手")
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(380, 468)
-        self.setStyleSheet(self._stylesheet() + panel_css(self._theme))
+        self.setStyleSheet(kit.panel_qss(theme) + self._extra_css())
         self._setup_ui()
         manager.timers_changed.connect(self._refresh)
         manager.cups_changed.connect(self._refresh)
         self._refresh()
 
-    def _stylesheet(self):
+    def _extra_css(self):
+        """喝水面板专属部件样式（外壳/按钮/文字色由 panel_kit 提供）"""
         c = self._c
         is_dark = self._theme == "dark"
-        sf = _hex(c["SURFACE"])
-        tx = _hex(c["TEXT"])
         hi = _hex(c["HINT"])
         ac = _hex(c["ACCENT"])
         bd = _hex(c["SEPARATOR"])
         card = "#333336" if is_dark else "#FFFFFF"
-        banner = "rgba(255,255,255,0.06)" if is_dark else "rgba(255,255,255,0.62)"
-        hover = "rgba(255,255,255,0.09)" if is_dark else "rgba(120,120,128,0.10)"
         return (
-            "QDialog { background: %s; border: 1px solid %s; border-radius: 14px; }" % (sf, bd)
-            + "QFrame#titleBar { background: %s; border-top-left-radius: 14px;"
-              " border-top-right-radius: 14px; border-bottom: 1px solid %s; }" % (banner, bd)
-            + "QFrame#waterCard { background: %s; border: 1px solid %s; border-radius: 10px; }" % (card, bd)
+            "QFrame#waterCard { background: %s; border: 1px solid %s; border-radius: 10px; }" % (card, bd)
             + "QFrame#timerRow { background: %s; border: 1px solid %s; border-radius: 10px; }" % (card, bd)
-            + "QLabel { color: %s; border: none; background: transparent; }" % tx
             + "QProgressBar { background: %s; border: none; border-radius: 4px;"
-              " height: 8px; text-align: center; font-size: 0px; }" % (hover if not is_dark else "rgba(255,255,255,0.10)")
+              " height: 8px; text-align: center; font-size: 0px; }" % ("rgba(255,255,255,0.10)" if is_dark else "rgba(120,120,128,0.14)")
             + "QProgressBar::chunk { background: %s; border-radius: 4px; }" % ac
-            + "QPushButton { background: %s; color: %s; border: 1px solid %s;"
-              " border-radius: 8px; padding: 6px 12px; font-size: 12px; }" % (card, ac, bd)
-            + "QPushButton:hover { background: %s; }" % sf
+            + "QPushButton#waterPrimary { background: %s; color: #FFF; border: none;"
+              " border-radius: 8px; padding: 5px 12px; font-size: 12px; font-weight: 600; }" % ac
             + "QPushButton:disabled { color: %s; }" % hi
-            + "QPushButton#primary { background: %s; color: #FFF; border: none; font-weight: bold; }" % ac
-            + "QPushButton#primary:hover { background: %s; }" % _hex(c["ACCENT"])
         )
 
     def _setup_ui(self):
         c = self._c
         ac = _hex(c["ACCENT"])
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-
-        root.addWidget(_TitleBar(self, "喝水助手"))
-
-        body = QVBoxLayout()
-        body.setContentsMargins(14, 12, 14, 12)
-        body.setSpacing(10)
+        body = self.body          # panel_kit 统一内边距 / 间距
 
         # ── 今日杯数卡片 ──
         card = QFrame()
@@ -125,7 +103,7 @@ class WaterPanel(FadePanelMixin, QDialog):
         num_row.addWidget(QLabel("杯"))
         num_row.addStretch()
         self.btn_cup = QPushButton("＋1 已喝水")
-        self.btn_cup.setObjectName("primary")
+        self.btn_cup.setObjectName("waterPrimary")
         self.btn_cup.setCursor(Qt.PointingHandCursor)
         self.btn_cup.clicked.connect(lambda: self._manager.add_cup(1))
         num_row.addWidget(self.btn_cup)
@@ -141,7 +119,12 @@ class WaterPanel(FadePanelMixin, QDialog):
             body.addWidget(self._build_timer_row(t))
 
         body.addStretch(1)
-        root.addLayout(body, 1)
+        # 底部操作条
+        self.btn_settings = kit.ghost_button("设置…", on_click=self.open_settings_requested.emit)
+        self.btn_close = kit.ghost_button("关闭", on_click=self.close)
+        self.footer.insertWidget(0, self.btn_settings)
+        self.footer.addWidget(self.btn_close)
+        self.show_footer(True)
 
     def _build_timer_row(self, t):
         c = self._c
@@ -244,7 +227,7 @@ class WaterReminderPopup(QDialog):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self._build_animation()
         self._build_ui()
-        self.setStyleSheet(panel_css(self._theme))     # PATCH 3.3.1：统一新风格
+        self.setStyleSheet(kit.panel_qss(self._theme))     # 统一新风格（panel_kit）
 
     def _build_animation(self):
         self._op_effect = QGraphicsOpacityEffect(self)
