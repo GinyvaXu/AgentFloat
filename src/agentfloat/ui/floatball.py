@@ -2682,6 +2682,19 @@ class FloatingWidget(QWidget):
         old_hidden = self.config.get("snap_hidden", True)
         self.config["snap_enabled"] = new_cfg.get("snap_enabled", True)
         self.config["snap_hidden"] = new_cfg.get("snap_hidden", True)
+        # v3.13.0：动效开关即时生效（改 config.json 的 motion.legacy / motion.reduced 后保存设置即可）
+        try:
+            _mcfg = new_cfg.get("motion")
+            if isinstance(_mcfg, dict):
+                self.config["motion"] = dict(_mcfg)
+                from agentfloat.ui import motion as _motion
+                _motion.set_legacy_motion(bool(_mcfg.get("legacy", False)))
+                if _mcfg.get("reduced") is not None:
+                    _motion.set_reduced_motion(bool(_mcfg.get("reduced")))
+                _log().info("动效开关已应用: legacy=%s reduced=%s",
+                            _motion.legacy_motion(), _motion.reduced_motion())
+        except Exception:  # noqa: BLE001
+            _log().debug("动效开关应用失败", exc_info=True)
 
         if not preview_only:
             self.config["widget_size"] = ns

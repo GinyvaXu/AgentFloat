@@ -63,6 +63,8 @@ def load_config():
         "opacity": 0.88,
         "working_directory": "",
         "snap_enabled": True,
+        # v3.13.0：动效开关（legacy=True → 用原始动效实现；reduced=None → 跟随系统）
+        "motion": {"legacy": False, "reduced": None},
         "snap_edge": "right",
         "snap_hidden": True,
         "hide_delay_ms": 800,
