@@ -612,6 +612,7 @@ class FloatingWidget(QWidget):
         super().showEvent(event)
         self._ensure_on_screen()   # PATCH 3.0.1：兜底收回屏幕外浮窗
         self._ensure_dpr()         # PATCH 3.4.0：跨屏 DPR 变化重建位图
+        self._hook_screen_signal()  # v3.13.2：挂上 screenChanged（屏幕切换即时重建）
         _log().debug("浮窗显示")
         if not self._hover_timer.isActive():
             self._hover_timer.start()
@@ -1150,26 +1151,81 @@ class FloatingWidget(QWidget):
         _log().debug("贴边让位: (%d,%d) → (%d,%d)（环形菜单完整展开）", cx, cy, nx, ny)
         return True
 
-    def _ensure_dpr(self):
-        """PATCH 3.4.0：跨屏（不同 DPI/分辨率）时重建位图与掩码，避免副屏绘制错乱
+    def _ensure_dpr(self, immediate=False):
+        """跨屏（不同 DPI/分辨率）时重建位图与掩码，避免副屏绘制错乱
 
-        v3.12.1：改为按「球心所在屏幕」取 DPR。此前用 self.devicePixelRatioF()，
-        而 Qt 要等窗口真正换屏后才更新该值 → 跨屏途中仍按旧 DPR 渲染，
-        表现就是拖到另一块屏时一直画错（错位/模糊/尺寸不对）。
+        v3.12.1：改为按「球心所在屏幕」取 DPR（原来用控件 devicePixelRatioF()，
+        Qt 要等窗口真正换屏后才更新）。
+        v3.13.2：改为**去抖 + 光标判定**——实机日志显示跨屏拖动时窗口中心会在屏幕
+        边界两侧反复横跳，导致一秒内 DPR 在 1.0/2.0 间来回重建 6 次（画面抖、尺寸闪）。
+        现在拖动期间只排一次延时检查，静止后再重建一次。
+        """
+        if not immediate:
+            self._schedule_dpr_check()
+            return
+        self._apply_dpr_now()
+
+    def _schedule_dpr_check(self):
+        """排一次去抖检查（180ms 内的连续 move 只触发一次重建）"""
+        if getattr(self, "_dpr_timer", None) is None:
+            self._dpr_timer = QTimer(self)
+            self._dpr_timer.setSingleShot(True)
+            self._dpr_timer.setInterval(180)
+            self._dpr_timer.timeout.connect(self._apply_dpr_now)
+        self._dpr_timer.start()
+
+    def _target_screen(self):
+        """判定当前应跟随的屏幕
+
+        拖拽/移动模式下用**光标所在屏**：窗口中心在屏幕边界会来回横跳（跨屏抖动的根因），
+        光标是用户意图且不随窗口被系统缩放而漂移。
+        """
+        pos = None
+        try:
+            if self._drag_active or getattr(self, "_move_mode", False):
+                pos = QCursor.pos()
+        except Exception:  # noqa: BLE001
+            pos = None
+        if pos is None:
+            pos = self.geometry().center()
+        return QApplication.screenAt(pos) or QApplication.primaryScreen()
+
+    def _hook_screen_signal(self):
+        """挂上 QWindow.screenChanged → 屏幕一换立即重建（比轮询准；窗口句柄变了会重挂）
+
+        v3.13.2：PyQt5(Qt5.15) 没有暴露 ScreenChangeInternal/DevicePixelRatioChange 事件，
+        所以用 QWindow.screenChanged + 去抖轮询双保险。
         """
         try:
-            scr = QApplication.screenAt(self.geometry().center()) or QApplication.primaryScreen()
-            if scr is not None:
-                dpr = max(1.0, float(scr.devicePixelRatio()))
-            else:
-                dpr = max(1.0, float(self.devicePixelRatioF()))
+            wh = self.windowHandle()
+            if wh is None or wh is getattr(self, "_hooked_win", None):
+                return
+            self._hooked_win = wh
+            wh.screenChanged.connect(lambda _s: self._ensure_dpr(immediate=True))
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _apply_dpr_now(self):
+        """按目标屏幕的 DPR 重建位图/掩码（同一屏幕+dpr 只做一次）"""
+        self._hook_screen_signal()
+        scr = self._target_screen()
+        if scr is None:
+            return
+        try:
+            dpr = max(1.0, float(scr.devicePixelRatio()))
         except Exception:  # noqa: BLE001
             return
-        if abs(dpr - getattr(self, "_pixmap_dpr", 0.0)) > 0.01:
+        key = (scr.name(), round(dpr, 2))
+        if (key == getattr(self, "_screen_key", None)
+                and abs(dpr - float(getattr(self, "_pixmap_dpr", 0.0))) <= 0.01):
+            return
+        self._screen_key = key
+        if abs(dpr - float(getattr(self, "_pixmap_dpr", 0.0))) > 0.01:
             self._render_pixmaps(dpr=dpr)
             self._update_mask()
-            self.update()
-            _log().debug("屏幕 DPR 变化 → 重建浮球位图: %.2f", dpr)
+            _log().debug("跨屏重建: 屏幕=%s DPR=%.2f", key[0], dpr)
+        self.update()
+        self._sync_api_panel_position()
 
     def _virtual_geometry(self):
         """所有屏幕工作区的并集（多屏拼接），用于把浮球限制在桌面范围内"""
@@ -2243,7 +2299,7 @@ class FloatingWidget(QWidget):
                 self.config["window_x"] = self.pos().x() + off
                 self.config["window_y"] = self.pos().y() + off
                 self._check_snap()
-                self._ensure_dpr()
+                self._ensure_dpr(immediate=True)                  # v3.12.1：拖动结束后立即同步
                 self.move(self._clamp_to_desktop(self.pos()))   # v3.12.1：吸附后仍保证在桌面内
                 # 无论是否吸附都保存位置
                 self.config["window_x"] = self.pos().x() + off
