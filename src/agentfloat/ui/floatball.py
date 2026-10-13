@@ -1599,9 +1599,26 @@ class FloatingWidget(QWidget):
             return None
 
     def _open_news_panel(self):
-        """打开 AI 快报（Web 壳页面，清除未读红点）"""
+        """打开 AI 快报（v3.12.0：Qt 三栏阅读器；Web 端 #/news 保留备用）"""
         self._mark_news_read()
-        web_ui.open_window("#/news")
+        panel = getattr(self, "_news_panel", None)
+        if panel is not None and panel.isVisible():
+            panel.refresh()
+            panel.raise_()
+            panel.activateWindow()
+            return
+        try:
+            from agentfloat.ui.news_window import NewsWindow
+            panel = NewsWindow(theme=self.theme, parent=self)
+            panel.generate_requested.connect(lambda: self._generate_news(auto=False))
+            panel.state_changed.connect(self.refresh_news_unread)
+            panel.finished.connect(lambda _r: self._clear_news_panel_ref(panel))
+            self._news_panel = panel
+            self._place_news_panel(panel)
+            panel.show()
+        except Exception:  # noqa: BLE001
+            _log().warning("打开 Qt 快报窗失败，回退 Web 端", exc_info=True)
+            web_ui.open_window("#/news")
 
     def _place_news_panel(self, panel):
         """把快报面板放到浮窗附近，且完整落在屏幕内"""
