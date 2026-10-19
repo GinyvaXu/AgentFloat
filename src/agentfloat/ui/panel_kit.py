@@ -456,3 +456,26 @@ def ghost_button(text, on_click=None, danger=False, primary=False):
     if on_click is not None:
         b.clicked.connect(on_click)
     return b
+
+def confirm(parent=None, title="确认", text="", ok_text="确定", cancel_text="取消",
+            danger=False, theme="light"):
+    """统一确认对话框（与面板同一套观感；替代带系统边框的原生 QMessageBox）
+
+    v3.16.2：破坏性操作（清空剪贴板、删除命令等）统一走这里。
+    返回 True 表示点了确认。
+    """
+    from PyQt5.QtGui import QFont
+    dlg = PanelShell(title, "", theme=theme, width=380, height=190, parent=parent)
+    lab = QLabel(text)
+    lab.setWordWrap(True)
+    f = QFont(lab.font())
+    f.setPixelSize(FONT.body)
+    lab.setFont(f)
+    dlg.body.addWidget(lab)
+    dlg.body.addStretch(1)
+    btn_cancel = ghost_button(cancel_text, on_click=dlg.reject)
+    btn_ok = ghost_button(ok_text, on_click=dlg.accept, danger=danger)
+    dlg.footer.addWidget(btn_cancel)
+    dlg.footer.addWidget(btn_ok)
+    dlg.show_footer(True)
+    return dlg.exec_() == QDialog.Accepted

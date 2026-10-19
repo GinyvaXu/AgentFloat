@@ -252,7 +252,8 @@ class CommandPanel(kit.PanelShell):
         if idx is None or not (0 <= idx < len(self._commands)):
             return
         name = self._commands[idx].get("name") or "该命令"
-        if QMessageBox.question(self, "删除", "确定删除「%s」？" % name) == QMessageBox.Yes:
+        if kit.confirm(self, "删除命令", "确定删除「%s」？" % name,
+                       ok_text="删除", danger=True, theme=self._theme):
             del self._commands[idx]
             self._emit_changed()
             self.refresh()

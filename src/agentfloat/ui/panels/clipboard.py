@@ -8,7 +8,7 @@
 import time
 
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtWidgets import QMenu, QApplication, QMessageBox
+from PyQt5.QtWidgets import QMenu, QApplication
 
 from agentfloat.core.theme import get_colors
 from agentfloat.ui import panel_kit as kit
@@ -189,11 +189,9 @@ class ClipboardPanel(kit.PanelShell):
         total = len(self._history.entries())
         if not total:
             return
-        ans = QMessageBox.question(
-            self, "清空剪贴板历史",
-            "确定清空全部 %d 条记录？此操作不可撤销。" % total,
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if ans != QMessageBox.Yes:
+        if not kit.confirm(self, "清空剪贴板历史",
+                           "确定清空全部 %d 条记录？此操作不可撤销。" % total,
+                           ok_text="清空", danger=True, theme=self._theme):
             return
         self._history.clear()
         self.refresh()
