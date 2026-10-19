@@ -332,9 +332,14 @@ class NewsWindow(kit.PanelShell):
             QDesktopServices.openUrl(QUrl(url))
 
     def _export(self):
+        """导出 Markdown（v3.16.1：export_markdown 返回 (路径, 错误) 元组，此前当字符串用直接报 TypeError）"""
         try:
-            path = nf.export_markdown(self._date or None)
-            self._flash("已导出：%s" % os.path.basename(path or ""))
+            res = nf.export_markdown(self._date or None)
+            path, err = res if isinstance(res, tuple) else (res, "")
+            if path:
+                self._flash("已导出：%s" % os.path.basename(path))
+            else:
+                self._flash("导出失败：%s" % (err or "未知错误"))
         except Exception as e:  # noqa: BLE001
             self._flash("导出失败：%s" % e)
 

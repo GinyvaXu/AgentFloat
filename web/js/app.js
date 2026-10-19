@@ -1591,7 +1591,7 @@ import {
     setPrimary: (i) => { (cfg.agents || []).forEach((a, j) => { a.primary = (i === j); }); refreshDirty(); renderAgents($("#settingsContent")); },
     addAgent: () => agentModal(null),
     editAgent: (i) => agentModal(i),
-    delAgent: (i) => confirmThen({ title: "删除 Agent", body: "「" + cfg.agents[i].name + "」将从列表中移除。", danger: true }, () => { \1 }),
+    delAgent: (i) => confirmThen({ title: "删除 Agent", body: "「" + cfg.agents[i].name + "」将从列表中移除。", danger: true }, () => { cfg.agents.splice(i, 1); refreshDirty(); renderAgents($("#settingsContent")); }),
     openDsh: () => API.api("/api/open_url", { method: "POST", body: { url: "http://127.0.0.1:3080" } }).catch(() => toast("请先启动 DeepSeek Harness", "err")),
     installAgent: installAgent,
     uninstallAgent: uninstallAgent,
@@ -1600,7 +1600,7 @@ import {
     checkUpdate: () => API.api("/api/check_update", { method: "POST" }).then(() => toast("已发起检查更新", "ok")).catch((e) => toast("检查失败：" + e.message, "err")),
     addTimer: () => timerModal(null),
     editTimer: (i) => timerModal(i),
-    delTimer: (i) => confirmThen({ title: "删除计时器", body: "该计时器将从喝水助手中移除。", danger: true }, () => { \1 }),
+    delTimer: (i) => confirmThen({ title: "删除计时器", body: "该计时器将从喝水助手中移除。", danger: true }, () => { cfg.water.timers.splice(i, 1); refreshDirty(); renderWater($("#settingsContent")); }),
     addEndpoint: () => endpointModal(null),
     addApiPreset: async (id) => {
       try {
@@ -1630,7 +1630,7 @@ import {
       } catch (e) { toast("添加预设失败：" + e.message, "err"); }
     },
     editEndpoint: (i) => endpointModal(i),
-    delEndpoint: (i) => confirmThen({ title: "删除端点", body: "该 API 端点将从余额监控中移除。", danger: true }, () => { \1 }),
+    delEndpoint: (i) => confirmThen({ title: "删除端点", body: "该 API 端点将从余额监控中移除。", danger: true }, () => { cfg.api_monitor.endpoints.splice(i, 1); refreshDirty(); renderApiCached(); }),
     addBadgeRow: () => {
       cfg.api_monitor = cfg.api_monitor || {};
       cfg.api_monitor.badge_rows = (cfg.api_monitor.badge_rows || []).concat([
@@ -1902,7 +1902,7 @@ import {
     delField: (i) => { window._epDraft.fields.splice(i, 1); endpointModal(window._epDraft.idx); },
     addInterest: () => interestModal(null),
     editInterest: (i) => interestModal(i),
-    delInterest: (i) => confirmThen({ title: "删除关注主题", body: "该主题将不再参与快报排序。", danger: true }, () => { \1 }),
+    delInterest: (i) => confirmThen({ title: "删除关注主题", body: "该主题将不再参与快报排序。", danger: true }, () => { cfg.news.interests.splice(i, 1); refreshDirty(); loadNewsState(); }),
     addInterestPreset: () => {
       const presets = [
         { label: "价格调整, 降价, 涨价, pricing", weight: 3, color: "#E67E22" },
