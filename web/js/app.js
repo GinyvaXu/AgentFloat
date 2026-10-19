@@ -129,7 +129,11 @@ import {
   function goPage(p) {
     page = p;
     if (p !== "install") leaveInstallPage();
-    $$("#nav .nav-item").forEach((a) => a.classList.toggle("active", a.dataset.page === p));
+    $$("#nav .nav-item").forEach((a) => {
+    a.classList.toggle("active", a.dataset.page === p);
+    if (a.dataset.page === p) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  });
     ["guide", "settings", "install", "api", "news"].forEach((id) => $("#page-" + id).classList.toggle("hidden", id !== p));
     $("#pageTitle").textContent = { guide: "使用指南", settings: "设置", install: "Agent 安装", api: "API 用量", news: "AI 快报" }[p];
     if (p === "guide") renderGuide();

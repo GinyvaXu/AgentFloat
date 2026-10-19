@@ -1,5 +1,17 @@
 # 更新日志
 
+## [3.14.0] - 2026-10-19（测试版 · 前端精修 B1：字号层级 / 对比度 / 禁用态 / 危险操作 / 键盘可达）
+### Fixed
+- **Qt 字号层级被全局样式表压平（严重）**：`panel_style.py` 的全局 `QLabel { font-size: 12px }` 优先级高于代码里的 `setFont` → 喝水面板「杯数」30px、Skills 详情 14px、process_panel 13px 等**全部被按 12px 渲染**。已从全局规则移除 font-size，改由各面板 QSS 显式声明；抓图验证：杯数已恢复大号
+- **危险操作没有防误触**：剪贴板「清空全部」→ 二次确认（显示条数 + 提示不可撤销）；单条删除 → **3 秒撤销**（状态条内可点「撤销」）
+- **Web 浅色主题对比度不达 AA**：`--hint #98989D`（2.9:1）→ `#6E6E73`（4.6:1）；`--text2` → `#5A5A5F`；语义标签文字改用新增「墨色」令牌（`--accent-ink / --ok-ink / --warn-ink / --purple-ink`，浅色 #0066CC / #1B8A3C / #C7251B / #6F42D9，暗色为提亮版），底色不变
+### Changed
+- **禁用态补齐**：`#pkGhost` / `#pkPrimary` 增加 `:disabled` 样式（此前 Skills「复制」禁用后仍是强调色、看起来可点）；Web 禁用态透明度统一为 0.4
+- **Web 主导航键盘可达**：`<a data-page>` → `<button type="button">`，补 `aria-current="page"`、`:focus-visible` 焦点环、图标 `aria-hidden`；Toast 容器加 `role="status" aria-live="polite"`
+- 剪贴板面板状态提示统一走 `panel_kit.flash`（150ms 淡出），移除自实现的 1500ms 硬隐藏
+### Tests
+- 全量测试通过、pyflakes 零告警；面板抓图（喝水/Skills/命令）已复核
+
 ## [3.13.2] - 2026-10-13（测试版 · 跨屏绘制抖动修复）
 ### Fixed
 - **从主屏拖到不同分辨率/缩放的副屏时，画面反复抖动、尺寸闪（跨屏绘制错误）**：

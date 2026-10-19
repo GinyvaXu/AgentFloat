@@ -68,11 +68,14 @@ def panel_qss(theme="light"):
         " border: 1px solid %(bd)s; border-radius: %(r)dpx; padding: 3px 10px;"
         " font-size: %(fc)dpx; }"
         "QPushButton#pkGhost:hover { background: %(hover)s; }"
+        "QPushButton#pkGhost:disabled { color: %(hint)s; border-color: %(bd)s; background: none; }"
         "QPushButton#pkDanger { color: #FF453A; }"
         "QPushButton#pkPrimary { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
         " stop:0 %(acc)s, stop:1 #AF52DE); color: #FFF; border: none;"
         " border-radius: %(r)dpx; padding: 4px 12px; font-size: %(fc)dpx;"
         " font-weight: 600; }"
+        "QPushButton#pkPrimary:disabled { background: %(card)s; color: %(hint)s;"
+        " border: 1px solid %(bd)s; }"
         % {"hint": hint, "fc": FONT.caption, "fb": FONT.body,
            "fm": FONT.micro, "r": RADIUS.sm, "card": "#2C2C31" if theme == "dark" else "#FFFFFF",
            "bd": "rgba(255,255,255,0.10)" if theme == "dark" else "rgba(60,60,67,0.12)",

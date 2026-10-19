@@ -7,9 +7,10 @@
 """
 import time
 
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtWidgets import QMenu, QApplication
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtWidgets import QMenu, QApplication, QMessageBox
 
+from agentfloat.core.theme import get_colors
 from agentfloat.ui import panel_kit as kit
 
 HISTORY_KEY = "clipboard_history"
@@ -138,12 +139,11 @@ class ClipboardPanel(kit.PanelShell):
             return
         QApplication.clipboard().setText(text)
         self.copied.emit(text)
-        self._flash("✓ 已复制到剪贴板")
+        self.flash("✓ 已复制到剪贴板")          # v3.14.0：统一走 panel_kit 的 flash（150ms 淡出）
 
     def _flash(self, text):
-        self.status.setText(text)
-        self.status.setVisible(True)
-        QTimer.singleShot(1500, lambda: self.status.setVisible(False))
+        """保留旧方法名作为别名（面板内其余调用点逐步并入 flash）"""
+        self.flash(text)
 
     def _context_menu(self, pos):
         item = self.list.itemAt(pos)
@@ -161,8 +161,40 @@ class ClipboardPanel(kit.PanelShell):
             if text:
                 self._history.remove(text)
                 self.refresh()
+                self._offer_undo(text)          # v3.14.0：单条删除给 3 秒撤销
+
+    def _offer_undo(self, text):
+        """删除后 3 秒内可撤销（Q3：不可逆动作用确认，单条删除用撤销）"""
+        self._undo_text = text
+        lab = self.flash("已删除 1 条 · 撤销", duration_ms=3000)
+        try:
+            accent = "#%02X%02X%02X" % get_colors(self._theme)["ACCENT"]
+            lab.setTextFormat(Qt.RichText)
+            lab.setText('已删除 1 条 · <a href="#undo" style="color:%s; text-decoration:none;">撤销</a>' % accent)
+            lab.linkActivated.connect(self._undo_delete)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _undo_delete(self, *_a):
+        text = getattr(self, "_undo_text", "")
+        if not text:
+            return
+        self._undo_text = ""
+        self._history.push(text)               # 回到列表顶部
+        self.refresh()
+        self.flash("已恢复 1 条")
 
     def _clear_all(self):
+        """清空全部：不可撤销 → 二次确认（v3.14.0）"""
+        total = len(self._history.entries())
+        if not total:
+            return
+        ans = QMessageBox.question(
+            self, "清空剪贴板历史",
+            "确定清空全部 %d 条记录？此操作不可撤销。" % total,
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if ans != QMessageBox.Yes:
+            return
         self._history.clear()
         self.refresh()
-        self._flash("已清空")
+        self._flash("已清空 %d 条" % total)

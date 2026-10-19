@@ -46,7 +46,10 @@ def panel_css(theme="light"):
             "h": header, "a1": ACCENT, "a2": ACCENT_2, "rxl": RADIUS.xl} +
         "QFrame#titleBar QLabel { font-size: %(ft)dpx; font-weight: 600; }" % {"ft": FONT.title} +
         # 文字
-        "QLabel { color: %s; font-size: %dpx; background: transparent; }" % (tx, FONT.body) +
+        # v3.14.0：不再在全局 QLabel 上写 font-size —— 样式表优先级高于 setFont，
+        # 会把代码里设好的字号（喝水杯数 30px、详情 14px 等）静默压平成 12px。
+        # 需要默认字号的标签请在各自面板的 QSS 里显式声明（用 FONT 令牌）。
+        "QLabel { color: %s; background: transparent; }" % tx +
         "QLabel#hint, QLabel.hint { color: %s; }" % hint +
         # 按钮
         "QPushButton { background: %(card)s; color: %(ac)s; border: 1px solid %(sep)s;"
