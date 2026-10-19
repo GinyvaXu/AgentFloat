@@ -60,7 +60,7 @@ class WaterPanel(kit.PanelShell):
         hi = _hex(c["HINT"])
         ac = _hex(c["ACCENT"])
         bd = _hex(c["SEPARATOR"])
-        card = "#333336" if is_dark else "#FFFFFF"
+        card = "#%02X%02X%02X" % tuple(c["CARD"])      # v3.14.0：卡片底单源
         return (
             "QFrame#waterCard { background: %s; border: 1px solid %s; border-radius: 10px; }" % (card, bd)
             + "QFrame#timerRow { background: %s; border: 1px solid %s; border-radius: 10px; }" % (card, bd)

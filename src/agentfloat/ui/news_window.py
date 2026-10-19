@@ -339,7 +339,8 @@ class NewsWindow(kit.PanelShell):
             self._flash("导出失败：%s" % e)
 
     def _flash(self, text):
-        self.lbl_status.setText(text)
+        """v3.14.0：统一走 PanelShell.flash（150ms 淡出）"""
+        self.flash(text, label=self.lbl_status)
 
     # ── 生成流程（由浮球驱动）─────────────────────
     def set_generating(self, flag):

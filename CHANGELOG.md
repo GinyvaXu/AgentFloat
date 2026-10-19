@@ -1,5 +1,16 @@
 # 更新日志
 
+## [3.14.1] - 2026-10-19（测试版 · 前端精修 B2：单一来源收敛 + DESIGN.md）
+### Added
+- **`DESIGN.md`**：长期设计上下文（令牌来源 / 颜色规则 / 组件登记 / 交互规则 / 文案口吻 / 反模式 / 变更流程），后续 UI 改动先读它
+### Changed
+- **卡片底色单源**：`core/theme.py` 新增 `CARD`（暗 `#333336` / 浅 `#FFFFFF`），面板组件库与喝水面板改为引用它（此前暗色卡片 `#333336`/`#2C2C31`/`#2c2c31` 三种并存）
+- **菜单样式单源**：新增 `ui/menu_style.py::menu_qss()`，浮球右键菜单与托盘菜单共用（此前同一份 QSS 复制两份、已开始漂移）；顺带修掉浮球菜单函数里 `QMenu(self)` 建两次导致的泄漏
+- **状态提示统一**：Skills / 命令面板 / 快报窗的 `_flash` 全部改走 `PanelShell.flash`（150ms 淡出），移除各自 `singleShot(1800)` 硬隐藏；剪贴板此前已并入
+- **Web 去重**：删除 `--card-radius` / `--radius` 旧别名（分别并入 `--r-lg` / `--r-md`）；合并 `.news-item` 的重复定义；`margin-bottom:14px` 改令牌
+### Tests
+- 全量测试通过、pyflakes 零告警；CSS 花括号平衡校验通过
+
 ## [3.14.0] - 2026-10-19（测试版 · 前端精修 B1：字号层级 / 对比度 / 禁用态 / 危险操作 / 键盘可达）
 ### Fixed
 - **Qt 字号层级被全局样式表压平（严重）**：`panel_style.py` 的全局 `QLabel { font-size: 12px }` 优先级高于代码里的 `setFont` → 喝水面板「杯数」30px、Skills 详情 14px、process_panel 13px 等**全部被按 12px 渲染**。已从全局规则移除 font-size，改由各面板 QSS 显式声明；抓图验证：杯数已恢复大号

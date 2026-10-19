@@ -2342,23 +2342,14 @@ class FloatingWidget(QWidget):
 
 
     def _build_context_menu(self, menu_css=None):
-        """构建浮球右键菜单（v3.9.2 抽出 / v3.10.0 修正重复构建；menu_css 可省略）"""
-        if not menu_css:
-            tc = get_colors(self.theme)
-            sfc, txt, acc, sep = tc["SURFACE"], tc["TEXT"], tc["ACCENT"], tc["SEPARATOR"]
-            menu_css = (
-                f"QMenu {{ background: rgba({sfc[0]},{sfc[1]},{sfc[2]},0.95);"
-                f" border: 1px solid rgba(0,0,0,0.1); border-radius: 10px; padding: 4px 0; }}"
-                f"QMenu::item {{ padding: 7px 32px 7px 16px; font-size: 12px;"
-                f" color: #{txt[0]:02X}{txt[1]:02X}{txt[2]:02X}; }}"
-                f"QMenu::item:selected {{ background: #{acc[0]:02X}{acc[1]:02X}{acc[2]:02X};"
-                f" color: #FFF; border-radius: 4px; margin: 1px 6px; }}"
-                f"QMenu::separator {{ height: 1px;"
-                f" background: #{sep[0]:02X}{sep[1]:02X}{sep[2]:02X}; margin: 4px 8px; }}"
-            )
-        menu = QMenu(self)
-        menu.setStyleSheet(menu_css)
+        """构建浮球右键菜单（v3.9.2 抽出 / v3.10.0 修正重复构建；menu_css 可省略）
 
+        v3.14.0：样式改取 ui/menu_style.menu_qss（与托盘菜单单源）；并修掉原先
+        连续 `QMenu(self)` 建两次导致第一个泄漏的问题。
+        """
+        if not menu_css:
+            from agentfloat.ui.menu_style import menu_qss
+            menu_css = menu_qss(self.theme)
         menu = QMenu(self)
         menu.setStyleSheet(menu_css)
 

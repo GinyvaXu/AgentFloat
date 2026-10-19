@@ -607,21 +607,9 @@ def _main():
 
     # ── 系统托盘 ──
     def _build_menu_stylesheet(theme):
-        tc = get_colors(theme)
-        sfc = tc["SURFACE"]
-        txt = tc["TEXT"]
-        acc = tc["ACCENT"]
-        sep = tc["SEPARATOR"]
-        return (
-            f"QMenu {{ background: rgba({sfc[0]},{sfc[1]},{sfc[2]},0.95);"
-            f" border: 1px solid rgba(0,0,0,0.1); border-radius: 10px; padding: 4px 0; }}"
-            f"QMenu::item {{ padding: 7px 32px 7px 16px; font-size: 12px;"
-            f" color: #{txt[0]:02X}{txt[1]:02X}{txt[2]:02X}; }}"
-            f"QMenu::item:selected {{ background: #{acc[0]:02X}{acc[1]:02X}{acc[2]:02X};"
-            f" color: #FFF; border-radius: 4px; margin: 1px 6px; }}"
-            f"QMenu::separator {{ height: 1px;"
-            f" background: #{sep[0]:02X}{sep[1]:02X}{sep[2]:02X}; margin: 4px 8px; }}"
-        )
+        """v3.14.0：改取单源 ui/menu_style.menu_qss（原来与浮球右键菜单两处拷贝）"""
+        from agentfloat.ui.menu_style import menu_qss
+        return menu_qss(theme)
 
     tray_menu = QMenu()
     tray_menu.setStyleSheet(_build_menu_stylesheet(widget.theme))

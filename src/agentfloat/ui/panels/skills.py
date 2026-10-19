@@ -7,7 +7,7 @@
 """
 import os
 
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QLabel, QLineEdit, QComboBox, QTextBrowser, QSplitter,
@@ -303,5 +303,4 @@ class SkillsPanel(kit.PanelShell):
         text = self.ed_trigger.text().strip()
         if text:
             QApplication.clipboard().setText(text)
-            self.lbl_status.setText("已复制「%s」✓" % text)
-            QTimer.singleShot(1800, lambda: self.lbl_status.setText(""))
+            self.flash("已复制「%s」✓" % text, label=self.lbl_status)   # v3.14.0：统一 flash

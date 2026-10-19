@@ -77,7 +77,8 @@ def panel_qss(theme="light"):
         "QPushButton#pkPrimary:disabled { background: %(card)s; color: %(hint)s;"
         " border: 1px solid %(bd)s; }"
         % {"hint": hint, "fc": FONT.caption, "fb": FONT.body,
-           "fm": FONT.micro, "r": RADIUS.sm, "card": "#2C2C31" if theme == "dark" else "#FFFFFF",
+           "fm": FONT.micro, "r": RADIUS.sm,
+           "card": "#%02X%02X%02X" % tuple(c["CARD"]),      # v3.14.0：卡片底单源（theme.CARD）
            "bd": "rgba(255,255,255,0.10)" if theme == "dark" else "rgba(60,60,67,0.12)",
            "hover": "rgba(255,255,255,0.08)" if theme == "dark" else "rgba(120,120,128,0.10)",
            "acc": "#%02X%02X%02X" % tuple(c["ACCENT"]),

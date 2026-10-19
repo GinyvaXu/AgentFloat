@@ -285,7 +285,5 @@ class CommandPanel(kit.PanelShell):
         self.commands_changed.emit([dict(c) for c in self._commands])
 
     def _flash(self, msg):
-        self.lbl_status.setText(msg)
-        self.lbl_status.setVisible(True)
-        from PyQt5.QtCore import QTimer
-        QTimer.singleShot(1800, lambda: self.lbl_status.setVisible(False))
+        """v3.14.0：统一走 PanelShell.flash（150ms 淡出），不再 QTimer 硬隐藏"""
+        self.flash(msg, label=self.lbl_status)
