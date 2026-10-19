@@ -584,7 +584,7 @@ import {
   // ══════════════════ API 用量页 ══════════════════
   async function loadApiPage() {
     const el = $("#apiContent");
-    el.innerHTML = '<div class="card">加载中…</div>';
+    el.innerHTML = loadingCard(4);
     try {
       await loadApiPresets();
       const st = await API.api("/api/api_state");
@@ -593,7 +593,7 @@ import {
       apiState.fetchedAt = new Date();
       renderApi(el, st);
     } catch (e) {
-      el.innerHTML = '<div class="card">加载失败：' + esc(e.message) + "</div>";
+      el.innerHTML = errorCard(e.message, "loadApiPage");
     }
   }
   async function loadApiPresets(force) {
@@ -923,7 +923,7 @@ import {
 
   async function loadNewsPage() {
     const el = $("#newsContent");
-    el.innerHTML = '<div class="card">加载中…</div>';
+    el.innerHTML = loadingCard(4);
     await loadNewsState();
   }
   async function loadNewsState(date) {
@@ -1438,12 +1438,50 @@ import {
   }
 
   // ── 模态框 / SSE / 启动 ─────────────────────────
+  // v3.15.1：统一加载骨架 / 错误卡片（替掉单行"加载中…"）
+  function loadingCard(lines) {
+    const n = Math.max(1, lines || 3);
+    let rows = "";
+    for (let i = 0; i < n; i += 1) {
+      rows += '<div class="skeleton-line" style="width:' + (92 - i * 14) + '%"></div>';
+    }
+    return '<div class="card skeleton">' + rows + "</div>";
+  }
+  function errorCard(msg, retryFn) {
+    return '<div class="card error"><h3>加载失败</h3>' +
+      '<div class="desc">' + esc(msg || "未知错误") + "</div>" +
+      '<div class="err-actions">' +
+      '<button class="btn sm primary" data-retry-load="' + esc(retryFn || "") + '">重试</button>' +
+      '<button class="btn sm" data-err-detail>查看详情</button></div>' +
+      '<pre class="err-detail hidden">' + esc(msg || "") + "</pre></div>";
+  }
+
   function openModal(html) {
     $("#modalBox").innerHTML = html;
     $("#modalMask").classList.remove("hidden");
   }
   function closeModal() {
     $("#modalMask").classList.add("hidden");
+  }
+  // v3.15.1：统一确认弹层（替代原生 confirm；危险操作可指定 danger/okText）
+  function confirmDialog(opts) {
+    const o = opts || {};
+    return new Promise((resolve) => {
+      openModal("<h3>" + esc(o.title || "确认") + "</h3>" +
+        (o.body ? '<div class="desc">' + esc(o.body) + "</div>" : "") +
+        '<div class="modal-actions"><button class="btn" data-close>取消</button>' +
+        '<button class="btn ' + (o.danger ? "danger" : "primary") + '" data-ok>' +
+        esc(o.okText || (o.danger ? "删除" : "确定")) + "</button></div>");
+      const ok = $("#modalBox [data-ok]");
+      const cancel = $("#modalBox [data-close]");
+      const done = (v) => { closeModal(); resolve(v); };
+      ok.addEventListener("click", () => done(true));
+      cancel.addEventListener("click", () => done(false));
+    });
+  }
+  // 非 async 处理器用这个：确认后再执行
+  function confirmThen(opts, fn) {
+    confirmDialog(opts).then((ok) => { if (ok) fn(); });
   }
   // v3.9.0：新用户横幅按钮（委托绑定，横幅在多个子页复用）
   document.addEventListener("click", (e) => {
@@ -1550,7 +1588,7 @@ import {
     setPrimary: (i) => { (cfg.agents || []).forEach((a, j) => { a.primary = (i === j); }); refreshDirty(); renderAgents($("#settingsContent")); },
     addAgent: () => agentModal(null),
     editAgent: (i) => agentModal(i),
-    delAgent: (i) => { if (confirm("确定删除 Agent「" + cfg.agents[i].name + "」？")) { cfg.agents.splice(i, 1); refreshDirty(); renderAgents($("#settingsContent")); } },
+    delAgent: (i) => confirmThen({ title: "删除 Agent", body: "「" + cfg.agents[i].name + "」将从列表中移除。", danger: true }, () => { \1 }),
     openDsh: () => API.api("/api/open_url", { method: "POST", body: { url: "http://127.0.0.1:3080" } }).catch(() => toast("请先启动 DeepSeek Harness", "err")),
     installAgent: installAgent,
     uninstallAgent: uninstallAgent,
@@ -1559,7 +1597,7 @@ import {
     checkUpdate: () => API.api("/api/check_update", { method: "POST" }).then(() => toast("已发起检查更新", "ok")).catch((e) => toast("检查失败：" + e.message, "err")),
     addTimer: () => timerModal(null),
     editTimer: (i) => timerModal(i),
-    delTimer: (i) => { if (confirm("确定删除计时器？")) { cfg.water.timers.splice(i, 1); refreshDirty(); renderWater($("#settingsContent")); } },
+    delTimer: (i) => confirmThen({ title: "删除计时器", body: "该计时器将从喝水助手中移除。", danger: true }, () => { \1 }),
     addEndpoint: () => endpointModal(null),
     addApiPreset: async (id) => {
       try {
@@ -1589,7 +1627,7 @@ import {
       } catch (e) { toast("添加预设失败：" + e.message, "err"); }
     },
     editEndpoint: (i) => endpointModal(i),
-    delEndpoint: (i) => { if (confirm("确定删除端点？")) { cfg.api_monitor.endpoints.splice(i, 1); refreshDirty(); renderApiCached(); } },
+    delEndpoint: (i) => confirmThen({ title: "删除端点", body: "该 API 端点将从余额监控中移除。", danger: true }, () => { \1 }),
     addBadgeRow: () => {
       cfg.api_monitor = cfg.api_monitor || {};
       cfg.api_monitor.badge_rows = (cfg.api_monitor.badge_rows || []).concat([
@@ -1697,6 +1735,7 @@ import {
       } catch (e) { toast("快速登录失败：" + e.message, "err"); }
     },
     vaultLogout: async () => {
+      if (!(await confirmDialog({ title: "登出", body: "密钥将被锁定，启动 Agent 时不再注入。", okText: "登出", danger: true }))) return;
       try {
         await API.api("/api/vault/logout", { method: "POST" });
         toast("已登出（密钥已锁定，启动 Agent 时不再注入）", "ok");
@@ -1770,7 +1809,7 @@ import {
       } catch (e) { App.keyReveal(name); }
     },
     keyDelete: async (name) => {
-      if (!confirm("确定删除密钥「" + name + "」？")) return;
+      if (!(await confirmDialog({ title: "删除密钥", body: "「" + name + "」删除后不可恢复。", danger: true }))) return;
       try {
         await API.api("/api/vault/keys/delete", { method: "POST", body: { name: name } });
         toast("已删除：" + name, "ok");
@@ -1860,7 +1899,7 @@ import {
     delField: (i) => { window._epDraft.fields.splice(i, 1); endpointModal(window._epDraft.idx); },
     addInterest: () => interestModal(null),
     editInterest: (i) => interestModal(i),
-    delInterest: (i) => { if (confirm("删除该关注主题？")) { cfg.news.interests.splice(i, 1); refreshDirty(); loadNewsState(); } },
+    delInterest: (i) => confirmThen({ title: "删除关注主题", body: "该主题将不再参与快报排序。", danger: true }, () => { \1 }),
     addInterestPreset: () => {
       const presets = [
         { label: "价格调整, 降价, 涨价, pricing", weight: 3, color: "#E67E22" },

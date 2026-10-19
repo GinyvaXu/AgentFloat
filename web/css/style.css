@@ -519,3 +519,22 @@ a { color: var(--accent); }
   }
   .toast, .modal, .card, .nav-item { transform: none !important; }
 }
+
+/* ── 加载骨架 / 错误卡片（v3.15.1）──────────────────────────── */
+.skeleton { display: flex; flex-direction: column; gap: 10px; }
+.skeleton-line {
+  height: 12px; border-radius: 6px;
+  background: linear-gradient(90deg, rgba(120,120,128,.14), rgba(120,120,128,.30), rgba(120,120,128,.14));
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes sk-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton-line { animation: none; } }
+.card.error { border-color: rgba(255,59,48,0.35); }
+.card.error h3 { color: var(--warn-ink); }
+.err-actions { display: flex; gap: 8px; margin-top: 12px; }
+.card.error pre.err-detail {
+  margin-top: 10px; padding: 10px; background: var(--surface2); border-radius: var(--r-sm);
+  font-size: 11px; line-height: 1.5; white-space: pre-wrap; color: var(--text2);
+  max-height: 180px; overflow: auto;
+}
