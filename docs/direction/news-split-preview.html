@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>快报分栏 · 真实样式静态校验</title>
+<link rel="stylesheet" href="../../web/css/style.css">
+<style>body{padding:24px;background:var(--bg);font-family:var(--font)}
+h1{font-size:14px;margin:0 0 12px} .wrap{max-width:980px;margin:0 auto}</style>
+</head>
+<body data-theme="dark">
+<div class="wrap">
+  <h1>快报分栏（方向 C）· 用真实 style.css 渲染</h1>
+  <div class="news-split">
+    <div class="news-list">
+      <div class="news-group">
+        <button class="news-group-head"><span class="chip" style="color:#fff;background:#0A84FF">AI</span><span class="grow">3 条</span><span class="caret">▾</span></button>
+        <div class="news-item unread focus" data-idx="0">
+          <div class="news-line"><span class="news-dot"></span><div class="t"><a href="#">Show HN: 把本地 Agent 接进桌面浮球的工具</a></div><button class="news-star on">★</button></div>
+          <div class="s">作者把常见的 CLI Agent 封装成桌面悬浮球…</div>
+          <div class="meta"><span class="chip" style="color:#fff;background:#0A84FF">AI</span><span class="src">HackerNews</span><button class="linklike">标为未读</button></div>
+        </div>
+        <div class="news-item unread" data-idx="1">
+          <div class="news-line"><span class="news-dot"></span><div class="t"><a href="#">Anthropic 发布新的 Agent 评测基准</a></div><button class="news-star">☆</button></div>
+          <div class="meta"><span class="chip" style="color:#fff;background:#0A84FF">AI</span><span class="src">量子位</span><button class="linklike">标为未读</button></div>
+        </div>
+        <div class="news-item" data-idx="2">
+          <div class="news-line"><span class="news-dot"></span><div class="t"><a href="#">arXiv: 用小模型蒸馏工具调用轨迹</a></div><button class="news-star">☆</button></div>
+          <div class="meta"><span class="chip" style="color:#fff;background:#0A84FF">AI</span><span class="src">arXiv AI</span><button class="linklike">标为已读</button></div>
+        </div>
+      </div>
+      <div class="news-group">
+        <button class="news-group-head"><span class="chip" style="color:#fff;background:#34C759">开发</span><span class="grow">2 条</span><span class="caret">▾</span></button>
+        <div class="news-item" data-idx="3">
+          <div class="news-line"><span class="news-dot"></span><div class="t"><a href="#">PyQt6 与 PyQt5 在 Windows 高 DPI 下的差异梳理</a></div><button class="news-star">☆</button></div>
+          <div class="meta"><span class="chip" style="color:#fff;background:#34C759">开发</span><span class="src">少数派</span><button class="linklike">标为已读</button></div>
+        </div>
+      </div>
+    </div>
+    <div class="news-detail">
+      <div class="kick"><span class="chip" style="color:#fff;background:#0A84FF">AI</span><span>HackerNews</span><span>未读 · 已收藏</span></div>
+      <h3>Show HN: 把本地 Agent 接进桌面浮球的工具</h3>
+      <p>作者把常见的 CLI Agent 封装成桌面悬浮球，支持环形菜单与 Skills 辅助窗。评论区讨论集中在权限隔离与沙箱上。</p>
+      <div class="actions">
+        <a class="btn sm" href="#">打开原文</a>
+        <button class="btn sm">取消收藏</button>
+        <button class="btn sm">标为已读</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

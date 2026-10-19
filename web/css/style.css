@@ -328,8 +328,9 @@ details.help code { background:rgba(120,120,128,0.16); border-radius:5px; paddin
 .news-list { overflow: auto; max-height: 620px; border-right: 1px solid var(--border); }
 .news-split .news-item {
   margin: 0; border: 0; border-bottom: 1px solid rgba(120,120,128,0.12);
-  border-radius: 0; padding: 9px 12px; background: transparent;
+  border-radius: 0; padding: 7px 12px; background: transparent; cursor: pointer;
 }
+.news-split .news-item .meta .chip { display: none; }   /* 分类已在分组头，行内不重复 */
 .news-split .news-item:hover { background: rgba(120,120,128,0.08); }
 .news-split .news-item.focus {
   background: rgba(10,132,255,0.10); box-shadow: none;
