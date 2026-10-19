@@ -139,7 +139,11 @@ class ClipboardPanel(kit.PanelShell):
             return
         QApplication.clipboard().setText(text)
         self.copied.emit(text)
-        self.flash("✓ 已复制到剪贴板")          # v3.14.0：统一走 panel_kit 的 flash（150ms 淡出）
+        try:
+            self.list.setCurrentItem(item)      # v3.16.3：选中态 = 可见反馈（此前只有底部小字）
+        except Exception:  # noqa: BLE001
+            pass
+        self.flash("✓ 已复制到剪贴板", duration_ms=1200)
 
     def _flash(self, text):
         """保留旧方法名作为别名（面板内其余调用点逐步并入 flash）"""

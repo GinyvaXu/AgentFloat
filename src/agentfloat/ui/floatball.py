@@ -2307,15 +2307,9 @@ class FloatingWidget(QWidget):
                 save_config(self.config)
                 _log().debug("拖拽结束，悬停冷却 400ms")
             elif InteractionActions.CLICK in acts:
-                # v3.16.2：单击开关语录浮窗（已开则关；设置里关掉语录时回退为启动 Agent）
+                # v3.10.0：单击改为弹出语录浮窗（可在设置里关掉，恢复为启动 Agent）
                 self._start_ripple(event.pos())
-                _win = getattr(self, "_quote_win", None)
-                if _win is not None and _win.isVisible():
-                    try:
-                        _win.close_window()
-                    except Exception:  # noqa: BLE001
-                        _win.hide()
-                elif not self.show_quote_window():
+                if not self.show_quote_window():
                     self.launch_requested.emit()
             self._drag_active = False
             # 同步 API 面板位置
