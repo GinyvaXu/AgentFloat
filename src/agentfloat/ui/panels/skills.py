@@ -46,7 +46,7 @@ class SkillsPanel(kit.PanelShell):
     # ── 界面 ────────────────────────────────────
     def _setup_ui(self):
         bar = QHBoxLayout()
-        bar.setSpacing(SPACE.xs + 2)
+        bar.setSpacing(SPACE.xs_plus)
         self.search_edit = kit.search_box("搜索 skill 名称 / 描述（中英文均可）…",
                                           on_change=lambda _t: self._apply_filter())
         self.source_combo = QComboBox()
@@ -70,8 +70,8 @@ class SkillsPanel(kit.PanelShell):
 
         detail = QWidget()
         dv = QVBoxLayout(detail)
-        dv.setContentsMargins(SPACE.sm + 2, 0, 0, 0)
-        dv.setSpacing(SPACE.xs + 2)
+        dv.setContentsMargins(SPACE.sm_plus, 0, 0, 0)
+        dv.setSpacing(SPACE.xs_plus)
         self.lbl_name = QLabel("—")
         f = QFont(self._cjk)
         f.setPixelSize(FONT.body + 2)
@@ -90,7 +90,7 @@ class SkillsPanel(kit.PanelShell):
         dv.addWidget(self.desc_view, 1)
 
         tri = QHBoxLayout()
-        tri.setSpacing(SPACE.xs + 2)
+        tri.setSpacing(SPACE.xs_plus)
         tri_lbl = QLabel("触发指令")
         ft = QFont(self._cjk)
         ft.setPixelSize(FONT.micro)
@@ -173,7 +173,7 @@ class SkillsPanel(kit.PanelShell):
         w = QWidget()
         h = QHBoxLayout(w)
         h.setContentsMargins(2, 2, 2, 2)
-        h.setSpacing(SPACE.xs + 2)
+        h.setSpacing(SPACE.xs_plus)
         t = QLabel(text)
         f = QFont(self._cjk)
         f.setPixelSize(FONT.body)

@@ -39,7 +39,9 @@ class SPACE(object):
     """间距：4 的倍数为主（xs/sm/md/lg），另有 2px 微调与 6px 过渡档"""
     xxs = 2
     xs = 4
+    xs_plus = 6      # xs + 2：紧凑控件之间的细分档
     sm = 8
+    sm_plus = 10     # sm + 2：面板内边距的细分档
     md = 12
     lg = 16
 

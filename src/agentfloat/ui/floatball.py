@@ -2382,7 +2382,7 @@ class FloatingWidget(QWidget):
                 web_menu.addSeparator()
 
         menu.addSeparator()
-        menu.addAction("设置...", self.settings_requested.emit)
+        menu.addAction("设置…", self.settings_requested.emit)
         menu.addAction("使用教程", lambda: self.start_onboarding(force=True))
         menu.addAction("换一条语录", lambda: self.show_quote_window(next_one=True))
         menu.addAction("复制 Web 控制台令牌", self._copy_web_token)

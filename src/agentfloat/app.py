@@ -631,7 +631,7 @@ def _main():
     tray_menu.addAction("喝水助手", widget._open_water_panel)
     tray_menu.addAction("停止 DSH Web 服务", lambda: stop_dsh())
     tray_menu.addSeparator()
-    tray_menu.addAction("设置...", open_settings)
+    tray_menu.addAction("设置…", open_settings)
     tray_menu.addSeparator()
 
     tray_auto = tray_menu.addAction("开机自启")

@@ -15,9 +15,9 @@ from PyQt5.QtWidgets import QWidget, QApplication
 
 from agentfloat.ui import motion
 
-_ACCENT = QColor(77, 107, 254)     # 品牌蓝
-_OK = QColor(48, 209, 88)          # 成功绿
-_ERR = QColor(255, 95, 86)         # 错误红
+_ACCENT = QColor(10, 132, 255)     # 品牌蓝（与 ui/tokens 的 ACCENT 一致；原 #4D6BFE 为旧品牌色）
+_OK = QColor(52, 199, 89)          # 成功绿（浅色主题值）
+_ERR = QColor(255, 59, 48)         # 错误红（浅色主题值）
 
 
 class LoadingIndicator(QWidget):

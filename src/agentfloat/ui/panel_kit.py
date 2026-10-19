@@ -132,8 +132,8 @@ class PanelShell(QDialog):
         self.setStyleSheet(panel_qss(theme))
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(SPACE.sm + 2, SPACE.sm, SPACE.sm + 2, SPACE.sm)
-        root.setSpacing(SPACE.xs + 2)
+        root.setContentsMargins(SPACE.sm_plus, SPACE.sm, SPACE.sm_plus, SPACE.sm)
+        root.setSpacing(SPACE.xs_plus)
 
         head = _Header(self)
         head.setObjectName("pkHeader")
@@ -166,7 +166,7 @@ class PanelShell(QDialog):
         root.addWidget(sep)
 
         self.body = QVBoxLayout()
-        self.body.setSpacing(SPACE.xs + 2)
+        self.body.setSpacing(SPACE.xs_plus)
         root.addLayout(self.body, 1)
 
         self._footer = QFrame()
