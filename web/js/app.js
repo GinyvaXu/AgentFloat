@@ -1459,6 +1459,9 @@ import {
   function openModal(html) {
     $("#modalBox").innerHTML = html;
     $("#modalMask").classList.remove("hidden");
+    // v3.16.0：打开即聚焦首个可输入控件（键盘可用）
+    const first = $("#modalBox input, #modalBox select, #modalBox textarea, #modalBox button");
+    if (first) { try { first.focus(); } catch (e) {} }
   }
   function closeModal() {
     $("#modalMask").classList.add("hidden");

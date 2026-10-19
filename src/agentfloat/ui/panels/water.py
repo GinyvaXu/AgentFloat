@@ -325,6 +325,17 @@ class WaterReminderPopup(QDialog):
     def _real_close(self):
         self.close()
 
+    def keyPressEvent(self, event):
+        """v3.16.0：Esc = 稍后提醒（此前全屏提醒弹窗键盘完全无法关闭）"""
+        if event.key() == Qt.Key_Escape:
+            try:
+                self._on_snooze()
+            except Exception:  # noqa: BLE001
+                self._real_close()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def show_on_screen(self, screen=None):
         if screen is not None:
             self._screen = screen
