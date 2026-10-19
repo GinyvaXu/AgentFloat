@@ -970,6 +970,28 @@ import {
       (it.read ? "1" : "0") + '">' + (it.read ? "标为未读" : "标为已读") + "</button></div></div>";
   }
 
+  function newsDetailHtml(it) {
+    if (!it) {
+      return '<div class="news-detail"><div class="desc">从左侧选一条，查看摘要与原文链接。</div></div>';
+    }
+    const c = NEWS_CAT_COLOR[it.category] || "#7F8C8D";
+    return '<div class="news-detail">' +
+      '<div class="kick"><span class="chip" style="color:#fff;background:' + c + '">' +
+      esc(it.category || "综合") + "</span>" +
+      (it.source ? "<span>" + esc(it.source) + "</span>" : "") +
+      "<span>" + (it.read ? "已读" : "未读") + (it.starred ? " · 已收藏" : "") + "</span></div>" +
+      "<h3>" + esc(it.title || "") + "</h3>" +
+      (it.summary ? "<p>" + esc(it.summary) + "</p>"
+                  : '<p class="desc">该条暂无摘要，点「打开原文」阅读全文。</p>') +
+      '<div class="actions">' +
+      '<a class="btn sm" href="' + esc(it.url || "#") + '" target="_blank" rel="noopener">打开原文</a>' +
+      '<button class="btn sm" data-star="' + esc(it.id || "") + '">' +
+      (it.starred ? "取消收藏" : "收藏") + "</button>" +
+      '<button class="btn sm" data-toggle-read="' + esc(it.id || "") + '" data-read="' +
+      (it.read ? "1" : "0") + '">' + (it.read ? "标为未读" : "标为已读") + "</button>" +
+      "</div></div>";
+  }
+
   function renderNews(el, st) {
     const n = cfg.news || {};
     const report = st.report || null;
@@ -1031,8 +1053,9 @@ import {
         (report.used_ai ? ' · <span class="tag purple">AI 摘要</span>' : ' · <span class="tag gray">标题列表</span>') +
         " · 共 " + (report.items || []).length + " 条 · 未读 " + unread +
         (st.starred_count ? " · 收藏 " + st.starred_count : "") + "</div>";
+      let listHtml = "";
       if (!items.length) {
-        reader += '<div class="desc">没有符合条件的条目（换个筛选或清空搜索）。</div>';
+        listHtml = '<div class="desc" style="padding:16px">没有符合条件的条目（换个筛选或清空搜索）。</div>';
       }
       const groups = {};
       items.forEach((it) => { (groups[it.category || "综合"] = groups[it.category || "综合"] || []).push(it); });
@@ -1040,15 +1063,19 @@ import {
       Object.keys(groups).sort().forEach((cat) => {
         const collapsed = !!newsUI.collapsed[cat];
         const c = NEWS_CAT_COLOR[cat] || "#7F8C8D";
-        reader += '<div class="news-group"><button class="news-group-head" data-cat="' + esc(cat) + '">' +
+        listHtml += '<div class="news-group"><button class="news-group-head" data-cat="' + esc(cat) + '">' +
           '<span class="chip" style="color:#fff;background:' + c + '">' + esc(cat) + "</span>" +
           '<span class="grow">' + groups[cat].length + " 条</span>" +
           '<span class="caret">' + (collapsed ? "▸" : "▾") + "</span></button>";
         if (!collapsed) {
-          groups[cat].forEach((it) => { reader += newsItemHtml(it, flat); flat += 1; });
+          groups[cat].forEach((it) => { listHtml += newsItemHtml(it, flat); flat += 1; });
         }
-        reader += "</div>";
+        listHtml += "</div>";
       });
+      // v3.15.0：方向 C —— 左侧列表 + 右侧详情（窄窗自动堆叠）
+      const sel = items[newsUI.focus] || null;
+      reader += '<div class="news-split"><div class="news-list">' + listHtml + "</div>" +
+        newsDetailHtml(sel) + "</div>";
     } else {
       reader += '<div class="desc">今日尚未生成快报。点上方「立即生成」开始。</div>';
     }
@@ -1141,6 +1168,12 @@ import {
       const c = b.dataset.cat;
       newsUI.collapsed[c] = !newsUI.collapsed[c];
       renderNews(el, newsState);
+    }));
+    // v3.15.0：方向 C —— 点行切换右侧详情（点标题/按钮时不抢）
+    $$("#newsContent .news-item").forEach((row) => row.addEventListener("click", (ev) => {
+      if (ev.target.closest("a,button,input")) return;
+      const idx = parseInt(row.dataset.idx, 10);
+      if (!isNaN(idx)) { newsUI.focus = idx; renderNews(el, newsState); }
     }));
     $$("#newsContent [data-star]").forEach((b) => b.addEventListener("click", async (ev) => {
       ev.preventDefault();

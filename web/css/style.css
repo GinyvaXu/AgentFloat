@@ -318,6 +318,38 @@ details.help code { background:rgba(120,120,128,0.16); border-radius:5px; paddin
   border-radius: var(--r-md); padding: 13px var(--sp-lg); margin-bottom: 10px;
   position: relative;                     /* v3.14.0：合并重复定义 */
 }
+
+/* ── 快报分栏阅读（v3.15.0 · 方向 C：左列表 + 右详情）──────────── */
+.news-split {
+  display: grid; grid-template-columns: 52% 1fr;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  overflow: hidden; background: var(--surface); min-height: 420px;
+}
+.news-list { overflow: auto; max-height: 620px; border-right: 1px solid var(--border); }
+.news-split .news-item {
+  margin: 0; border: 0; border-bottom: 1px solid rgba(120,120,128,0.12);
+  border-radius: 0; padding: 9px 12px; background: transparent;
+}
+.news-split .news-item:hover { background: rgba(120,120,128,0.08); }
+.news-split .news-item.focus {
+  background: rgba(10,132,255,0.10); box-shadow: none;
+  border-left: 2px solid var(--accent); padding-left: 10px;
+}
+.news-split .news-item .s { display: none; }      /* 摘要移到右栏 */
+.news-split .news-item .meta { margin-top: 4px; }
+.news-list .news-group-head:hover { background: rgba(120,120,128,0.08); }
+.news-detail { padding: 16px 18px; overflow: auto; max-height: 620px; }
+.news-detail .kick { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 11px; color: var(--hint); }
+.news-detail h3 { font-size: 15px; line-height: 1.42; font-weight: 600; margin: 0 0 8px; }
+.news-detail .meta { font-size: 11px; color: var(--hint); margin-bottom: 12px; }
+.news-detail p { font-size: 12.5px; line-height: 1.65; color: var(--text2); margin: 0 0 10px; }
+.news-detail .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+
+@media (max-width: 860px) {
+  .news-split { grid-template-columns: 1fr; }
+  .news-list { border-right: none; border-bottom: 1px solid var(--border); max-height: 340px; }
+  .news-detail { max-height: none; }
+}
 .news-item .t { font-size: 13.5px; font-weight: 600; line-height: 1.45; }
 .news-item .t a { color: var(--text); text-decoration: none; }
 .news-item .t a:hover { color: var(--accent); }

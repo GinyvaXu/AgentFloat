@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AgentFloat · 重做方向拼版（精密工具感）</title>
+<style>
+  :root{
+    --bg:#0E0F12; --panel:#14161A; --panel2:#171A1F; --line:rgba(255,255,255,.07);
+    --line2:rgba(255,255,255,.12); --text:#E8E9EC; --text2:#9A9CA3; --hint:#6E7076;
+    --accent:#0A84FF; --ok:#34C759; --warn:#FF9F0A;
+    --r:8px; --row:34px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0A0B0D;color:var(--text);font-family:"Inter","SF Pro Text","Segoe UI","Microsoft YaHei",sans-serif;
+       -webkit-font-smoothing:antialiased;padding:28px 32px 60px}
+  h1{font-size:15px;font-weight:600;letter-spacing:.2px;margin-bottom:6px}
+  .sub{font-size:12px;color:var(--text2);margin-bottom:22px}
+  .board{margin-bottom:34px}
+  .board-head{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}
+  .board-name{font-size:13px;font-weight:600}
+  .board-tag{font-size:11px;color:var(--hint);border:1px solid var(--line);padding:1px 7px;border-radius:999px}
+  .board-note{font-size:11.5px;color:var(--hint);margin-left:auto}
+
+  /* 共享外壳：无圆角、细线、单强调色 */
+  .app{display:grid;grid-template-columns:196px 1fr;height:520px;border:1px solid var(--line);
+       border-radius:12px;overflow:hidden;background:var(--bg)}
+  .rail{border-right:1px solid var(--line);padding:14px 12px;display:flex;flex-direction:column;gap:2px}
+  .brand{display:flex;align-items:center;gap:8px;padding:2px 6px 14px}
+  .dot{width:14px;height:14px;border-radius:50%;background:linear-gradient(135deg,#0A84FF,#AF52DE)}
+  .brand b{font-size:12.5px;font-weight:600;letter-spacing:.2px}
+  .ver{font-size:10.5px;color:var(--hint)}
+  .nav{display:flex;align-items:center;gap:9px;height:30px;padding:0 8px;border-radius:6px;font-size:12.5px;color:var(--text2)}
+  .nav .ico{width:14px;text-align:center;opacity:.75;font-size:11px}
+  .nav.on{background:rgba(10,132,255,.10);color:var(--text)}
+  .nav.on .ico{opacity:1;color:var(--accent)}
+  .nav .k{margin-left:auto;font-size:10px;color:var(--hint);font-variant-numeric:tabular-nums}
+  .rail-foot{margin-top:auto;padding:8px 6px;font-size:10.5px;color:var(--hint);display:flex;align-items:center;gap:6px}
+  .live{width:5px;height:5px;border-radius:50%;background:var(--ok)}
+
+  .main{display:flex;flex-direction:column;min-width:0}
+  .top{height:42px;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--line)}
+  .top h2{font-size:13px;font-weight:600;letter-spacing:.2px}
+  .top .count{font-size:11px;color:var(--hint);font-variant-numeric:tabular-nums}
+  .search{margin-left:auto;display:flex;align-items:center;gap:8px;height:26px;padding:0 10px;border:1px solid var(--line);
+          border-radius:6px;font-size:11.5px;color:var(--hint);min-width:200px}
+  .search .kbd{border:1px solid var(--line);border-radius:4px;padding:0 4px;font-size:10px}
+  .btn{height:26px;padding:0 10px;border:1px solid var(--line2);border-radius:6px;background:transparent;color:var(--text);
+       font-size:11.5px;display:flex;align-items:center;gap:6px}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .filters{display:flex;align-items:center;gap:14px;padding:0 16px;height:34px;border-bottom:1px solid var(--line);
+           font-size:11.5px;color:var(--hint)}
+  .filters .f{height:34px;display:flex;align-items:center;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .filters .f.on{color:var(--text);border-bottom-color:var(--accent)}
+  .filters .right{margin-left:auto;display:flex;gap:10px}
+  .list{overflow:auto;flex:1}
+
+  /* A：紧凑列表（无卡片，细线分组） */
+  .group{display:flex;align-items:center;gap:8px;height:26px;padding:0 16px;font-size:10.5px;color:var(--hint);
+         letter-spacing:.4px;text-transform:uppercase;border-bottom:1px solid var(--line)}
+  .group .n{margin-left:auto;font-variant-numeric:tabular-nums}
+  .row{display:grid;grid-template-columns:2px 1fr 92px 74px 54px;align-items:center;gap:10px;
+       height:var(--row);padding:0 16px;border-bottom:1px solid rgba(255,255,255,.04);font-size:12.5px}
+  .row:hover{background:rgba(255,255,255,.03)}
+  .bar{width:2px;height:14px;border-radius:1px;background:transparent}
+  .row.unread .bar{background:var(--accent)}
+  .row .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .src{font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .meta{font-size:10.5px;color:var(--hint);font-variant-numeric:tabular-nums;text-align:right}
+  .row .star{color:var(--warn);font-size:10px;text-align:right}
+
+  /* B：卡片分组（同一系统，稍松） */
+  .cards{padding:12px 16px 16px;display:flex;flex-direction:column;gap:10px;overflow:auto}
+  .card{border:1px solid var(--line);border-radius:var(--r);background:var(--panel)}
+  .card .head{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line);font-size:11px;color:var(--text2)}
+  .card .head .n{margin-left:auto;color:var(--hint);font-variant-numeric:tabular-nums}
+  .card .r{display:grid;grid-template-columns:2px 1fr 88px 56px;gap:10px;align-items:center;
+          height:38px;padding:0 12px;border-bottom:1px solid rgba(255,255,255,.04);font-size:12.5px}
+  .card .r:last-child{border-bottom:none}
+  .card .r .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .card .r .src{font-size:11px;color:var(--text2)}
+  .card .r .meta{font-size:10.5px;color:var(--hint);text-align:right;font-variant-numeric:tabular-nums}
+
+  /* C：分栏（列表 + 详情） */
+  .split{display:grid;grid-template-columns:52% 1fr;flex:1;min-height:0}
+  .split .list{border-right:1px solid var(--line)}
+  .detail{padding:16px 18px;overflow:auto}
+  .detail .kicker{font-size:10.5px;color:var(--accent);letter-spacing:.4px;text-transform:uppercase;margin-bottom:8px}
+  .detail h3{font-size:15px;line-height:1.4;font-weight:600;margin-bottom:8px}
+  .detail .meta{font-size:11px;color:var(--hint);margin-bottom:14px;font-variant-numeric:tabular-nums}
+  .detail p{font-size:12.5px;line-height:1.62;color:var(--text2);margin-bottom:10px}
+  .detail .actions{display:flex;gap:8px;margin-top:14px}
+  .link{font-size:11.5px;color:var(--accent);text-decoration:none}
+
+  .swatches{display:flex;gap:6px;margin-top:8px}
+  .sw{width:22px;height:14px;border-radius:3px;border:1px solid var(--line)}
+</style>
+</head>
+<body>
+  <h1>AgentFloat · 重做方向拼版 —— 精密工具感</h1>
+  <div class="sub">同一套令牌，三种密度。品牌渐变只保留在浮球与标题左侧 2px 细线；面板全部实底、细线分隔，不用毛玻璃。</div>
+
+  <!-- A -->
+  <div class="board">
+    <div class="board-head">
+      <div class="board-name">A · 紧凑列表</div>
+      <div class="board-tag">rows 34px · 无卡片</div>
+      <div class="board-note">信息密度最高，适合每天扫读</div>
+    </div>
+    <div class="app">
+      <aside class="rail">
+        <div class="brand"><div class="dot"></div><div><b>AgentFloat</b><div class="ver">v3.14.1 测试版</div></div></div>
+        <div class="nav"><span class="ico">⌘</span>使用指南</div>
+        <div class="nav"><span class="ico">⚙</span>设置</div>
+        <div class="nav"><span class="ico">↓</span>Agent 安装</div>
+        <div class="nav"><span class="ico">¥</span>API 用量</div>
+        <div class="nav on"><span class="ico">N</span>AI 快报<span class="k">⌘N</span></div>
+        <div class="rail-foot"><span class="live"></span>本地服务运行中</div>
+      </aside>
+      <main class="main">
+        <div class="top">
+          <h2>AI 快报</h2><span class="count">2026-10-19 · 42 条 · 未读 6</span>
+          <div class="search">搜索标题 / 来源 <span class="kbd">⌘K</span></div>
+          <button class="btn primary">生成快报</button>
+        </div>
+        <div class="filters">
+          <span class="f on">全部</span><span class="f">未读 6</span><span class="f">收藏 3</span>
+          <span class="right"><span>来源：全部</span><span>导出</span></span>
+        </div>
+        <div class="list">
+          <div class="group">AI · 14<span class="n">按时间</span></div>
+          <div class="row unread"><span class="bar"></span><span class="t">Show HN: 把本地 Agent 接进桌面浮球的工具</span><span class="src">HackerNews</span><span class="meta">09:12</span><span class="star">★</span></div>
+          <div class="row unread"><span class="bar"></span><span class="t">Anthropic 发布新的 Agent 评测基准</span><span class="src">量子位</span><span class="meta">08:47</span><span class="star"></span></div>
+          <div class="row"><span class="bar"></span><span class="t">arXiv: 用小模型蒸馏工具调用轨迹</span><span class="src">arXiv AI</span><span class="meta">08:02</span><span class="star"></span></div>
+          <div class="group">开发 · 11<span class="n">按时间</span></div>
+          <div class="row"><span class="bar"></span><span class="t">PyQt6 与 PyQt5 在 Windows 高 DPI 下的差异梳理</span><span class="src">少数派</span><span class="meta">昨天</span><span class="star">★</span></div>
+          <div class="row unread"><span class="bar"></span><span class="t">github/awesome-copilot</span><span class="src">GitHub Trending</span><span class="meta">昨天</span><span class="star"></span></div>
+          <div class="row"><span class="bar"></span><span class="t">Rust 在 AI 推理服务中的落地经验</span><span class="src">HackerNews</span><span class="meta">昨天</span><span class="star"></span></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- B -->
+  <div class="board">
+    <div class="board-head">
+      <div class="board-name">B · 卡片分组</div>
+      <div class="board-tag">rows 38px · 8px 圆角</div>
+      <div class="board-note">比 A 松一点，分组边界更清楚</div>
+    </div>
+    <div class="app">
+      <aside class="rail">
+        <div class="brand"><div class="dot"></div><div><b>AgentFloat</b><div class="ver">v3.14.1 测试版</div></div></div>
+        <div class="nav"><span class="ico">⌘</span>使用指南</div>
+        <div class="nav"><span class="ico">⚙</span>设置</div>
+        <div class="nav"><span class="ico">↓</span>Agent 安装</div>
+        <div class="nav"><span class="ico">¥</span>API 用量</div>
+        <div class="nav on"><span class="ico">N</span>AI 快报<span class="k">⌘N</span></div>
+        <div class="rail-foot"><span class="live"></span>本地服务运行中</div>
+      </aside>
+      <main class="main">
+        <div class="top"><h2>AI 快报</h2><span class="count">2026-10-19 · 42 条 · 未读 6</span>
+          <div class="search">搜索标题 / 来源 <span class="kbd">⌘K</span></div><button class="btn primary">生成快报</button></div>
+        <div class="filters"><span class="f on">全部</span><span class="f">未读 6</span><span class="f">收藏 3</span>
+          <span class="right"><span>来源：全部</span><span>导出</span></span></div>
+        <div class="cards">
+          <div class="card">
+            <div class="head">AI<span class="n">3 条 · 未读 2</span></div>
+            <div class="r"><span class="bar" style="background:var(--accent)"></span><span class="t">Show HN: 把本地 Agent 接进桌面浮球的工具</span><span class="src">HackerNews</span><span class="meta">09:12 ★</span></div>
+            <div class="r"><span class="bar" style="background:var(--accent)"></span><span class="t">Anthropic 发布新的 Agent 评测基准</span><span class="src">量子位</span><span class="meta">08:47</span></div>
+            <div class="r"><span class="bar"></span><span class="t">arXiv: 用小模型蒸馏工具调用轨迹</span><span class="src">arXiv AI</span><span class="meta">08:02</span></div>
+          </div>
+          <div class="card">
+            <div class="head">开发<span class="n">3 条 · 未读 1</span></div>
+            <div class="r"><span class="bar"></span><span class="t">PyQt6 与 PyQt5 在 Windows 高 DPI 下的差异梳理</span><span class="src">少数派</span><span class="meta">昨天 ★</span></div>
+            <div class="r"><span class="bar" style="background:var(--accent)"></span><span class="t">github/awesome-copilot</span><span class="src">GitHub Trending</span><span class="meta">昨天</span></div>
+            <div class="r"><span class="bar"></span><span class="t">Rust 在 AI 推理服务中的落地经验</span><span class="src">HackerNews</span><span class="meta">昨天</span></div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- C -->
+  <div class="board">
+    <div class="board-head">
+      <div class="board-name">C · 分栏阅读</div>
+      <div class="board-tag">列表 52% + 详情</div>
+      <div class="board-note">边扫边读，适合快报这种"标题 + 摘要"内容</div>
+    </div>
+    <div class="app">
+      <aside class="rail">
+        <div class="brand"><div class="dot"></div><div><b>AgentFloat</b><div class="ver">v3.14.1 测试版</div></div></div>
+        <div class="nav"><span class="ico">⌘</span>使用指南</div>
+        <div class="nav"><span class="ico">⚙</span>设置</div>
+        <div class="nav"><span class="ico">↓</span>Agent 安装</div>
+        <div class="nav"><span class="ico">¥</span>API 用量</div>
+        <div class="nav on"><span class="ico">N</span>AI 快报<span class="k">⌘N</span></div>
+        <div class="rail-foot"><span class="live"></span>本地服务运行中</div>
+      </aside>
+      <main class="main">
+        <div class="top"><h2>AI 快报</h2><span class="count">2026-10-19 · 42 条 · 未读 6</span>
+          <div class="search">搜索标题 / 来源 <span class="kbd">⌘K</span></div><button class="btn primary">生成快报</button></div>
+        <div class="filters"><span class="f on">全部</span><span class="f">未读 6</span><span class="f">收藏 3</span>
+          <span class="right"><span>来源：全部</span><span>导出</span></span></div>
+        <div class="split">
+          <div class="list">
+            <div class="group">AI · 14</div>
+            <div class="row unread" style="grid-template-columns:2px 1fr 54px"><span class="bar"></span><span class="t">Show HN: 把本地 Agent 接进桌面浮球的工具</span><span class="meta">09:12</span></div>
+            <div class="row unread" style="grid-template-columns:2px 1fr 54px"><span class="bar"></span><span class="t">Anthropic 发布新的 Agent 评测基准</span><span class="meta">08:47</span></div>
+            <div class="row" style="grid-template-columns:2px 1fr 54px"><span class="bar"></span><span class="t">arXiv: 用小模型蒸馏工具调用轨迹</span><span class="meta">08:02</span></div>
+            <div class="group">开发 · 11</div>
+            <div class="row" style="grid-template-columns:2px 1fr 54px"><span class="bar"></span><span class="t">PyQt6 与 PyQt5 在 Windows 高 DPI 下的差异梳理</span><span class="meta">昨天</span></div>
+            <div class="row unread" style="grid-template-columns:2px 1fr 54px"><span class="bar"></span><span class="t">github/awesome-copilot</span><span class="meta">昨天</span></div>
+          </div>
+          <div class="detail">
+            <div class="kicker">HackerNews · AI</div>
+            <h3>Show HN: 把本地 Agent 接进桌面浮球的工具</h3>
+            <div class="meta">2026-10-19 09:12 · 未读 · 已收藏</div>
+            <p>作者把常见的 CLI Agent 封装成桌面悬浮球，支持环形菜单与 Skills 辅助窗。评论区讨论集中在权限隔离与沙箱上。</p>
+            <p>亮点：菜单按使用频率排序；Skills 面板支持中英对照；剪贴板历史自动去重。</p>
+            <div class="actions"><button class="btn">打开原文</button><button class="btn">取消收藏</button><button class="btn">标记未读</button></div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="board">
+    <div class="board-head"><div class="board-name">共用调色板</div><div class="board-tag">单强调色</div></div>
+    <div class="swatches">
+      <span class="sw" style="background:#0E0F12"></span><span class="sw" style="background:#14161A"></span>
+      <span class="sw" style="background:#171A1F"></span><span class="sw" style="background:#0A84FF"></span>
+      <span class="sw" style="background:#34C759"></span><span class="sw" style="background:#FF9F0A"></span>
+      <span style="font-size:11px;color:var(--hint);margin-left:6px">底 / 面板 / 浮层 / 强调 / 成功 / 提醒 —— 渐变只出现在浮球与标题左缘 2px</span>
+    </div>
+  </div>
+</body>
+</html>
