@@ -17,6 +17,11 @@ def ball(qapp):
     orig = fb.save_config
     fb.save_config = lambda cfg: None          # 测试期间不落盘
     w = fb.FloatingWidget()
+    # 隔离本机真实 config.json：用户把 quotes.on_click 设成了 false，
+    # 会让「单击弹语录」的断言按老行为回退到启动 Agent（见 HANDOFF §2.1）。
+    # 这里固定成默认值，只影响内存，不落盘。
+    w.config.setdefault("quotes", {})["on_click"] = True
+    w.config["quotes"].setdefault("enabled", True)
     w.move(500, 400)
     _pump(qapp, 0.3)
     yield w
