@@ -44,14 +44,34 @@
     return path + (path.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(TOKEN);
   }
 
+  var DEFAULT_TIMEOUT = 15000;   // v3.16.4：请求超时，避免页面停在骨架上不动
+
   async function api(path, options) {
     options = options || {};
+    const timeout = options.timeout === undefined ? DEFAULT_TIMEOUT : options.timeout;
     const init = {
       method: options.method || "GET",
       headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
     };
     if (options.body !== undefined) init.body = JSON.stringify(options.body);
-    const resp = await fetch(path, init);
+    let timer = null;
+    if (timeout > 0 && typeof AbortController !== "undefined") {
+      const ctrl = new AbortController();
+      init.signal = ctrl.signal;
+      timer = setTimeout(function () { ctrl.abort(); }, timeout);
+    }
+    let resp;
+    try {
+      resp = await fetch(path, init);
+    } catch (e) {
+      if (e && e.name === "AbortError") {
+        const secs = Math.max(1, Math.round(timeout / 1000));
+        throw new Error("请求超时（" + secs + " 秒无响应）。本地服务可能未启动或正忙。");
+      }
+      throw new Error("网络请求失败：" + (e && e.message ? e.message : e));
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     if (resp.status === 401) {
       showTokenGate();
       throw new Error("需要访问令牌（请在浮球右键菜单复制后粘贴）");

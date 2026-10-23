@@ -2,7 +2,7 @@
  * install.js — Agent 安装页（ES Module）
  * 独立管理安装状态与轮询；app.js 进入/离开页面时调用 render/leave。
  */
-import { $, esc, toast } from "./util.js";
+import { $, esc, toast, loadingCard, errorCard } from "./util.js";
 
 let active = false;
 let timer = null;
@@ -13,7 +13,9 @@ let refreshing = false;
 export function renderInstallPage() {
   active = true;
   const el = $("#installContent");
-  el.innerHTML = '<div class="desc" style="padding:6px 2px 10px">检测本机 Agent 安装情况，支持一键安装 / 升级 / 卸载（npm 全局安装，国内镜像优先自动回退）。</div><div id="installList">加载中…</div>';
+  // v3.16.4：首屏用骨架，不再是一行「加载中…」
+  el.innerHTML = '<div class="desc" style="padding:6px 2px 10px">检测本机 Agent 安装情况，支持一键安装 / 升级 / 卸载（npm 全局安装，国内镜像优先自动回退）。</div>' +
+    '<div id="installList">' + loadingCard(3) + "</div>";
   refreshInstall();
   if (timer) clearInterval(timer);
   timer = setInterval(() => {
@@ -70,9 +72,13 @@ export async function refreshInstall(silent) {
   try {
     const resp = await API.api("/api/agent_install/status");
     agents = resp.agents || [];
-    el.innerHTML = agents.map(installCard).join("");
+    // v3.16.4：空态行（后端返回空列表时不再是一片空白）
+    el.innerHTML = agents.length
+      ? agents.map(installCard).join("")
+      : '<div class="card"><div class="desc">暂未收录可安装的 Agent。可在设置页手动添加启动命令。</div></div>';
   } catch (e) {
-    if (!silent) el.innerHTML = '<div class="desc" style="color:#FF5F56">加载失败：' + esc(e.message) + "</div>";
+    // v3.16.4：错误卡片 + 重试（轮询失败时只在非静默态提示，避免刷屏）
+    if (!silent) el.innerHTML = errorCard(e.message, "refreshInstall");
   } finally {
     refreshing = false;
   }
@@ -87,7 +93,16 @@ export async function installAgent(id, action) {
 }
 
 export async function uninstallAgent(id) {
-  if (!confirm("确定卸载该 Agent 吗？")) return;
+  // v3.16.4：改用统一确认弹层（原生 confirm 带系统边框，与本页观感不一致）
+  const a = agents.find((x) => x.id === id) || {};
+  const body = "确定卸载「" + (a.name || id) + "」吗？卸载后可重新安装。";
+  let ok;
+  if (window.App && typeof window.App.confirmDialog === "function") {
+    ok = await window.App.confirmDialog({ title: "卸载 Agent", body: body, okText: "卸载", danger: true });
+  } else {
+    ok = confirm(body);
+  }
+  if (!ok) return;
   try {
     const r = await API.api("/api/agent_install/uninstall", { method: "POST", body: { id: id } });
     toast(r.message || "已开始卸载", "ok");

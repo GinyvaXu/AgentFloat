@@ -3,7 +3,7 @@
  * 数据流：配置以 JSON 形式在浏览器内编辑 → PUT /api/config 持久化并应用到浮窗。
  * P3：拆分 ES Module —— 工具函数在 util.js，Agent 安装页在 install.js。
  */
-import { $, $$, esc, getPath, setPath, num, deep, toast } from "./util.js";
+import { $, $$, esc, getPath, setPath, num, deep, toast, loadingCard, errorCard } from "./util.js";
 import {
   renderInstallPage, leaveInstallPage, refreshInstall,
   installAgent, uninstallAgent, toggleInstallLog,
@@ -1438,24 +1438,7 @@ import {
   }
 
   // ── 模态框 / SSE / 启动 ─────────────────────────
-  // v3.15.1：统一加载骨架 / 错误卡片（替掉单行"加载中…"）
-  function loadingCard(lines) {
-    const n = Math.max(1, lines || 3);
-    let rows = "";
-    for (let i = 0; i < n; i += 1) {
-      rows += '<div class="skeleton-line" style="width:' + (92 - i * 14) + '%"></div>';
-    }
-    return '<div class="card skeleton">' + rows + "</div>";
-  }
-  function errorCard(msg, retryFn) {
-    return '<div class="card error"><h3>加载失败</h3>' +
-      '<div class="desc">' + esc(msg || "未知错误") + "</div>" +
-      '<div class="err-actions">' +
-      '<button class="btn sm primary" data-retry-load="' + esc(retryFn || "") + '">重试</button>' +
-      '<button class="btn sm" data-err-detail>查看详情</button></div>' +
-      '<pre class="err-detail hidden">' + esc(msg || "") + "</pre></div>";
-  }
-
+  // v3.15.1：统一加载骨架 / 错误卡片（v3.16.4 起实现移到 util.js，供安装页共用）
   function openModal(html) {
     $("#modalBox").innerHTML = html;
     $("#modalMask").classList.remove("hidden");
@@ -1488,7 +1471,24 @@ import {
   }
   // v3.9.0：新用户横幅按钮（委托绑定，横幅在多个子页复用）
   document.addEventListener("click", (e) => {
-    const id = e.target && e.target.id;
+    const t = e.target;
+    // v3.16.4：错误卡「重试」/「查看详情」（此前按钮在页面上但没人接事件）
+    const retryEl = t && t.closest ? t.closest("[data-retry-load]") : null;
+    if (retryEl) {
+      const name = retryEl.dataset.retryLoad;
+      const fn = name && window.App ? window.App[name] : null;
+      if (typeof fn === "function") fn();
+      else toast("没有可用的重试入口", "err");
+      return;
+    }
+    const detailEl = t && t.closest ? t.closest("[data-err-detail]") : null;
+    if (detailEl) {
+      const card = detailEl.closest(".card.error");
+      const pre = card ? card.querySelector(".err-detail") : null;
+      if (pre) pre.classList.toggle("hidden");
+      return;
+    }
+    const id = t && t.id;
     if (id === "btnGoGuide") { goPage("guide"); }
     else if (id === "btnSkipOnboard") {
       cfg.onboarding_done = true;
@@ -1578,6 +1578,11 @@ import {
 
   window.App = {
     save: save, goPage: goPage, goSub: goSub,
+    confirmDialog: confirmDialog,     // v3.16.4：安装页等子模块复用统一确认弹层
+    loadApiPage: loadApiPage,         // 错误卡「重试」入口
+    refreshInstall: refreshInstall,   // 安装页错误卡「重试」入口
+    loadingCard: loadingCard,
+    errorCard: errorCard,
     guide: renderGuide,          // v3.9.2：供调试/自动化测试直接渲染指南页
     renderNews: renderNews,
     rangeLabel: (el, id) => {

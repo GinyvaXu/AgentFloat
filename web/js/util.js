@@ -19,3 +19,30 @@ export function toast(msg, kind) {
   wrap.appendChild(t);
   setTimeout(() => { t.classList.add("out"); setTimeout(() => t.remove(), 320); }, 2600);
 }
+
+/**
+ * 加载骨架（v3.15.1 引入，v3.16.4 从 app.js 提到这里共用）
+ * @param {number} lines 骨架行数
+ */
+export function loadingCard(lines) {
+  const n = Math.max(1, lines || 3);
+  let rows = "";
+  for (let i = 0; i < n; i += 1) {
+    rows += '<div class="skeleton-line" style="width:' + (92 - i * 14) + '%"></div>';
+  }
+  return '<div class="card skeleton">' + rows + "</div>";
+}
+
+/**
+ * 错误卡片 + 重试（v3.16.4 共用；retryName 为 window.App 上的方法名）
+ * 事件由 app.js 的全局 click 委托处理（data-retry-load / data-err-detail）。
+ */
+export function errorCard(msg, retryName) {
+  return '<div class="card error"><h3>加载失败</h3>' +
+    '<div class="desc">' + esc(msg || "未知错误") + "</div>" +
+    '<div class="err-actions">' +
+    '<button class="btn sm primary" data-retry-load="' + esc(retryName || "") + '">重试</button>' +
+    '<button class="btn sm" data-err-detail>查看详情</button></div>' +
+    '<pre class="err-detail hidden">' + esc(msg || "") + "</pre></div>";
+}
+
