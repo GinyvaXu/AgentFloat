@@ -1,5 +1,24 @@
 # 更新日志
 
+## [未发布] - 2026-10-23（P1 Catalog 地基，后端未接 UI）
+### Added
+- `src/agentfloat/services/catalog/schema.py`：`AgentSpec` / `CatalogManifest` 结构定义与校验（无第三方校验库）
+  - `platforms` 三值枚举 `native/wsl/none`（拒绝布尔写法）
+  - 一记录 + `launch.variants[]`；`status` 三态 `active/deprecated/eol`（eol 必须写迁移说明）
+  - `verifiedAt` 超 90 天标记为「需复核」；`health.versionPattern` 编译期校验
+  - 稳定层 / 易变层字段白名单（远程只能改易变层的依据）
+  - 批量校验逐条降级：单条非法只丢该条
+- `catalog/merge.py`：`bundled < remote < user` 三层合并
+  - 远程条目只能覆盖易变字段、不能新增 Agent；稳定字段被改时忽略并留痕
+  - 坏补丁回退内置条目；用户覆盖优先级最高，也能新增本机私有 Agent
+  - `diff_specs()` 供 `af catalog verify` 打印人审差异
+- `catalog/store.py`：本地缓存（`%LOCALAPPDATA%/AgentFloat/catalog/`）
+  - 原子写（临时文件 + `os.replace`）+ `*.bak` last-known-good 自动回退
+  - 分包按字节存、可用 sha256 校验；文件名白名单拒绝路径穿越
+  - ETag / TTL 24h 的刷新状态
+### Tests
+- `tests/test_catalog_schema.py`（21 项）、`tests/test_catalog_merge.py`（13 项）、`tests/test_catalog_store.py`（7 项）全绿
+
 ## [3.16.4] - 2026-10-23（测试版 · B3 前端收尾）
 ### Fixed
 - **错误卡的「重试 / 查看详情」按钮此前没接事件**（点了毫无反应）：改由全局 click 委托处理 —— 重试按 `data-retry-load` 调用 `App` 上对应方法，详情按钮展开/收起原始报错
