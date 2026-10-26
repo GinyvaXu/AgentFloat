@@ -1,4 +1,10 @@
-# 更新日志
+﻿# 更新日志
+
+## [3.17.6] - 2026-10-26（测试版 · 目录核对 CLI）
+### Added
+- `tools/catalog_cli.py verify`：核对 21 条目录（npm 查最新版；winget/script/download/pip 标注人工核对），支持 `--json`；npm 查询失败时退出码 1
+- 实跑结果：10 条 npm 全部可解析、0 失败；11 条列为人工核对
+- 新增 `tests/test_catalog_cli.py`（3 项，注入 runner，不联网）
 
 ## [3.17.3] - 2026-10-26（测试版 · Agent 自动更新 + 启动偏好）
 ### Added
