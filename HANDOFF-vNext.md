@@ -11,6 +11,7 @@
 - **方案侧已就绪**：vNext 四条线（A Agent Hub / B 日报 2.0 / C Skill 车间 2.0 / D 进度面板）方案全部收口；A 线名单与分发已定稿，决策门 **G0 已通过**。
 - **仓库侧还没就绪**：有一盏红灯（已定位，非业务 bug）、一个已提交未构建的版本（v3.16.3）、一个未收尾的前端批次（B3）。
 - **建议开工顺序**：清障（约 1 小时）→ P1 第一刀（Content Catalog 骨架）→ Registry 数据 → 安装适配器 → Hub 页面。
+- **开发时间线（archify）**：每次提交后重跑更新 `.archify/timeline-dev-*/agentfloat-dev-timeline.html`（已完成 / 开发中 / 待开发）；当前版本见 `.archify/timeline-dev-20261026-130332/`。
 
 ---
 

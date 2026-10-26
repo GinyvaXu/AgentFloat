@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "diagram_type": "timeline",
+  "meta": {
+    "title": "AgentFloat 开发时间线",
+    "subtitle": "左 → 右：已完成 → 开发中 → 待开发。10-26 之后为计划项（示意，不是承诺日期）。",
+    "output": "docs/agentfloat-dev-timeline.html",
+    "evidence": "illustrative",
+    "timezone": "Asia/Shanghai",
+    "quality_profile": "showcase"
+  },
+  "layout": { "breaks": "auto" },
+  "lanes": [
+    { "id": "effect", "label": "动效与稳定性" },
+    { "id": "ui", "label": "前端精修" },
+    { "id": "catalog", "label": "vNext · P1 Catalog" },
+    { "id": "release", "label": "发布与装机" },
+    { "id": "process", "label": "工程流程" }
+  ],
+  "events": [
+    { "id": "motion-plan", "at": "2026-10-13T14:20:00+08:00", "lane": "effect", "kind": "change",
+      "title": "动效方案全量实施", "detail": "【已完成】SmoothState/Kick/令牌 + 6 处逐帧迁移 + 面板动画 + 启动动画可跳过（v3.13.0）" },
+    { "id": "motion-fix", "at": "2026-10-13T15:45:00+08:00", "lane": "effect", "kind": "recovery",
+      "title": "环菜单动画回归修复", "detail": "【已完成】reduced-motion 误判导致全局跳变 → BOOL 指针修正（v3.13.1）" },
+    { "id": "crossscreen", "at": "2026-10-13T17:20:00+08:00", "lane": "effect", "kind": "recovery",
+      "title": "跨屏抖动修复（第一版）", "detail": "【已完成·仍待续】去抖 + 光标判定 + screenChanged；B5 深层渲染问题按用户意见延后" },
+
+    { "id": "b1", "at": "2026-10-19T12:00:00+08:00", "lane": "ui", "kind": "change",
+      "title": "前端精修 B1", "detail": "【已完成】Qt 字号层级、Web 对比度 4.6:1、危险确认、禁用态、键盘可达（v3.14.0）" },
+    { "id": "b2", "at": "2026-10-19T18:35:00+08:00", "lane": "ui", "kind": "change",
+      "title": "DESIGN.md + 单一来源", "detail": "【已完成】CARD 令牌、菜单样式单源、flash 统一、Web CSS 去重（v3.14.1）" },
+    { "id": "news-c", "at": "2026-10-19T20:17:00+08:00", "lane": "ui", "kind": "change",
+      "title": "快报分栏阅读（方向 C）", "detail": "【已完成·待端到端复验】Web 左列表 + 右详情 + 窄窗堆叠（v3.15.0）" },
+    { "id": "b3", "at": "2026-10-19T21:40:00+08:00", "lane": "ui", "kind": "change",
+      "title": "B3 状态补齐", "detail": "【已完成】确认弹层、骨架加载、错误卡重试（v3.15.1）" },
+    { "id": "web-regression", "at": "2026-10-19T22:13:00+08:00", "lane": "ui", "kind": "recovery",
+      "title": "Web 全站脚本回归修复", "detail": "【已完成】正则替换残留 \\1 导致 app.js 解析失败 → 设置页复活（v3.16.1）" },
+    { "id": "toolbox", "at": "2026-10-19T22:25:00+08:00", "lane": "ui", "kind": "change",
+      "title": "统一确认框 + 语录开关", "detail": "【已完成】panel_kit.confirm()、单击浮球开关语录（v3.16.2）" },
+
+    { "id": "fixture", "at": "2026-10-23T14:40:00+08:00", "lane": "process", "kind": "recovery",
+      "title": "集成测试夹具隔离真实配置", "detail": "【已完成】on_click=false 污染测试 → 夹具强制内存配置，409 项全绿（6b3ce2b）" },
+    { "id": "v3164", "at": "2026-10-23T15:03:00+08:00", "lane": "release", "kind": "change",
+      "title": "v3.16.4 装机", "detail": "【已完成】B3 收尾：安装页骨架/空态、统一确认框、15s 请求超时" },
+    { "id": "catalog-core", "at": "2026-10-23T20:00:00+08:00", "lane": "catalog", "kind": "change",
+      "title": "P1 Catalog 地基", "detail": "【已完成】schema / merge / store + 41 项单测（e0d41c5、e400a86）" },
+
+    { "id": "timeline", "at": "2026-10-26T13:03:00+08:00", "lane": "process", "kind": "change",
+      "title": "开发时间线接入", "detail": "【开发中】archify timeline 建图；规则：每次提交后重跑更新" },
+    { "id": "catalog-ui", "at": "2026-10-28T10:00:00+08:00", "lane": "catalog", "kind": "action",
+      "title": "Catalog 接 UI", "detail": "【待开发】Registry 数据 → 本地缓存 → 安装适配器" },
+    { "id": "hub", "at": "2026-10-30T10:00:00+08:00", "lane": "catalog", "kind": "action",
+      "title": "Agent Hub 页面", "detail": "【待开发】列表/详情/一键安装，打通检测与启动" },
+    { "id": "agent-research", "at": "2026-11-02T10:00:00+08:00", "lane": "catalog", "kind": "action",
+      "title": "热门 Agent 收录与调研", "detail": "【待开发】P0：逐个调研启动方式/参数/安装，产出支持矩阵" },
+    { "id": "release-eval", "at": "2026-11-05T10:00:00+08:00", "lane": "release", "kind": "action",
+      "title": "正式版评估", "detail": "【待开发】tag / Release / 官网同步；需用户明确指令" }
+  ]
+}
