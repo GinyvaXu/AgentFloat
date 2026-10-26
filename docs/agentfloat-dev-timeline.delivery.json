@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "0430d271-e46a-45b4-9700-1d6837da2ceb",
+  "status": "current",
+  "command": "deliver",
+  "type": "timeline",
+  "input": "C:\\AIAgentBase\\Project3-AgentFloat克隆仓库\\.archify\\timeline-dev-20261026-130332\\candidate.json",
+  "output": "C:\\AIAgentBase\\Project3-AgentFloat克隆仓库\\docs\\agentfloat-dev-timeline.html",
+  "specification": {
+    "sha256": "057d0c227f8d1a582388e60ad9d9fb9814c751086d9eb44a85cdee1721785618",
+    "bytes": 4777
+  },
+  "artifact": {
+    "sha256": "e4667db7f1a658bbbbc080cc6be697899cd9c2aa500fec0bc79bd5a530bf7bd2",
+    "bytes": 841027
+  }
+}

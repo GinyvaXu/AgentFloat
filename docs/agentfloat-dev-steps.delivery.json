@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "86f8d695-9665-4275-916f-7c8a736f3842",
+  "status": "current",
+  "command": "deliver",
+  "type": "tree",
+  "input": "C:\\AIAgentBase\\Project3-AgentFloat克隆仓库\\.archify\\tree-dev-steps-20261026-140000\\candidate.json",
+  "output": "C:\\AIAgentBase\\Project3-AgentFloat克隆仓库\\docs\\agentfloat-dev-steps.html",
+  "specification": {
+    "sha256": "ebe65ee16b99af8e03ae4e10941bad18c58fa533b751d5526aae2c8a6cbe52a3",
+    "bytes": 2459
+  },
+  "artifact": {
+    "sha256": "f3b23bd07f02c34de5fd45646c3b8306d7c2234c7175f1adff37cf17773aac9a",
+    "bytes": 830511
+  }
+}
