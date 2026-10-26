@@ -86,7 +86,13 @@ def install(spec: AgentSpec, base: Optional[str] = None,
     kind = install_type(spec)
     t0 = time.time()
     log = []
-    if not pkg or kind not in ("npm", "pip"):
+    if not pkg:
+        return {"ok": False, "prefix": prefix, "reason": "缺少安装包/地址", "log": log, "seconds": 0}
+    if kind == "download":
+        # 只有官网下载页：不自动安装，返回链接让 UI 打开
+        return {"ok": False, "prefix": prefix, "reason": "download-page", "url": pkg,
+                "log": log, "seconds": round(time.time() - t0, 1)}
+    if kind not in ("npm", "pip", "winget", "script"):
         return {"ok": False, "prefix": prefix, "reason": "unsupported install type: %s" % kind,
                 "log": log, "seconds": 0}
 
@@ -99,6 +105,21 @@ def install(spec: AgentSpec, base: Optional[str] = None,
             cmd = ('npm.cmd install --prefix "%s" --cache "%s" --no-audit --no-fund '
                    '--loglevel=error %s' % (prefix, os.path.join(base or agents_dir(), ".npm-cache"), pkg))
         r = runner(cmd, DEFAULT_INSTALL_TIMEOUT)
+        log.append(r)
+        ok = r.get("rc") == 0
+    elif kind in ("winget", "script"):
+        if kind == "winget":
+            cmd = ('winget install --id %s --silent --accept-package-agreements '
+                   '--accept-source-agreements --disable-interactivity' % pkg)
+        else:
+            platforms = getattr(spec, "platforms", {}) or {}
+            win_support = platforms.get("windows") if isinstance(platforms, dict) else ""
+            if win_support == "wsl" or "ampcode.com" in pkg:
+                cmd = 'wsl bash -lc "curl -fsSL %s | bash"' % pkg
+            else:
+                cmd = ('powershell -NoProfile -ExecutionPolicy Bypass -Command '
+                       '"irm %s | iex"' % pkg)
+        r = runner(cmd, 900)
         log.append(r)
         ok = r.get("rc") == 0
     else:

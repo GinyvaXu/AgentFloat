@@ -77,3 +77,27 @@ def test_detect_not_installed(tmp_path):
 def test_auth_probe_unsupported_for_qwen(tmp_path):
     spec = specs().get("qwen")
     assert installer.auth_probe(spec, base=str(tmp_path)) == "unsupported"
+
+def test_install_winget_builds_command(tmp_path):
+    spec = specs().get("cursor-desktop")
+    calls = []
+    r = installer.install(spec, base=str(tmp_path), runner=fake_ok(calls))
+    assert r["ok"] is True
+    assert "winget install" in calls[0] and "Anysphere.Cursor" in calls[0]
+    assert "--silent" in calls[0]
+
+
+def test_install_script_builds_irm(tmp_path):
+    spec = specs().get("cursor-cli")
+    calls = []
+    r = installer.install(spec, base=str(tmp_path), runner=fake_ok(calls))
+    assert r["ok"] is True
+    assert "irm" in calls[0] and "cursor.com/install" in calls[0]
+
+
+def test_install_download_returns_page(tmp_path):
+    spec = specs().get("goose")
+    calls = []
+    r = installer.install(spec, base=str(tmp_path), runner=fake_ok(calls))
+    assert r["ok"] is False and r["reason"] == "download-page"
+    assert r["url"].startswith("http") and calls == []
