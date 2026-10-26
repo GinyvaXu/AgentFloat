@@ -11,7 +11,7 @@
   "nodes": [
     { "id": "root", "label": "AgentFloat 开发步骤", "sublabel": "按汇报单元划分" },
 
-    { "id": "done", "label": "已完成", "parent": "root", "sublabel": "9 个单元" },
+    { "id": "done", "label": "已完成", "parent": "root", "sublabel": "10 个单元" },
     { "id": "s1", "label": "1 · 动效落地", "parent": "done", "sublabel": "引擎/令牌 + 逐帧迁移 + 跳过动画" },
     { "id": "s2", "label": "2 · 动效回归", "parent": "done", "sublabel": "reduced-motion 误判 + 跨屏去抖" },
     { "id": "s3", "label": "3 · 前端 B1", "parent": "done", "sublabel": "字号/对比度/危险确认/键盘" },
@@ -25,8 +25,8 @@
     { "id": "current", "label": "进行中", "parent": "root", "sublabel": "1 个单元" },
     { "id": "s10", "label": "10 · 开发步骤图", "parent": "current", "sublabel": "archify 步骤图 + 每次汇报后更新" },
 
-    { "id": "todo", "label": "待开发", "parent": "root", "sublabel": "3 个单元" },
-    { "id": "s11", "label": "11 · Agent 调研", "parent": "todo", "sublabel": "9 个 Agent：启动/参数/安装核实" },
+    { "id": "todo", "label": "待开发", "parent": "root", "sublabel": "2 个单元" },
+    { "id": "s11", "label": "11 · Agent 调研", "parent": "done", "sublabel": "6 个已核实（headless 3 个）+ 4 个待定" },
     { "id": "s12", "label": "12 · Catalog 接 UI", "parent": "todo", "sublabel": "内置+远程 Registry、安装适配器" },
     { "id": "s13", "label": "13 · Hub 页面", "parent": "todo", "sublabel": "Web 先行：列表/详情/一键安装" }
   ]
