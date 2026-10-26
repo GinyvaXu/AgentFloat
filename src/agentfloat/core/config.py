@@ -135,6 +135,17 @@ def load_config():
         defaults["agents"] = _def_agents
         _migrated = True
 
+    # ── AI 日报 B 线：为旧配置补齐新增字段（不覆盖用户已有 sources / 设置）──
+    _news_cfg = defaults.get("news")
+    if isinstance(_news_cfg, dict):
+        for _k, _v in _NEWS_DEFAULTS.items():
+            if _k not in _news_cfg:
+                _news_cfg[_k] = copy.deepcopy(_v)
+                _migrated = True
+    else:
+        defaults["news"] = copy.deepcopy(_NEWS_DEFAULTS)
+        _migrated = True
+
     # ── 环绕菜单手感迁移（PATCH 3.2.0）：旧默认时延 → 灵敏档 + 按住选环 ──
     _rm = defaults.get("radial_menu")
     if isinstance(_rm, dict):

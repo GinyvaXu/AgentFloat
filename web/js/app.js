@@ -934,6 +934,8 @@ import {
       newsState = st;
       renderNews($("#newsContent"), st);
     } catch (e) {
+      const el = $("#newsContent");
+      if (el) el.innerHTML = errorCard("快报状态加载失败：" + e.message, "reloadNews");
       toast("快报状态加载失败：" + e.message, "err");
     }
   }
@@ -949,7 +951,7 @@ import {
       if (newsUI.filter === "starred" && !it.starred) return false;
       if (!kw) return true;
       return ((it.title || "") + " " + (it.summary || "") + " " + (it.source || "") +
-              " " + (it.category || "")).toLowerCase().indexOf(kw) >= 0;
+              " " + (it.category || "") + " " + (it.why || "")).toLowerCase().indexOf(kw) >= 0;
     });
   }
 
@@ -963,11 +965,36 @@ import {
       '<button class="news-star' + (it.starred ? " on" : "") + '" title="收藏/取消收藏" data-star="' +
       esc(it.id || "") + '">' + (it.starred ? "★" : "☆") + "</button></div>" +
       (it.summary ? '<div class="s">' + esc(it.summary) + "</div>" : "") +
+      (it.why ? '<div class="why">为什么：' + esc(it.why) + "</div>" : "") +
       '<div class="meta"><span class="chip" style="color:#fff;background:' + c + '">' +
       esc(it.category || "综合") + "</span>" +
       (it.source ? '<span class="src">' + esc(it.source) + "</span>" : "") +
+      (it.score ? '<span class="score">' + esc(it.score) + " 分</span>" : "") +
       '<button class="linklike" data-toggle-read="' + esc(it.id || "") + '" data-read="' +
       (it.read ? "1" : "0") + '">' + (it.read ? "标为未读" : "标为已读") + "</button></div></div>";
+  }
+
+  function newsFactorHtml(it) {
+    const f = it.factors || {};
+    if (!Object.keys(f).length) return "";
+    const rows = [["信任", "trust", 25], ["新鲜", "freshness", 20], ["兴趣", "interest", 20],
+                  ["重要性", "importance", 25], ["多样性", "diversity", 10]];
+    return '<div class="news-factors">' + rows.map((r) => {
+      const v = Number(f[r[1]] || 0);
+      const pct = Math.max(0, Math.min(100, Math.round((v / r[2]) * 100)));
+      return '<div class="nf-row"><span class="nf-label">' + r[0] + "</span>" +
+        '<span class="nf-bar"><i style="width:' + pct + '%"></i></span>' +
+        '<span class="nf-val">' + v + "/" + r[2] + "</span></div>";
+    }).join("") + "</div>";
+  }
+
+  function newsRelatedHtml(it) {
+    const rel = it.related || [];
+    if (!rel.length) return "";
+    return '<div class="news-related"><h4>相关来源</h4>' + rel.slice(0, 4).map((r) =>
+      '<div class="rel-row"><span class="rel-src">' + esc(r.source || "来源") + "</span>" +
+      '<a href="' + esc(r.url || "#") + '" target="_blank" rel="noopener">' +
+      esc(r.title || r.url || "链接") + "</a></div>").join("") + "</div>";
   }
 
   function newsDetailHtml(it) {
@@ -979,10 +1006,16 @@ import {
       '<div class="kick"><span class="chip" style="color:#fff;background:' + c + '">' +
       esc(it.category || "综合") + "</span>" +
       (it.source ? "<span>" + esc(it.source) + "</span>" : "") +
-      "<span>" + (it.read ? "已读" : "未读") + (it.starred ? " · 已收藏" : "") + "</span></div>" +
+      (it.score ? '<span class="score">综合 ' + esc(it.score) + " 分</span>" : "") +
+      "<span>" + (it.read ? "已读" : "未读") + (it.starred ? " · 已收藏" : "") + "</span>" +
+      (it.translated === false ? '<span class="tag gray">原文未翻译</span>' : "") +
+      (it.degraded ? '<span class="tag gray">逐条降级</span>' : "") + "</div>" +
       "<h3>" + esc(it.title || "") + "</h3>" +
+      (it.why ? '<div class="news-why"><b>为什么</b>' + esc(it.why) + "</div>" : "") +
       (it.summary ? "<p>" + esc(it.summary) + "</p>"
                   : '<p class="desc">该条暂无摘要，点「打开原文」阅读全文。</p>') +
+      newsFactorHtml(it) +
+      newsRelatedHtml(it) +
       '<div class="actions">' +
       '<a class="btn sm" href="' + esc(it.url || "#") + '" target="_blank" rel="noopener">打开原文</a>' +
       '<button class="btn sm" data-star="' + esc(it.id || "") + '">' +
@@ -1020,17 +1053,41 @@ import {
         '<div class="progress"><div style="width:' + pct + '%"></div></div>';
     }
     if (report && (report.sources || []).length) {
-      gen += '<div class="news-sources">' + report.sources.map((s) =>
-        '<span class="news-src-chip' + (s.ok ? " ok" : " bad") + '" title="' + esc(s.error || "") + '">' +
-        esc(s.name) + (s.ok ? " · " + (s.count || 0) : " · 失败") +
-        (s.ok ? "" : ' <button class="linklike" data-retry="' + esc(s.id) + '">重试</button>') + "</span>").join("") +
-        "</div>";
+      const health = report.source_health || {};
+      if (health.total) {
+        gen += '<div class="desc">源健康：正常 ' + (health.ok || 0) + " · 降级 " +
+          (health.degraded || 0) + " · 失败 " + (health.failed || 0) +
+          "（成功率 " + Math.round((health.success_rate || 0) * 100) + "%）</div>";
+      }
+      gen += '<div class="news-sources">' + report.sources.map((s) => {
+        const status = s.status || (s.ok ? "ok" : "failed");
+        const label = status === "ok" ? "正常" : (status === "degraded" ? "降级" : "失败");
+        const tip = ["信任 " + Number(s.trust != null ? s.trust : 0.6).toFixed(2)];
+        if (s.attempts) tip.push("尝试 " + s.attempts + " 次");
+        if (s.error) tip.push(s.error);
+        return '<span class="news-src-chip ' + esc(status) + '" title="' + esc(tip.join(" · ")) + '">' +
+          esc(s.name) + " · " + label + (status !== "failed" ? " " + (s.count || 0) : "") +
+          (status !== "ok" ? ' <button class="linklike" data-retry="' + esc(s.id) + '">重试</button>' : "") +
+          "</span>";
+      }).join("") + "</div>";
     }
-    if (report && report.stats) {
-      const s = report.stats;
-      gen += '<div class="desc">抓取 ' + (s.raw || 0) + " 条" +
-        (s.blocked ? " · 屏蔽 " + s.blocked : "") +
-        " · 去重后 " + (s.deduped || 0) + " · 展示 " + (s.shown || report.count || 0) + "</div>";
+    if (report) {
+      const s = report.stats || {};
+      const q = report.quality || {};
+      gen += '<div class="desc">抓取 ' + (s.raw || q.raw || 0) + " 条" +
+        (q.blocked ? " · 屏蔽 " + q.blocked : "") +
+        " · 去重后 " + (s.deduped || q.kept || 0) +
+        (q.duplicate ? " · 重复 " + q.duplicate : "") +
+        (q.similar ? " · 相似 " + q.similar : "") +
+        " · 展示 " + (s.shown || report.count || 0) +
+        (q.avg_score ? " · 平均 " + q.avg_score + " 分" : "") +
+        (q.translation_coverage != null ? " · 翻译覆盖 " + Math.round(q.translation_coverage * 100) + "%" : "") +
+        (report.batch && report.batch.id ? " · 批次 " + esc(report.batch.id) : "") + "</div>";
+      if (report.batch && report.batch.retries && report.batch.retries.length) {
+        gen += '<div class="desc">本批次重试：' + report.batch.retries.slice(-3).map((r) =>
+          esc(r.source) + (r.auto ? (r.ok ? " 已恢复" : " 自动重试失败")
+                                  : " +" + (r.added || 0) + (r.ok ? "" : "（失败）"))).join(" · ") + "</div>";
+      }
     }
     gen += "</div>";
 
@@ -1038,7 +1095,7 @@ import {
     let reader = '<div class="card"><div class="news-head">' +
       "<h3>今日快报</h3>" +
       '<div class="news-tools">' +
-      '<input id="newsSearch" class="news-search" placeholder="搜索标题 / 摘要 / 来源（/）" value="' + esc(newsUI.search) + '">' +
+      '<input id="newsSearch" class="news-search" placeholder="搜索标题 / 摘要 / 来源 / 理由（/）" value="' + esc(newsUI.search) + '">' +
       '<div class="news-filter">' + [["all", "全部"], ["unread", "未读"], ["starred", "收藏"]]
         .map((f) => '<button class="news-filter-btn' + (newsUI.filter === f[0] ? " on" : "") +
                     '" data-filter="' + f[0] + '">' + f[1] + "</button>").join("") + "</div>" +
@@ -1083,9 +1140,27 @@ import {
 
     const hist = (st.dates && st.dates.length) ? card("历史记录", "点击日期查看历史快报。",
       '<div class="hist-chips">' + st.dates.map((d) => '<button class="hist-chip" onclick="App.viewNews(\'' + esc(d) + '\')">' + esc(d) + "</button>").join("") + "</div>") : "";
-    const srcOpts = [["hackernews", "Hacker News"], ["github_trending", "GitHub 趋势"], ["sspai", "少数派"], ["qbitai", "量子位"], ["arxiv_ai", "arXiv AI"]];
-    const srcChecks = srcOpts.map((o) =>
-      '<label class="chip-check"><input type="checkbox" data-src="' + o[0] + '"' + ((n.sources || []).indexOf(o[0]) >= 0 ? " checked" : "") + "> " + o[1] + "</label>").join("");
+    // B 线：15 源注册表由后端下发（旧后端时回退内置最小清单）
+    const NEWS_LAYERS = [["official", "官方"], ["paper", "论文"], ["community", "社区"],
+                         ["chinese", "中文"], ["product", "产品"]];
+    const catalog = (st.source_catalog && st.source_catalog.length) ? st.source_catalog : [
+      { id: "hackernews", zh: "Hacker News", layer: "community", trust: 0.8, wave: 1 },
+      { id: "github_trending", zh: "GitHub 趋势", layer: "product", trust: 0.75, wave: 1 },
+      { id: "sspai", zh: "少数派", layer: "chinese", trust: 0.78, wave: 1 },
+      { id: "qbitai", zh: "量子位", layer: "chinese", trust: 0.8, wave: 1 },
+      { id: "arxiv_ai", zh: "arXiv AI", layer: "paper", trust: 0.9, wave: 1 },
+    ];
+    const srcChecks = NEWS_LAYERS.map((layer) => {
+      const rows = catalog.filter((o) => (o.layer || "community") === layer[0]);
+      if (!rows.length) return "";
+      return '<div class="src-layer"><div class="src-layer-title">' + layer[1] + "</div>" +
+        '<div class="src-layer-items">' + rows.map((o) =>
+          '<label class="chip-check" title="信任 ' + Number(o.trust || 0.6).toFixed(2) +
+          ' · Wave ' + (o.wave || 1) + '"><input type="checkbox" data-src="' + esc(o.id) + '"' +
+          ((n.sources || []).indexOf(o.id) >= 0 ? " checked" : "") + "> " +
+          esc(o.zh || o.name || o.id) + (o.wave === 2 ? ' <span class="wave-tag">W2</span>' : "") +
+          "</label>").join("") + "</div></div>";
+    }).join("");
     const interests = (n.interests || []);
     const intRows = interests.map((it, i) =>
       '<div class="mini-row"><span class="dot" style="background:' + esc(it.color || "#5B8DEF") + '"></span>' +
@@ -1103,6 +1178,9 @@ import {
       row("每源抓取条数", "单个数据源最多取多少条", numCtl("news.per_source", n.per_source || 12, { min: 3, max: 30 })) +
       row("AI 摘要条数", "送给本地 Agent 精选的条目数", numCtl("news.ai_max_items", n.ai_max_items || 6, { min: 1, max: 20 })) +
       row("屏蔽关键词", "逗号分隔；标题/摘要命中即丢弃", '<input type="text" data-bind="news.blocked_keywords" value="' + esc(blocked) + '" placeholder="招聘, 广告, 优惠" style="width:220px">') +
+      row("时效窗口（天）", "超过天数的条目会被硬过滤", numCtl("news.max_age_days", n.max_age_days || 7, { min: 1, max: 30 })) +
+      row("单类上限", "同一分类最多展示条数（分类配额）", numCtl("news.category_cap", n.category_cap || 3, { min: 1, max: 10 })) +
+      row("失败源自动重试", "生成时对失败源额外重试一次", switchCtl("news.retry_failed_sources", n.retry_failed_sources !== false)) +
       row("历史保留天数", "超过天数的历史快报自动清理", numCtl("news.retention_days", n.retention_days || 14, { min: 3, max: 180 })) +
       row("正文字号", "应用于本页快报阅读区", numCtl("news.font_size", n.font_size || 13, { min: 11, max: 20 })) +
       row("阅读密度", "", selectCtl("news.density", n.density || "comfortable", [["comfortable", "舒适"], ["compact", "紧凑"]])) +
@@ -1110,7 +1188,8 @@ import {
       row("摘要 Agent", "生成 AI 摘要使用的 Agent", selectCtl("news.agent_id", n.agent_id || "", agentOpts)) +
       row("完成后托盘通知", "", switchCtl("news.notify", n.notify)) +
       row("生成后自动打开快报", "", switchCtl("news.auto_show_panel", n.auto_show_panel)));
-    const srcCard = card("数据源", "勾选要聚合的数据源。", '<div class="src-grid">' + srcChecks + "</div>");
+    const srcCard = card("数据源", "按层勾选聚合源；W2 为 Wave 2（接口待验证，默认关闭）。",
+      '<div class="src-grid">' + srcChecks + "</div>");
     const intCard = card("关注主题", "定向偏好：命中主题的条目按权重优先收录，不同类型可用颜色标注。",
       intRows +
       '<div style="margin-top:10px;display:flex;gap:8px">' +
@@ -1200,8 +1279,10 @@ import {
       b.disabled = true;
       try {
         const r = await API.api("/api/news/retry_source", { method: "POST", body: { source_id: b.dataset.retry } });
-        toast(r.ok ? ("已补抓 " + (r.added || 0) + " 条") : ("重试失败：" + (r.error || "")), r.ok ? "ok" : "err");
-        if (r.ok && r.added) loadNewsState();
+        toast(r.ok ? ("已补抓 " + (r.added || 0) + " 条（重复 " + (r.duplicates || 0) +
+                      (r.quota_skipped ? "，配额跳过 " + r.quota_skipped : "") + "）")
+                   : ("重试失败：" + (r.error || "")), r.ok ? "ok" : "err");
+        loadNewsState();      // 成功/失败都刷新源健康与批次记录
       } catch (e) { toast("重试失败：" + e.message, "err"); b.disabled = false; }
     }));
     $$("#newsContent [data-src]").forEach((cb) => cb.addEventListener("change", () => {
@@ -1974,6 +2055,7 @@ import {
       toast("已添加 5 个预设主题", "ok");
     },
     viewNews: (d) => loadNewsState(d),
+    reloadNews: () => loadNewsState(),
     renderPage: renderPage,
   };
 

@@ -1,5 +1,19 @@
 ﻿# 更新日志
 
+## [3.18.0] - 2026-10-26（测试版 · B 线 AI 日报 2.0）
+### Added
+- 15 源注册表（Wave1 10 / Wave2 5：OpenAI/Anthropic/DeepMind/机器之心/InfoQ/HF Papers/Reddit/Product Hunt/Qwen/DeepSeek 等），含分层/信任/默认开关
+- 硬过滤（空字段/屏蔽词/7 天/信任<0.5/URL 重复/标题相似≥0.9）+ 五因子评分 + 分类配额 + MMR 去重
+- 条目新增 score/factors/reasons/why/related/translated/degraded；报告新增 quality/batch/source_health/prompt_version（version 仍 2，向后兼容）
+- 生成：抓取→过滤评分→AI→落盘；失败源自动重试；news-v3 prompt + schema 校验 + 修复 1 次 + 逐条降级；<2 条有效时全量抽取式降级
+- Qt 快报窗：源健康条（正常/降级/失败 + 重试）、取消生成、为什么/评分因子/相关来源；失败/空/加载态
+- Web 快报：源健康、为什么、因子条、相关来源、质量/批次指标、错误重试
+### Changed
+- 默认源调整为 Wave1（9 个，去掉 arXiv）；Wave2 默认关闭；已有用户 sources 不被覆盖
+- 单源重试与历史日期忽略 AI 缓存/已读状态，避免串期
+### Tests
+- 新增 26 项；全量 489 项通过；pyflakes / node --check 通过
+
 ## [3.17.6] - 2026-10-26（测试版 · 目录核对 CLI）
 ### Added
 - `tools/catalog_cli.py verify`：核对 21 条目录（npm 查最新版；winget/script/download/pip 标注人工核对），支持 `--json`；npm 查询失败时退出码 1

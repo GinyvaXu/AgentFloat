@@ -34,7 +34,7 @@ from agentfloat.services.api_monitor.config import DEFAULTS as API_MONITOR_DEFAU
 from agentfloat.services.api_monitor.fetcher import serialize_results
 from agentfloat.services.api_monitor.worker import ApiMonitorWorker
 from agentfloat.services.news.fetcher import DEFAULT_NEWS as _NEWS_DEFAULTS
-from agentfloat.services.news.worker import NewsWorker, today_news_exists
+from agentfloat.services.news.worker import NewsRetryWorker, NewsWorker, today_news_exists
 from agentfloat.services.skills.ai_service import (
     AutoTranslateWorker, LocalAiWorker, _ensure_platform_url, find_new_skills,
 )
@@ -176,6 +176,8 @@ class FloatingWidget(QWidget):
         self._water_mgr.timer_finished.connect(self._on_water_timer_finished)
         self._water_popups = {}
         self._news_worker = None
+        self._news_retry_worker = None
+        self._news_retrying = False
         self._news_panel = None
         self._news_generating = False
         self._news_pop_after = False
@@ -1726,6 +1728,8 @@ class FloatingWidget(QWidget):
             from agentfloat.ui.news_window import NewsWindow
             panel = NewsWindow(theme=self.theme, parent=self)
             panel.generate_requested.connect(lambda: self._generate_news(auto=False))
+            panel.cancel_requested.connect(self.cancel_news)
+            panel.retry_source_requested.connect(self._retry_news_source)
             panel.state_changed.connect(self.refresh_news_unread)
             panel.finished.connect(lambda _r: self._clear_news_panel_ref(panel))
             self._news_panel = panel
@@ -1806,6 +1810,39 @@ class FloatingWidget(QWidget):
         except Exception as e:  # noqa: BLE001
             _log().warning("取消快报失败: %s", e)
             return False
+
+    def _retry_news_source(self, source_id):
+        """单源重试（Qt 快报窗源健康条触发；后台线程，避免阻塞 GUI）"""
+        if self._news_retrying or self._news_generating or not source_id:
+            return
+        cfg = self._news_cfg or {}
+        self._news_retrying = True
+        worker = NewsRetryWorker(source_id, cfg, parent=self)
+        track(worker, "NewsRetryWorker")
+        worker.done.connect(self._on_news_retry_done)
+        self._news_retry_worker = worker
+        _log().info("AI 日报单源重试: %s", source_id)
+        worker.start()
+
+    def _on_news_retry_done(self, result):
+        """单源重试完成：刷新面板 / Web 快照"""
+        try:
+            result = result or {}
+            self._news_retrying = False
+            if result.get("ok"):
+                _log().info("AI 日报单源重试完成: 新增 %d 条，重复 %d 条",
+                            int(result.get("added") or 0),
+                            int(result.get("duplicates") or 0))
+            else:
+                _log().warning("AI 日报单源重试失败: %s", result.get("error") or "未知错误")
+            _bridge = getattr(self, "_web_bridge", None)
+            if _bridge is not None:
+                _bridge.publish("news_retry_done", result)
+            panel = getattr(self, "_news_panel", None)
+            if panel is not None and panel.isVisible():
+                panel.on_source_retried(result)
+        finally:
+            self._release_worker_attr("_news_retry_worker")
 
     def _on_news_progress(self, phase, done, total, label):
         """生成阶段进度 → Web 桥（SSE）与面板"""
@@ -1903,7 +1940,10 @@ class FloatingWidget(QWidget):
             _bridge.set_snapshot("news_progress", {})
             _bridge.publish("news_failed", {"error": str(err)})
         if self._news_panel is not None and self._news_panel.isVisible():
-            self._news_panel.set_generating(False)
+            try:
+                self._news_panel.set_error(str(err))
+            except Exception:  # noqa: BLE001
+                self._news_panel.set_generating(False)
         self.news_failed.emit(str(err))
 
     def _setup_news_scheduler(self):

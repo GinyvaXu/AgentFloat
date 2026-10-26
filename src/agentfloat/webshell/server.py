@@ -132,20 +132,18 @@ def _skills_payload(cfg):
 
 
 def _news_payload(config_dir_hint=None, date=None):
-    """读取快报报告（指定日期或最新）+ 历史日期列表。"""
-    from agentfloat.services.news.fetcher import news_storage_dir
+    """读取日报报告（指定日期或最新）+ 历史日期列表（忽略状态/缓存文件）。"""
+    import re
+    from agentfloat.services.news.fetcher import (
+        news_storage_dir, load_latest, load_archive,
+    )
     d = news_storage_dir()
-    report = None
-    fname = "%s.json" % date if date else "latest.json"
-    try:
-        with open(os.path.join(d, fname), encoding="utf-8") as f:
-            report = json.load(f)
-    except Exception:  # noqa: BLE001
-        report = None
+    report = load_archive(date) if date else load_latest()
     dates = []
     try:
         for fn in sorted(os.listdir(d), reverse=True):
-            if fn.endswith(".json") and fn != "latest.json":
+            if fn.endswith(".json") and fn != "latest.json" and re.match(
+                    r"^\d{4}-\d{2}-\d{2}$", fn[:-5]):
                 dates.append(fn[:-5])
     except Exception:  # noqa: BLE001
         pass

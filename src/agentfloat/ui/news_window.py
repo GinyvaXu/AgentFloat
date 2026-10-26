@@ -1,12 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""AgentFloat — AI 快报独立窗口（v3.12.0，Qt 三栏阅读器）
+"""AgentFloat — AI 日报独立窗口（B 线 2.0，Qt 三栏阅读器）
 
 左栏：日期（历史期数）/ 过滤（全部·未读·收藏）/ 来源
-中栏：按分类分组的条目列表（未读与收藏角标）
-右栏：条目详情（摘要 + 原文链接 + 打开原文 / 收藏 / 标记未读）
+中栏：按分类分组的条目列表（未读 / 收藏角标 + 排序理由）
+右栏：条目详情（摘要 + 为什么 + 因子条 + 相关来源 + 原文链接）
+顶部：源健康条（正常 / 降级 / 失败 + 单源重试）
 
-数据层完全复用 services/news/fetcher（报告 v2 + 已读收藏状态），
-生成仍走浮球的 NewsWorker：窗口只发 generate_requested 信号。
+数据层完全复用 services/news/fetcher（报告 v2 + B 线附加字段 + 已读收藏状态），
+生成仍走浮球的 NewsWorker：窗口只发 generate / cancel / retry 信号。
 """
 import os
 
@@ -14,7 +15,8 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QDesktopServices, QFont
 from PyQt5.QtCore import QUrl
 from PyQt5.QtWidgets import (
-    QLabel, QTextBrowser, QSplitter, QHBoxLayout, QVBoxLayout, QWidget,
+    QFrame, QLabel, QScrollArea, QTextBrowser, QSplitter, QHBoxLayout,
+    QVBoxLayout, QWidget,
 )
 
 from agentfloat.core.theme import get_colors
@@ -23,18 +25,25 @@ from agentfloat.ui import panel_kit as kit
 from agentfloat.ui import states
 from agentfloat.ui.tokens import FONT, SPACE
 
-CAT_LABEL = {"ai": "AI", "dev": "开发", "product": "产品", "other": "其它"}
+CAT_LABEL = {
+    "模型": "模型", "工具": "工具", "论文": "论文", "产品": "产品",
+    "行业": "行业", "综合": "综合",
+    "ai": "AI", "dev": "开发", "product": "产品", "other": "其它",
+}
+STATUS_LABEL = {"ok": "正常", "degraded": "降级", "failed": "失败"}
 
 
 class NewsWindow(kit.PanelShell):
-    """AI 快报三栏阅读器"""
+    """AI 日报三栏阅读器"""
 
     generate_requested = pyqtSignal()
+    cancel_requested = pyqtSignal()
+    retry_source_requested = pyqtSignal(str)
     state_changed = pyqtSignal()
 
     def __init__(self, theme="light", parent=None):
-        super().__init__("AI 快报", "", theme=theme, width=980, height=600, parent=parent)
-        self.setWindowTitle("AgentFloat — AI 快报")
+        super().__init__("AI 日报", "", theme=theme, width=1000, height=640, parent=parent)
+        self.setWindowTitle("AgentFloat — AI 日报")
         self._theme = theme
         self._report = None
         self._date = ""
@@ -44,19 +53,41 @@ class NewsWindow(kit.PanelShell):
         c = get_colors(theme)
         self._accent_hex = "#%02X%02X%02X" % c["ACCENT"]
         self._hint_hex = "#%02X%02X%02X" % c["HINT"]
+        self._ok_hex = "#%02X%02X%02X" % c["OK"]
+        self._warn_hex = "#%02X%02X%02X" % c["WARN_FG"]
+        self._warning_hex = "#%02X%02X%02X" % c["WARNING"]
         self._cjk = "Microsoft YaHei"
         self._setup_ui()
         self.refresh()
 
     # ── 界面 ────────────────────────────────────
     def _setup_ui(self):
-        self.btn_generate = kit.ghost_button("生成快报", on_click=self.generate_requested.emit)
+        self.btn_generate = kit.ghost_button("生成日报", on_click=self.generate_requested.emit)
         self.footer.insertWidget(0, self.btn_generate)
+        self.btn_cancel = kit.ghost_button("取消生成", on_click=self.cancel_requested.emit,
+                                           danger=True)
+        self.btn_cancel.setVisible(False)
+        self.footer.insertWidget(1, self.btn_cancel)
         self.btn_export = kit.ghost_button("导出 Markdown", on_click=self._export)
         self.footer.addWidget(self.btn_export)
         self.btn_close = kit.ghost_button("关闭", on_click=self.close)
         self.footer.addWidget(self.btn_close)
         self.show_footer(True)
+
+        # 顶部源健康条（横向滚动，避免 15 个源挤压三栏）
+        self.health_scroll = QScrollArea()
+        self.health_scroll.setObjectName("newsHealth")
+        self.health_scroll.setWidgetResizable(True)
+        self.health_scroll.setFixedHeight(42)
+        self.health_scroll.setFrameShape(QFrame.NoFrame)
+        self.health_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.health_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.health_host = QWidget()
+        self.health_row = QHBoxLayout(self.health_host)
+        self.health_row.setContentsMargins(0, 0, 0, 0)
+        self.health_row.setSpacing(SPACE.xs)
+        self.health_scroll.setWidget(self.health_host)
+        self.body.addWidget(self.health_scroll)
 
         split = QSplitter(Qt.Horizontal)
         split.setHandleWidth(2)
@@ -65,7 +96,7 @@ class NewsWindow(kit.PanelShell):
         # 左栏：日期 / 过滤 / 来源
         self.left = kit.ListView()
         self.left.itemClicked.connect(self._on_left_clicked)
-        self.left.setMaximumWidth(210)
+        self.left.setMaximumWidth(220)
         split.addWidget(self.left)
 
         # 中栏：搜索 + 分类分组列表
@@ -73,7 +104,8 @@ class NewsWindow(kit.PanelShell):
         mv = QVBoxLayout(mid)
         mv.setContentsMargins(0, 0, 0, 0)
         mv.setSpacing(SPACE.xs_plus)
-        self.search_edit = kit.search_box("搜索标题 / 来源…", on_change=lambda _t: self._fill_items())
+        self.search_edit = kit.search_box("搜索标题 / 摘要 / 来源 / 理由…",
+                                         on_change=lambda _t: self._fill_items())
         mv.addWidget(self.search_edit)
         self.list = kit.ListView()
         self.list.itemClicked.connect(self._on_item_clicked)
@@ -97,6 +129,7 @@ class NewsWindow(kit.PanelShell):
         fm.setPixelSize(FONT.micro)
         self.lbl_meta.setFont(fm)
         self.lbl_meta.setStyleSheet("color: %s;" % self._hint_hex)
+        self.lbl_meta.setWordWrap(True)
         rv.addWidget(self.lbl_meta)
         self.detail = QTextBrowser()
         self.detail.setObjectName("pkDetail")
@@ -114,7 +147,7 @@ class NewsWindow(kit.PanelShell):
         rv.addLayout(acts)
         split.addWidget(right)
 
-        split.setSizes([190, 400, 390])
+        split.setSizes([200, 390, 410])
         self.body.addWidget(split, 1)
 
         self.lbl_status = QLabel("")
@@ -126,16 +159,74 @@ class NewsWindow(kit.PanelShell):
 
     # ── 数据 ────────────────────────────────────
     def refresh(self, date=None):
-        """加载某期（默认最新）快报并重建三栏"""
+        """加载某期（默认最新）日报并重建三栏"""
         report = nf.load_archive(date) if date else nf.load_latest()
         if isinstance(report, dict):
             nf.apply_state(report)
         self._report = report if isinstance(report, dict) else None
         self._date = (self._report or {}).get("date") or date or ""
         self._current = None
+        self._fill_health()
         self._fill_left()
         self._fill_items()
         self._show_placeholder()
+
+    def _fill_health(self):
+        """源健康条：正常 / 降级 / 失败 + 单源重试"""
+        self._clear_layout(self.health_row)
+        try:
+            self.health_host.setMinimumWidth(0)
+        except Exception:  # noqa: BLE001
+            pass
+        label = QLabel("源健康")
+        lf = QFont(self._cjk)
+        lf.setPixelSize(FONT.micro)
+        lf.setBold(True)
+        label.setFont(lf)
+        label.setStyleSheet("color: %s;" % self._accent_hex)
+        self.health_row.addWidget(label)
+        sources = (self._report or {}).get("sources") or []
+        if not sources:
+            hint = QLabel("暂无源状态（生成后显示）")
+            hf = QFont(self._cjk)
+            hf.setPixelSize(FONT.micro)
+            hint.setFont(hf)
+            hint.setStyleSheet("color: %s;" % self._hint_hex)
+            self.health_row.addWidget(hint)
+            self.health_row.addStretch(1)
+            return
+        for src in sources:
+            status = src.get("status") or ("ok" if src.get("ok") else "failed")
+            color = {"ok": self._ok_hex, "degraded": self._warning_hex,
+                     "failed": self._warn_hex}.get(status, self._hint_hex)
+            count = int(src.get("count") or 0)
+            text = "● %s %s" % (src.get("name") or src.get("id") or "?",
+                               count if status != "failed" else STATUS_LABEL["failed"])
+            chip = QLabel(text)
+            cf = QFont(self._cjk)
+            cf.setPixelSize(FONT.micro)
+            chip.setFont(cf)
+            chip.setStyleSheet("color: %s;" % color)
+            tip = ["信任 %.2f" % float(src.get("trust") or 0.6)]
+            if src.get("error"):
+                tip.append(str(src["error"]))
+            if src.get("attempts"):
+                tip.append("尝试 %s 次" % src["attempts"])
+            chip.setToolTip(" · ".join(tip))
+            self.health_row.addWidget(chip)
+            if status != "ok":
+                btn = kit.ghost_button(
+                    "重试",
+                    on_click=lambda _checked=False, sid=src.get("id"): self.retry_source_requested.emit(sid))
+                btn.setFixedHeight(26)
+                btn.setToolTip("重新抓取 %s（并回当日日报，不重跑 AI）" % (src.get("name") or ""))
+                self.health_row.addWidget(btn)
+        self.health_row.addStretch(1)
+        try:
+            # 15 个源横向排列时允许横向滚动，不挤压三栏
+            self.health_host.setMinimumWidth(self.health_row.sizeHint().width())
+        except Exception:  # noqa: BLE001
+            pass
 
     def _fill_left(self):
         self.left.clear()
@@ -189,7 +280,8 @@ class NewsWindow(kit.PanelShell):
             if self._source and (it.get("source") or "其它") != self._source:
                 continue
             if kw:
-                blob = ("%s %s" % (it.get("title") or "", it.get("source") or "")).lower()
+                blob = ("%s %s %s %s" % (it.get("title") or "", it.get("summary") or "",
+                                         it.get("source") or "", it.get("why") or "")).lower()
                 if kw not in blob:
                     continue
             out.append(it)
@@ -214,10 +306,10 @@ class NewsWindow(kit.PanelShell):
                 if not row.get("read"):
                     badge, bcolor = "未读", self._accent_hex
                 if row.get("starred"):
-                    badge, bcolor = (badge + " ★").strip(), "#FF9F0A"
+                    badge, bcolor = (badge + " ★").strip(), self._warning_hex
                 it2, w2 = kit.item_for(
                     kit.list_row("   " + (row.get("title") or "（无标题）"),
-                                 row.get("source") or "", badge, bcolor),
+                                 self._row_meta(row), badge, bcolor, compact=False),
                     data=("item", row))
                 self.list.addItem(it2)
                 self.list.setItemWidget(it2, w2)
@@ -227,6 +319,23 @@ class NewsWindow(kit.PanelShell):
         if not items:
             self._add_static(self.list, self._plain("（当前过滤下没有条目）"))
 
+    def _row_meta(self, row):
+        """列表第二行：来源 · 分类 · 分数 · 为什么（截断，避免撑爆）"""
+        parts = []
+        if row.get("source"):
+            parts.append(str(row["source"]))
+        cat = CAT_LABEL.get(row.get("category") or "", "")
+        if cat:
+            parts.append(cat)
+        if row.get("score"):
+            parts.append("%s 分" % row["score"])
+        if row.get("why"):
+            why = str(row["why"])
+            if len(why) > 56:
+                why = why[:56].rstrip("；，,. ") + "…"
+            parts.append(why)
+        return " · ".join(parts)
+
     def _show_placeholder(self):
         self.lbl_title.setText("—")
         self.lbl_meta.setText("")
@@ -234,9 +343,9 @@ class NewsWindow(kit.PanelShell):
         self.btn_open.setEnabled(False)
         self.btn_unread.setEnabled(False)
         if self._report is None:
-            self.detail.setPlainText(states.empty("AI 快报", "点底部「生成快报」抓取今日内容"))
+            self.detail.setPlainText(states.empty("AI 日报", "点底部「生成日报」抓取今日内容"))
         else:
-            self.detail.setPlainText(states.empty("快报条目", "从中间列表点选一条查看摘要与原文链接"))
+            self.detail.setPlainText(states.empty("日报条目", "从中间列表点选一条查看摘要、评分理由与原文链接"))
 
     # ── 交互 ────────────────────────────────────
     def _on_left_clicked(self, item):
@@ -265,15 +374,31 @@ class NewsWindow(kit.PanelShell):
         self.lbl_title.setText(row.get("title") or "（无标题）")
         meta = " · ".join(x for x in (row.get("source") or "",
                                       CAT_LABEL.get(row.get("category") or "", ""),
-                                      row.get("time") or "") if x)
+                                      row.get("time") or "",
+                                      ("%s 分" % row["score"]) if row.get("score") else "") if x)
         self.lbl_meta.setText(meta)
         parts = []
+        if row.get("why"):
+            parts.append("【为什么】\n%s" % row["why"])
         if row.get("summary"):
             parts.append("【摘要】\n%s" % row["summary"])
         if row.get("ai_summary"):
             parts.append("【AI 摘要】\n%s" % row["ai_summary"])
         if row.get("desc"):
             parts.append(str(row["desc"]))
+        factors = row.get("factors") or {}
+        if factors:
+            parts.append("【评分】综合 %s 分\n%s" % (
+                row.get("score") or 0, self._factor_text(factors)))
+        related = row.get("related") or []
+        if related:
+            lines = ["- [%s] %s" % (r.get("source") or "来源", r.get("title") or "链接")
+                     for r in related[:4]]
+            parts.append("【相关来源】\n%s" % "\n".join(lines))
+        if row.get("degraded"):
+            parts.append("（该条 AI 输出不完整，已逐条降级：保留原文 / 抽取式摘要）")
+        if row.get("translated") is False:
+            parts.append("（该条未完成翻译，保留原文标题/摘要）")
         if not parts:
             parts.append("（该条无摘要，点「打开原文」阅读全文）")
         parts.append("\n原文：%s" % (row.get("url") or ""))
@@ -289,6 +414,14 @@ class NewsWindow(kit.PanelShell):
             except Exception:  # noqa: BLE001
                 pass
             self._after_state_change()
+
+    @staticmethod
+    def _factor_text(factors):
+        """因子条文本（详情页展示完整五项）"""
+        rows = (("信任", "trust", 25), ("新鲜", "freshness", 20), ("兴趣", "interest", 20),
+                ("重要性", "importance", 25), ("多样性", "diversity", 10))
+        return " · ".join("%s %s/%d" % (label, factors.get(key) or 0, top)
+                          for label, key, top in rows)
 
     def _after_state_change(self):
         """状态变化后重算未读并刷新界面（左栏计数 + 中栏角标 + 浮球红点）"""
@@ -332,7 +465,7 @@ class NewsWindow(kit.PanelShell):
             QDesktopServices.openUrl(QUrl(url))
 
     def _export(self):
-        """导出 Markdown（v3.16.1：export_markdown 返回 (路径, 错误) 元组，此前当字符串用直接报 TypeError）"""
+        """导出 Markdown"""
         try:
             res = nf.export_markdown(self._date or None)
             path, err = res if isinstance(res, tuple) else (res, "")
@@ -350,18 +483,45 @@ class NewsWindow(kit.PanelShell):
     # ── 生成流程（由浮球驱动）─────────────────────
     def set_generating(self, flag):
         self.btn_generate.setEnabled(not flag)
+        self.btn_cancel.setVisible(bool(flag))
+        self.btn_cancel.setEnabled(bool(flag))
         if flag:
             self.lbl_status.setText("正在生成…")
+            self.set_subtitle("生成中…")
 
     def set_progress(self, info):
         info = info or {}
         label = info.get("label") or ""
         done, total = int(info.get("done") or 0), int(info.get("total") or 0)
-        self.lbl_status.setText("%s %s" % (label, ("(%d/%d)" % (done, total)) if total else ""))
+        text = "%s %s" % (label, ("(%d/%d)" % (done, total)) if total else "")
+        self.lbl_status.setText(text)
+        if self.btn_cancel.isVisible():
+            self.set_subtitle("生成中 · %s" % (label or "处理中"))
+
+    def set_error(self, message):
+        """生成失败 / 取消：恢复按钮并在详情区给出可操作提示"""
+        self.set_generating(False)
+        self.set_subtitle("")
+        self.lbl_status.setText(str(message or "生成失败"))
+        self.detail.setPlainText(states.empty("生成失败", str(message or "未知错误")))
+        self._flash("生成失败：%s" % (message or "未知错误"))
 
     def on_generated(self, payload):
         self.set_generating(False)
         self._flash("已生成：%s（%d 条）" % (payload.get("date", ""), payload.get("count", 0)))
+        self.refresh()
+
+    def on_source_retried(self, result):
+        """单源重试回调：刷新源健康与列表"""
+        self.set_subtitle("")
+        if not result.get("ok"):
+            self.refresh()
+            self._flash("重试失败：%s" % (result.get("error") or "未知错误"))
+            return
+        self._flash("已补抓 %d 条（重复 %d%s）" % (
+            int(result.get("added") or 0), int(result.get("duplicates") or 0),
+            "，配额跳过 %d" % int(result["quota_skipped"])
+            if result.get("quota_skipped") else ""))
         self.refresh()
 
     def _cat_row(self, text, count):
@@ -408,3 +568,10 @@ class NewsWindow(kit.PanelShell):
         it.setFlags(Qt.ItemIsEnabled)
         view.addItem(it)
         view.setItemWidget(it, w)
+
+    def _clear_layout(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()

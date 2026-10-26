@@ -295,7 +295,7 @@ class WebAppHandlers(object):
         return result
 
     def get_news_state(self, date=None):
-        """AI 快报状态（v3.9.0）：报告 + 每源结果 + 统计 + 已读/收藏 + 下次生成时间"""
+        """AI 日报状态（B 线）：报告 + 源注册表 + 质量/批次 + 已读收藏 + 下次生成"""
         from agentfloat.webshell.server import _news_payload
         base = _news_payload(None, date)
         cfg = getattr(self.widget, "_news_cfg", None) or self.widget.config.get("news") or _NEWS_DEFAULTS
@@ -309,13 +309,23 @@ class WebAppHandlers(object):
             if isinstance(report, dict):
                 _nf.apply_state(report)
                 base["unread"] = report.get("unread", 0)
+                base["quality"] = report.get("quality") or {}
+                base["batch"] = report.get("batch") or {}
+                base["source_health"] = report.get("source_health") or _nf.source_health(
+                    report.get("sources"))
             else:
                 base["unread"] = 0
+                base["quality"] = {}
+                base["batch"] = {}
+                base["source_health"] = _nf.source_health([])
+            base["source_catalog"] = _nf.source_catalog(cfg.get("sources") or [])
             base["next_run"] = _nf.next_run_time(cfg)
             base["starred_count"] = len(_nf.load_state().get("starred") or [])
         except Exception:  # noqa: BLE001
             base.setdefault("unread", 0)
             base.setdefault("next_run", "")
+            base.setdefault("source_catalog", [])
+            base.setdefault("source_health", {})
         return base
 
     def news_mark_read(self, item_id=None, read=True):
@@ -348,52 +358,15 @@ class WebAppHandlers(object):
         return {"ok": True, "path": path}
 
     def news_retry_source(self, source_id):
-        """单源重试：重新抓取该源并并回当日报告（不重跑 AI）"""
+        """单源重试：重新抓取该源并并回当日报告（不重跑 AI）。
+
+        B 线：合并逻辑下沉到 fetcher.merge_source_retry，重复/相似项挂到
+        「相关来源」，并更新源健康、批次 retries 与质量统计。
+        """
         from agentfloat.services.news import fetcher as _nf
         cfg = getattr(self.widget, "_news_cfg", None) or self.widget.config.get("news") or {}
         per = max(3, min(30, int(cfg.get("per_source") or 12)))
-        items, err = _nf.fetch_one(str(source_id), per_source=per)
-        if err:
-            return {"ok": False, "error": err, "added": 0}
-        report = _nf.load_latest() or {}
-        existing = report.get("items") or []
-        seen = {it.get("id") or _nf.item_id(it.get("url", ""), it.get("title", ""))
-                for it in existing}
-        added = 0
-        for it in _nf.filter_blocked(items, cfg.get("blocked_keywords")):
-            iid = _nf.item_id(it.get("url", ""), it.get("title", ""))
-            if iid in seen:
-                continue
-            seen.add(iid)
-            existing.append({
-                "id": iid, "title": it.get("title", "?"), "url": it.get("url", "#"),
-                "category": _nf.guess_category(it.get("title", ""), it.get("url", "")),
-                "summary": "", "source": it.get("source", ""), "ts": it.get("ts", 0),
-            })
-            added += 1
-        if added:
-            report["items"] = existing
-            report["count"] = len(existing)
-            report["source_errors"] = [e for e in (report.get("source_errors") or [])
-                                       if str(source_id) not in str(e)]
-            srcs = report.get("sources") or []
-            for s in srcs:
-                if s.get("id") == source_id:
-                    s["ok"] = True
-                    s["error"] = ""
-                    s["count"] = int(s.get("count") or 0) + added
-            report["sources"] = srcs
-            stats = report.get("stats") or {}
-            stats["shown"] = len(existing)
-            report["stats"] = stats
-            import time as _time
-            date = report.get("date") or _time.strftime("%Y-%m-%d")
-            _nf.save_report(date, existing, report.get("raw_md") or "",
-                            report.get("language") or "zh",
-                            bool(report.get("used_ai")), report.get("source_errors") or [],
-                            sources=srcs, stats=stats,
-                            headline=report.get("headline") or "")
-        return {"ok": True, "added": added, "error": ""}
+        return _nf.retry_source_report(str(source_id), per_source=per, cfg=cfg)
 
     def open_url(self, url):
         _open_url(url)
