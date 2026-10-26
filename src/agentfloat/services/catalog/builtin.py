@@ -1,0 +1,134 @@
+# -*- coding: utf-8 -*-
+"""内置 Agent 目录（随包，bundled 层）。
+
+只收录**已核实**的条目（核实方式与日期见各条 ``source`` / ``verifiedAt``）。
+未核实的候选（Kimi CLI / Goose / Cursor Agent / Cline-Roo 等）不写入，避免误导安装。
+"""
+from __future__ import annotations
+
+from typing import Dict, List
+
+#: 统一版本检测（npm 全局安装后都能用 --version）
+_VER = r"(\d+\.\d+\.\d+)"
+
+BUILTIN_SPECS: List[Dict] = [
+    {
+        "schemaVersion": 1,
+        "id": "opencode",
+        "name": "OpenCode",
+        "vendor": "Anomaly",
+        "group": "intl-cli",
+        "icon": "opencode.svg",
+        "description": "终端里的 AI 编程代理（CLI）",
+        "platforms": {"windows": "native", "macos": "native", "linux": "native"},
+        "install": [{"type": "npm", "packageOrUrl": "@opencode/cli",
+                      "verify": "opencode --version"}],
+        "launch": {"command": "opencode", "modes": ["interactive"]},
+        "capability": {"headless": False},
+        "health": {"versionCmd": "opencode --version", "versionPattern": _VER},
+        "status": "active",
+        "verifiedAt": "2026-10-26",
+        "source": "https://opencode.ai",
+        "statusNote": "npm registry @opencode/cli@2.0.18；本机 opencode --version 实测；headless 待核实",
+    },
+    {
+        "schemaVersion": 1,
+        "id": "claude",
+        "name": "Claude Code",
+        "vendor": "Anthropic",
+        "group": "intl-cli",
+        "icon": "claude.svg",
+        "description": "Anthropic 官方 CLI 编程代理",
+        "platforms": {"windows": "native", "macos": "native", "linux": "native"},
+        "install": [{"type": "npm", "packageOrUrl": "@anthropic-ai/claude-code",
+                      "verify": "claude --version"}],
+        "launch": {"command": "claude", "modes": ["interactive", "headless"]},
+        "capability": {"headless": True},
+        "health": {"versionCmd": "claude --version", "versionPattern": _VER},
+        "status": "active",
+        "verifiedAt": "2026-10-26",
+        "source": "https://claude.com/claude-code",
+        "statusNote": "npm registry @anthropic-ai/claude-code@2.1.310；headless: -p/--print（--help 实测）",
+    },
+    {
+        "schemaVersion": 1,
+        "id": "codex",
+        "name": "OpenAI Codex CLI",
+        "vendor": "OpenAI",
+        "group": "intl-cli",
+        "icon": "codex.svg",
+        "description": "OpenAI 官方终端 Coding Agent",
+        "platforms": {"windows": "native", "macos": "native", "linux": "native"},
+        "install": [{"type": "npm", "packageOrUrl": "@openai/codex",
+                      "verify": "codex --version"}],
+        "launch": {"command": "codex", "modes": ["interactive", "headless"]},
+        "capability": {"headless": True},
+        "health": {"versionCmd": "codex --version", "versionPattern": _VER},
+        "status": "active",
+        "verifiedAt": "2026-10-26",
+        "source": "https://github.com/openai/codex",
+        "statusNote": "npm registry @openai/codex@0.164.0；headless: codex exec（--help 实测）",
+    },
+    {
+        "schemaVersion": 1,
+        "id": "gemini",
+        "name": "Gemini CLI",
+        "vendor": "Google",
+        "group": "intl-cli",
+        "icon": "gemini.svg",
+        "description": "Google 官方 Gemini 终端代理",
+        "platforms": {"windows": "native", "macos": "native", "linux": "native"},
+        "install": [{"type": "npm", "packageOrUrl": "@google/gemini-cli",
+                      "verify": "gemini --version"}],
+        "launch": {"command": "gemini", "modes": ["interactive", "headless"]},
+        "capability": {"headless": True},
+        "health": {"versionCmd": "gemini --version", "versionPattern": _VER},
+        "status": "active",
+        "verifiedAt": "2026-10-26",
+        "source": "https://github.com/google-gemini/gemini-cli",
+        "statusNote": "npm registry @google/gemini-cli@0.65.0；headless: -p/--prompt（--help 实测）",
+    },
+    {
+        "schemaVersion": 1,
+        "id": "qwen",
+        "name": "Qwen Code",
+        "vendor": "Alibaba",
+        "group": "cn-cli",
+        "icon": "qwen.svg",
+        "description": "通义千问 CLI 编程代理（Gemini CLI 分支）",
+        "platforms": {"windows": "native", "macos": "native", "linux": "native"},
+        "install": [{"type": "npm", "packageOrUrl": "@qwen-code/qwen-code",
+                      "verify": "qwen --version"}],
+        "launch": {"command": "qwen", "modes": ["interactive"]},
+        "capability": {"headless": False},
+        "health": {"versionCmd": "qwen --version", "versionPattern": _VER},
+        "status": "active",
+        "verifiedAt": "2026-10-26",
+        "source": "https://github.com/QwenLM/qwen-code",
+        "statusNote": "npm registry @qwen-code/qwen-code@0.26.1；headless 待核实",
+    },
+    {
+        "schemaVersion": 1,
+        "id": "aider",
+        "name": "Aider",
+        "vendor": "Aider",
+        "group": "intl-cli",
+        "icon": "aider.svg",
+        "description": "开源终端结对编程助手（Python）",
+        "platforms": {"windows": "native", "macos": "native", "linux": "native"},
+        "install": [{"type": "pip", "packageOrUrl": "aider-chat",
+                      "verify": "aider --version"}],
+        "launch": {"command": "aider", "modes": ["interactive"]},
+        "capability": {"headless": False},
+        "health": {"versionCmd": "aider --version", "versionPattern": _VER},
+        "status": "active",
+        "verifiedAt": "2026-10-26",
+        "source": "https://aider.chat",
+        "statusNote": "PyPI aider-chat 0.16.0（pip index）；headless 待核实",
+    },
+]
+
+
+def builtin_specs() -> List[Dict]:
+    """返回内置目录的浅拷贝（调用方可以安全修改 dict）。"""
+    return [dict(item) for item in BUILTIN_SPECS]
