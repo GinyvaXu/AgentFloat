@@ -330,6 +330,29 @@ def create_app(bridge, handlers):
     def get_catalog():
         return handlers.get_catalog()
 
+    # ── Agent 目录：安装 / 卸载（v0.1 可安装链路）──────────────
+    @api.post("/catalog/install")
+    def catalog_install(body: dict | None = None):
+        """立即返回；实际安装由后台线程执行，前端轮询 /catalog/job。"""
+        try:
+            return handlers.catalog_install((body or {}).get("id"))
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"ok": False, "busy": False,
+                                 "error": "启动安装失败：%s" % str(e)[:200]},
+                                status_code=500)
+
+    @api.post("/catalog/uninstall")
+    def catalog_uninstall(body: dict | None = None):
+        try:
+            return handlers.catalog_uninstall((body or {}).get("id"))
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"ok": False, "error": "卸载失败：%s" % str(e)[:200]},
+                                status_code=500)
+
+    @api.get("/catalog/job")
+    def catalog_job():
+        return handlers.catalog_job()
+
     @api.post("/news/generate")
     def news_generate():
         bridge.command("generate_news")

@@ -5,8 +5,8 @@
  */
 import { $, $$, esc, getPath, setPath, num, deep, toast, loadingCard, errorCard } from "./util.js";
 import {
-  renderInstallPage, leaveInstallPage, refreshInstall,
-  installAgent, uninstallAgent, toggleInstallLog,
+  renderInstallPage, leaveInstallPage, loadCatalog,
+  catalogInstall, catalogUninstall,
 } from "./install.js";
 
 (function () {
@@ -1580,7 +1580,7 @@ import {
     save: save, goPage: goPage, goSub: goSub,
     confirmDialog: confirmDialog,     // v3.16.4：安装页等子模块复用统一确认弹层
     loadApiPage: loadApiPage,         // 错误卡「重试」入口
-    refreshInstall: refreshInstall,   // 安装页错误卡「重试」入口
+    loadCatalog: loadCatalog,         // 安装页错误卡「重试」入口
     loadingCard: loadingCard,
     errorCard: errorCard,
     guide: renderGuide,          // v3.9.2：供调试/自动化测试直接渲染指南页
@@ -1598,9 +1598,8 @@ import {
     editAgent: (i) => agentModal(i),
     delAgent: (i) => confirmThen({ title: "删除 Agent", body: "「" + cfg.agents[i].name + "」将从列表中移除。", danger: true }, () => { cfg.agents.splice(i, 1); refreshDirty(); renderAgents($("#settingsContent")); }),
     openDsh: () => API.api("/api/open_url", { method: "POST", body: { url: "http://127.0.0.1:3080" } }).catch(() => toast("请先启动 DeepSeek Harness", "err")),
-    installAgent: installAgent,
-    uninstallAgent: uninstallAgent,
-    toggleInstallLog: toggleInstallLog,
+    catalogInstall: catalogInstall,
+    catalogUninstall: catalogUninstall,
     runAiServices: () => API.api("/api/run_ai_services", { method: "POST", body: { auto: false } }).then(() => toast("已发起本地 AI 自检服务", "ok")).catch((e) => toast("启动失败：" + e.message, "err")),
     checkUpdate: () => API.api("/api/check_update", { method: "POST" }).then(() => toast("已发起检查更新", "ok")).catch((e) => toast("检查失败：" + e.message, "err")),
     addTimer: () => timerModal(null),

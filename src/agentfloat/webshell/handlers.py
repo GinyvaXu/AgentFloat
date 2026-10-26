@@ -204,6 +204,37 @@ class WebAppHandlers(object):
         from agentfloat.services.catalog.report import catalog_payload
         return catalog_payload()
 
+    @staticmethod
+    def _catalog_spec(agent_id):
+        """按 id 取合并后的 spec；不存在返回 None。"""
+        from agentfloat.services.catalog.builtin import builtin_specs
+        from agentfloat.services.catalog.merge import merge_layers
+        aid = str(agent_id or "").strip()
+        if not aid:
+            return None
+        return merge_layers(builtin_specs()).get(aid)
+
+    def catalog_install(self, agent_id):
+        """启动后台安装任务，立即返回（实际安装由 jobs 线程执行）。"""
+        from agentfloat.services.catalog import jobs
+        spec = self._catalog_spec(agent_id)
+        if spec is None:
+            return {"ok": False, "busy": False, "error": "未知 Agent：%s" % (agent_id or "")}
+        return jobs.start(spec, "install")
+
+    def catalog_uninstall(self, agent_id):
+        """同步卸载受管前缀（不触碰系统全局安装）。"""
+        from agentfloat.services.catalog import installer
+        spec = self._catalog_spec(agent_id)
+        if spec is None:
+            return {"ok": False, "error": "未知 Agent：%s" % (agent_id or "")}
+        return installer.uninstall(spec)
+
+    def catalog_job(self):
+        """当前安装 / 卸载任务快照。"""
+        from agentfloat.services.catalog import jobs
+        return jobs.status()
+
     def get_news_state(self, date=None):
         """AI 快报状态（v3.9.0）：报告 + 每源结果 + 统计 + 已读/收藏 + 下次生成时间"""
         from agentfloat.webshell.server import _news_payload
