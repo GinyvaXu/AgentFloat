@@ -17,18 +17,28 @@
 | 卸载 | 卸载命令或安装包卸载入口 |
 | 核实日期 | 最后核对日期 + 来源 |
 
-## 已核实（本机 2026-10-26）
+## 已核实（2026-10-26 · npm registry 实测 + 本机探测）
 
-| Agent | 启动命令 | launcher | 版本检测 | 安装方式 | 核实 |
+| Agent | 启动命令 | npm 包 | 最新版本 | 安装命令 | 核实方式 |
 |---|---|---|---|---|---|
-| OpenCode（CLI） | `opencode` | cli | `opencode --version` → **v2.0.18** | npm 全局包 **`@opencode/cli`**（本机已装，`%APPDATA%\npm\opencode.ps1`） | 本机实测（PATH + npm ls + --version） |
+| OpenCode CLI | `opencode` | `@opencode/cli` | **2.0.18**（本机已装） | `npm i -g @opencode/cli` | 本机 `--version` + `npm ls -g` |
+| Claude Code | `claude` | `@anthropic-ai/claude-code` | **2.1.310** | `npm i -g @anthropic-ai/claude-code` | `npm view` bin/version |
+| OpenAI Codex CLI | `codex` | `@openai/codex` | **0.164.0** | `npm i -g @openai/codex` | `npm view` bin/version |
+| Gemini CLI | `gemini` | `@google/gemini-cli` | **0.65.0** | `npm i -g @google/gemini-cli` | `npm view` bin/version（`@google/gemini` 为 404，确认包名） |
+| Qwen Code | `qwen` | `@qwen-code/qwen-code` | **0.26.1** | `npm i -g @qwen-code/qwen-code` | `npm view` bin/version |
 
-> 同期本机已装、可纳入候选验证的 npm 全局包：`@deepseek-ai/dsh@0.1.2-rc.1`、`agent-browser@0.39.1`、`skills@1.7.1`。
-> 本机未安装（便于验证「未装→检测→安装」链路）：claude / codex / gemini / aider / qwen 均返回「未安装」。
+> 以上 5 个都走 npm 全局安装、二进制名即启动命令；四家官方文档的 **headless 参数**（供快报 AI 摘要复用）仍待核实，验证方法：安装后跑 `<cmd> --help`，或 `npx -y <pkg> --help`。
+> 本机未安装（正好用于验证「未装 → 检测 → 安装」链路）：claude / codex / gemini / aider / qwen。
 
-### 本轮受阻（如实记录）
+### 下一批待核实
 
-- `raw.githubusercontent.com` 拉取 Codex CLI README 失败（Transport error，需代理）；官方文档核实推到下一轮（开代理后重试）。
+| Agent | 包管理器 | 待补 |
+|---|---|---|
+| Aider | pip / pipx（`aider-chat`） | 版本、启动名、`--message` 非交互参数 |
+| Kimi CLI | 待定 | 包名与安装方式 |
+| Goose | 待定 | 包名与安装方式 |
+| Cursor Agent | 待定 | 是否有独立 CLI |
+| Cline / Roo Code | VS Code 扩展 | 是否能 CLI 化（可能只能检测 GUI） |
 
 ## 候选清单（待核实，按优先级）
 
