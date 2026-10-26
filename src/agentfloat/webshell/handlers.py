@@ -230,6 +230,14 @@ class WebAppHandlers(object):
             return {"ok": False, "error": "未知 Agent：%s" % (agent_id or "")}
         return installer.uninstall(spec)
 
+    def catalog_launch(self, agent_id):
+        """启动已安装的 Agent CLI（新控制台，立即返回）；未知 id 明确报错。"""
+        from agentfloat.services.catalog import installer
+        spec = self._catalog_spec(agent_id)
+        if spec is None:
+            return {"ok": False, "reason": "unknown-agent"}
+        return installer.launch(spec)
+
     def catalog_job(self):
         """当前安装 / 卸载任务快照。"""
         from agentfloat.services.catalog import jobs

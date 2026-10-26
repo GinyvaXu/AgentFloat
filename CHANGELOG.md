@@ -1,5 +1,13 @@
 # 更新日志
 
+## [3.17.1] - 2026-10-26（测试版 · 目录补全 + 全局安装）
+### Added
+- 目录新增 **Pi Coding Agent**（`@earendil-works/pi-coding-agent` 1.4.0）与 **DeepSeek Harness**（`@deepseek-ai/dsh` 0.2.1-rc.2，预发布），各带官网 `source`
+- 安装适配器支持 **npm 全局安装**（`npm -g` + npmmirror 镜像，与旧安装器一致，CLI 进 PATH）；受管目录模式保留
+- 卸载按模式区分：global → `npm uninstall -g`；managed → 删除受管前缀
+### Note
+- 桌面版（opencode desktop）与直链下载尚未录入：官方安装包 URL 未核实，不写猜测链接；官网/文档链接已随每条 `source` 展示
+
 ## [3.17.0] - 2026-10-26（测试版 · Agent 安装页接入目录）
 ### Added
 - **Agent 安装页改为新目录（替换旧列表）**：读取 `GET /api/catalog`，展示内置 6 条已核实条目与安装状态徽章（已安装：系统 PATH / 受管目录；未安装）
@@ -785,3 +793,8 @@
 ## [0.1.0] - 2026-08-12
 ### Added
 - 项目初始化（由 ProjectDock 预设生成）
+## [3.17.2] - 2026-10-26（测试版 · Agent 快捷启动）
+### Added
+- 已安装的 Agent 支持一键启动：新控制台运行 CLI（受管前缀优先、PATH 兜底），API `POST /api/catalog/launch`；安装页已安装行出现「启动」按钮
+- 全量测试通过（catalog + launch 用例），JS 语法检查通过
+

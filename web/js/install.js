@@ -1,7 +1,8 @@
 /**
  * install.js — Agent 安装页（ES Module）
  * 目录来自 /api/catalog；安装走后台任务（/api/catalog/install + /api/catalog/job 轮询），
- * 卸载同步完成（/api/catalog/uninstall）。不再维护旧版 #installList 的第二套状态。
+ * 卸载同步完成（/api/catalog/uninstall），已安装条目可一键启动（/api/catalog/launch）。
+ * 不再维护旧版 #installList 的第二套状态。
  * app.js 进入/离开页面时调用 render/leave。
  */
 import { $, esc, toast, loadingCard, errorCard } from "./util.js";
@@ -76,13 +77,17 @@ function statusTag(a) {
 }
 
 function actionCtl(a, running) {
-  if (a.installed && a.installSource === "path") return "";
   if (!a.installed) {
     const attr = running ? " disabled" : ' onclick="App.catalogInstall(\'' + esc(a.id) + '\')"';
     return '<button class="btn sm primary"' + attr + ">安装</button>";
   }
+  // 已安装（受管目录 / 系统 PATH）都可启动；启动不占安装任务，运行中也不禁用
+  const launchBtn = '<button class="btn sm primary" onclick="App.catalogLaunch(\'' +
+    esc(a.id) + '\')">启动</button>';
+  // 系统 PATH 安装不提供卸载（避免误删用户全局）
+  if (a.installSource === "path") return launchBtn;
   const attr = running ? " disabled" : ' onclick="App.catalogUninstall(\'' + esc(a.id) + '\')"';
-  return '<button class="btn sm danger"' + attr + ">卸载</button>";
+  return launchBtn + '<button class="btn sm danger"' + attr + ">卸载</button>";
 }
 
 // ── 任务进度 ───────────────────────────────────────
@@ -235,5 +240,20 @@ export async function catalogUninstall(id) {
   } catch (e) {
     busy = false;
     showError("卸载失败：" + (e.message || e));
+  }
+}
+
+export async function catalogLaunch(id) {
+  // 启动是即发即忘：不占用安装任务状态，也不启动 job 轮询
+  const a = items.find(function (x) { return x.id === id; }) || {};
+  try {
+    const r = await API.api("/api/catalog/launch", { method: "POST", body: { id: id } });
+    if (!r || r.ok === false) {
+      toast("启动失败：" + ((r && r.reason) || "未知错误"), "err");
+      return;
+    }
+    toast("已启动 " + (a.name || id), "ok");
+  } catch (e) {
+    toast("启动失败：" + (e.message || e), "err");
   }
 }

@@ -349,6 +349,14 @@ def create_app(bridge, handlers):
             return JSONResponse({"ok": False, "error": "卸载失败：%s" % str(e)[:200]},
                                 status_code=500)
 
+    @api.post("/catalog/launch")
+    def catalog_launch(body: dict | None = None):
+        """启动已安装 Agent（新控制台）；启动失败只回 {ok:false, reason}，不抛 HTTP 异常。"""
+        try:
+            return handlers.catalog_launch((body or {}).get("id"))
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "reason": "启动失败：%s" % str(e)[:200]}
+
     @api.get("/catalog/job")
     def catalog_job():
         return handlers.catalog_job()

@@ -6,7 +6,7 @@
 import { $, $$, esc, getPath, setPath, num, deep, toast, loadingCard, errorCard } from "./util.js";
 import {
   renderInstallPage, leaveInstallPage, loadCatalog,
-  catalogInstall, catalogUninstall,
+  catalogInstall, catalogUninstall, catalogLaunch,
 } from "./install.js";
 
 (function () {
@@ -1600,6 +1600,7 @@ import {
     openDsh: () => API.api("/api/open_url", { method: "POST", body: { url: "http://127.0.0.1:3080" } }).catch(() => toast("请先启动 DeepSeek Harness", "err")),
     catalogInstall: catalogInstall,
     catalogUninstall: catalogUninstall,
+    catalogLaunch: catalogLaunch,
     runAiServices: () => API.api("/api/run_ai_services", { method: "POST", body: { auto: false } }).then(() => toast("已发起本地 AI 自检服务", "ok")).catch((e) => toast("启动失败：" + e.message, "err")),
     checkUpdate: () => API.api("/api/check_update", { method: "POST" }).then(() => toast("已发起检查更新", "ok")).catch((e) => toast("检查失败：" + e.message, "err")),
     addTimer: () => timerModal(null),

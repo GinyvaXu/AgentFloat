@@ -17,11 +17,12 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from .schema import AgentSpec
 
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+CREATE_NEW_CONSOLE = 0x00000010 if os.name == "nt" else 0
 DEFAULT_INSTALL_TIMEOUT = 480
 DEFAULT_CHECK_TIMEOUT = 40
 DEFAULT_PROBE_TIMEOUT = 30
@@ -137,6 +138,43 @@ def detect(spec: AgentSpec, base: Optional[str] = None) -> Dict:
     if found:
         return {"installed": True, "source": "path", "path": found}
     return {"installed": False, "source": "", "path": ""}
+
+
+def launch(spec: AgentSpec, base: Optional[str] = None,
+           popen: Optional[Callable[..., Any]] = None) -> Dict:
+    """启动已安装的 Agent CLI（新控制台窗口，不阻塞、不捕获输出）。
+
+    返回 ``{ok, pid, exe, method}``；未安装返回 ``reason=not-installed``，
+    启动异常统一收敛为 ``{ok: False, reason}``，不让异常冒到 HTTP 层。
+    """
+    try:
+        det = detect(spec, base=base)
+        if not det.get("installed"):
+            return {"ok": False, "reason": "not-installed"}
+        if det.get("source") == "managed":
+            exe = bin_path(spec, managed_prefix(spec, base))
+            method = "managed"
+        else:
+            # PATH 安装：优先用 which 解析出的真实路径，便于带空格的路径加引号
+            exe = det.get("path") or spec.launch.command
+            method = "path"
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "reason": "detect-failed: %s" % str(exc)[:200]}
+
+    spawn = popen or subprocess.Popen
+    try:
+        if os.name == "nt":
+            # cmd /k：CLI 退出后窗口保留，用户能看到报错；不捕获交互输出
+            proc = spawn(
+                'cmd.exe /k "%s"' % exe,
+                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", CREATE_NEW_CONSOLE),
+            )
+        else:
+            proc = spawn([exe])
+        return {"ok": True, "pid": int(getattr(proc, "pid", 0) or 0),
+                "exe": exe, "method": method}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "reason": str(exc)[:200] or "launch-failed"}
 
 
 def classify_probe(rc: Optional[int], out: str, timed_out: bool = False) -> str:
