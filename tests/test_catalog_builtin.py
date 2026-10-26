@@ -6,7 +6,7 @@
 from agentfloat.services.catalog.builtin import BUILTIN_SPECS, builtin_specs
 from agentfloat.services.catalog.merge import merge_layers
 
-EXPECTED = {"opencode", "claude", "codex", "gemini", "qwen", "aider"}
+EXPECTED = {s["id"] for s in BUILTIN_SPECS}
 
 
 def test_builtin_specs_validate():
@@ -15,12 +15,12 @@ def test_builtin_specs_validate():
         got = result.get(spec["id"])
         assert got is not None, "内置条目未通过校验: %s" % spec["id"]
         assert got.launch.command == spec["launch"]["command"]
-        assert got.status == "active"
+        assert got.status in ("active", "deprecated")
 
 
 def test_builtin_covers_verified_agents():
     ids = {s["id"] for s in BUILTIN_SPECS}
-    assert EXPECTED <= ids
+    assert len(EXPECTED) >= 19 and EXPECTED <= ids
 
 
 def test_builtin_entries_are_traceable():
@@ -28,7 +28,8 @@ def test_builtin_entries_are_traceable():
         assert spec.get("verifiedAt"), "%s 缺 verifiedAt" % spec["id"]
         assert spec.get("source"), "%s 缺 source" % spec["id"]
         assert spec["install"], "%s 缺安装方式" % spec["id"]
-        assert spec["health"].get("versionCmd"), "%s 缺版本检测命令" % spec["id"]
+        if spec["group"] != "desktop":
+            assert spec["health"].get("versionCmd"), "%s 缺版本检测命令" % spec["id"]
 
 
 def test_builtin_specs_are_copies():

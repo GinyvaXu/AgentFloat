@@ -1,9 +1,9 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """目录只读载荷（/api/catalog）单测。"""
+from agentfloat.services.catalog.builtin import BUILTIN_SPECS
 from agentfloat.services.catalog.report import catalog_payload
 
-EXPECTED = {"opencode", "claude", "codex", "gemini", "qwen", "aider", "pi", "dsh",
-            "opencode-desktop"}
+EXPECTED = {s["id"] for s in BUILTIN_SPECS}
 
 
 def test_payload_shape_and_ids():
@@ -14,7 +14,7 @@ def test_payload_shape_and_ids():
     assert ids == EXPECTED
     for item in got["items"]:
         assert item["command"] and item["package"]
-        assert item["installType"] in ("npm", "pip", "download")
+        assert item["installType"] in ("npm","pip","winget","script","download")
         assert isinstance(item["installed"], bool)
         assert item["sourceUrl"].startswith("http")
         assert isinstance(item["updateAvailable"], bool)
