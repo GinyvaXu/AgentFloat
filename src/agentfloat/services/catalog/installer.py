@@ -73,7 +73,7 @@ def _run(cmd: str, timeout: int, cwd: Optional[str] = None) -> Dict:
 
 
 def install(spec: AgentSpec, base: Optional[str] = None,
-            runner: Callable[..., Dict] = _run) -> Dict:
+            runner: Callable[..., Dict] = _run, target: str = "managed") -> Dict:
     """安装到受管前缀；返回 {ok, prefix, log[], seconds}。"""
     prefix = managed_prefix(spec, base)
     pkg = spec.install[0].package_or_url if spec.install else ""
@@ -85,8 +85,13 @@ def install(spec: AgentSpec, base: Optional[str] = None,
                 "log": log, "seconds": 0}
 
     if kind == "npm":
-        cmd = ('npm.cmd install --prefix "%s" --cache "%s" --no-audit --no-fund '
-               '--loglevel=error %s' % (prefix, os.path.join(base or agents_dir(), ".npm-cache"), pkg))
+        if target == "global":
+            # 与旧安装器一致：装到全局，CLI 进 PATH（便于其它程序复用）
+            cmd = ('npm.cmd install -g --registry https://registry.npmmirror.com '
+                   '--no-audit --no-fund --loglevel=error %s' % pkg)
+        else:
+            cmd = ('npm.cmd install --prefix "%s" --cache "%s" --no-audit --no-fund '
+                   '--loglevel=error %s' % (prefix, os.path.join(base or agents_dir(), ".npm-cache"), pkg))
         r = runner(cmd, DEFAULT_INSTALL_TIMEOUT)
         log.append(r)
         ok = r.get("rc") == 0
@@ -159,9 +164,14 @@ def auth_probe(spec: AgentSpec, base: Optional[str] = None,
     return classify_probe(r.get("rc"), r.get("out", ""), bool(r.get("timeout")))
 
 
-def uninstall(spec: AgentSpec, base: Optional[str] = None) -> Dict:
-    """删除受管前缀（只动 app 自己的目录，不碰全局安装）。"""
+def uninstall(spec: AgentSpec, base: Optional[str] = None, target: str = "managed",
+              runner: Callable[..., Dict] = _run) -> Dict:
+    """卸载：managed 删受管前缀；global 走 npm uninstall -g。"""
     prefix = managed_prefix(spec, base)
+    if target == "global" and install_type(spec) == "npm" and spec.install:
+        r = runner('npm.cmd uninstall -g %s' % spec.install[0].package_or_url, 180)
+        return {"ok": r.get("rc") == 0, "removed": r.get("rc") == 0,
+                "prefix": "", "out": r.get("out", "")}
     existed = os.path.isdir(prefix)
     shutil.rmtree(prefix, ignore_errors=True)
     return {"ok": not os.path.isdir(prefix), "removed": existed, "prefix": prefix}
