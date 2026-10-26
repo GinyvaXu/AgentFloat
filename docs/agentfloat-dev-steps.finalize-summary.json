@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "tree",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\AIAgentBase\\Project3-AgentFloat克隆仓库\\.archify\\tree-dev-steps-20261026-140000\\candidate.json",
+    "sha256": "e07b5b265536232977d5565ff28ceb6af4c5b0d3466233a7edbbe3a22121d777",
+    "bytes": 2451
+  },
+  "artifact": {
+    "path": "C:\\AIAgentBase\\Project3-AgentFloat克隆仓库\\docs\\agentfloat-dev-steps.html",
+    "sha256": "545a34b45e745940227cf6127177edb6cec68b830eb0863e7590fb48e0c00475",
+    "bytes": 830172
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "C:\\AIAgentBase\\Project3-AgentFloat克隆仓库\\docs\\agentfloat-dev-steps.finalize.json",
+    "summaryReceipt": "C:\\AIAgentBase\\Project3-AgentFloat克隆仓库\\docs\\agentfloat-dev-steps.finalize-summary.json",
+    "browserCheckReceipt": "C:\\AIAgentBase\\Project3-AgentFloat克隆仓库\\docs\\agentfloat-dev-steps.browser-check.json"
+  },
+  "update": {
+    "status": "update_available",
+    "installedVersion": "3.1.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": "https://github.com/tt-a1i/archify/releases/tag/v3.2.0",
+    "severity": "normal",
+    "checkedAt": "2026-10-26T05:03:54.625Z",
+    "source": "cache",
+    "noticeRequired": true,
+    "noticeText": "Archify update: 3.1.0 → 3.2.0. A previous check at 2026-10-26T05:03:54.625Z found a newer release. Release notes: https://github.com/tt-a1i/archify/releases/tag/v3.2.0. The installed Skill has not changed; ask to snooze or ignore this reminder.",
+    "eventKey": "archify@sha256:70e210265c59f24dcbdf2a502ff671104b5454e7ee7d3554aecd86bad32384f5"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 3606
+}

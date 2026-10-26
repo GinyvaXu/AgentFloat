@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "diagram_type": "tree",
+  "meta": {
+    "title": "AgentFloat 开发步骤（按汇报单元）",
+    "subtitle": "一个步骤 = 我开发到向你汇报、等待下一步指示的一个单元；叶子节点写的是该步骤要开发的内容。",
+    "output": "docs/agentfloat-dev-steps.html",
+    "quality_profile": "showcase"
+  },
+  "layout": { "direction": "right", "nodeW": 260, "nodeMaxW": 300, "gapY": 30, "gapX": 90 },
+  "nodes": [
+    { "id": "root", "label": "AgentFloat 开发步骤", "sublabel": "按汇报单元划分" },
+
+    { "id": "done", "label": "已完成", "parent": "root", "sublabel": "9 个单元" },
+    { "id": "s1", "label": "1 · 动效落地", "parent": "done", "sublabel": "引擎/令牌 + 逐帧迁移 + 跳过动画" },
+    { "id": "s2", "label": "2 · 动效回归", "parent": "done", "sublabel": "reduced-motion 误判 + 跨屏去抖" },
+    { "id": "s3", "label": "3 · 前端 B1", "parent": "done", "sublabel": "字号/对比度/危险确认/键盘" },
+    { "id": "s4", "label": "4 · 单一来源", "parent": "done", "sublabel": "DESIGN.md + CARD/菜单/flash 单源" },
+    { "id": "s5", "label": "5 · 快报分栏", "parent": "done", "sublabel": "Web 左列表 + 右详情 + 窄窗堆叠" },
+    { "id": "s6", "label": "6 · 状态补齐", "parent": "done", "sublabel": "确认弹层/骨架加载/错误重试" },
+    { "id": "s7", "label": "7 · Web 回归", "parent": "done", "sublabel": "修复 \\1 语法错误、统一确认框" },
+    { "id": "s8", "label": "8 · 测试收尾", "parent": "done", "sublabel": "夹具隔离红灯 + 安装页骨架/空态" },
+    { "id": "s9", "label": "9 · Catalog 地基", "parent": "done", "sublabel": "schema/merge/store + 41 项单测" },
+
+    { "id": "current", "label": "进行中", "parent": "root", "sublabel": "1 个单元" },
+    { "id": "s10", "label": "10 · 开发步骤图", "parent": "current", "sublabel": "archify 步骤图 + 每次汇报后更新" },
+
+    { "id": "todo", "label": "待开发", "parent": "root", "sublabel": "3 个单元" },
+    { "id": "s11", "label": "11 · Agent 调研", "parent": "todo", "sublabel": "9 个 Agent：启动/参数/安装核实" },
+    { "id": "s12", "label": "12 · Catalog 接 UI", "parent": "todo", "sublabel": "内置+远程 Registry、安装适配器" },
+    { "id": "s13", "label": "13 · Hub 页面", "parent": "todo", "sublabel": "Web 先行：列表/详情/一键安装" }
+  ]
+}

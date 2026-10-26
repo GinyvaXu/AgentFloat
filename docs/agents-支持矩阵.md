@@ -21,7 +21,14 @@
 
 | Agent | 启动命令 | launcher | 版本检测 | 安装方式 | 核实 |
 |---|---|---|---|---|---|
-| OpenCode（CLI） | `opencode` | cli | 待补（`opencode --version` 未跑） | 已在本机 npm 全局目录（`%APPDATA%\npm\opencode.ps1`） | 本机 PATH 探测 |
+| OpenCode（CLI） | `opencode` | cli | `opencode --version` → **v2.0.18** | npm 全局包 **`@opencode/cli`**（本机已装，`%APPDATA%\npm\opencode.ps1`） | 本机实测（PATH + npm ls + --version） |
+
+> 同期本机已装、可纳入候选验证的 npm 全局包：`@deepseek-ai/dsh@0.1.2-rc.1`、`agent-browser@0.39.1`、`skills@1.7.1`。
+> 本机未安装（便于验证「未装→检测→安装」链路）：claude / codex / gemini / aider / qwen 均返回「未安装」。
+
+### 本轮受阻（如实记录）
+
+- `raw.githubusercontent.com` 拉取 Codex CLI README 失败（Transport error，需代理）；官方文档核实推到下一轮（开代理后重试）。
 
 ## 候选清单（待核实，按优先级）
 
