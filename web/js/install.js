@@ -15,7 +15,9 @@ export function renderInstallPage() {
   const el = $("#installContent");
   // v3.16.4：首屏用骨架，不再是一行「加载中…」
   el.innerHTML = '<div class="desc" style="padding:6px 2px 10px">检测本机 Agent 安装情况，支持一键安装 / 升级 / 卸载（npm 全局安装，国内镜像优先自动回退）。</div>' +
+    '<div id="catalogBox">' + loadingCard(3) + "</div>" +
     '<div id="installList">' + loadingCard(3) + "</div>";
+  loadCatalog();
   refreshInstall();
   if (timer) clearInterval(timer);
   timer = setInterval(() => {
@@ -29,8 +31,31 @@ export function leaveInstallPage() {
   if (timer) { clearInterval(timer); timer = null; }
 }
 
-function installCard(a) {
-  const busy = a.busy || a.phase === "running";
+// v3.17.0：Agent 目录（新版）——只读展示内置 6 条 + 本机安装状态
+async function loadCatalog() {
+  const box = $("#catalogBox");
+  if (!box) return;
+  try {
+    const r = await API.api("/api/catalog");
+    const items = r.items || [];
+    box.innerHTML = '<div class="card"><h3>Agent 目录（新版）</h3>' +
+      '<div class="desc">内置 ' + items.length + ' 条已核实条目；当前只读展示，安装/卸载下一步接入。</div>' +
+      items.map(function (a) {
+        const tag = a.installed
+          ? '<span class="tag green">已安装</span>'
+          : '<span class="tag gray">未安装</span>';
+        const src = a.installed ? (a.installSource === "path" ? " · PATH" : " · 受管目录") : "";
+        return '<div class="row"><div class="lbl">' + esc(a.name) + " " + tag +
+          "<small>" + esc(a.command) + " · " + esc(a.package) + " · " + esc(a.installType) + esc(src) + "</small></div>" +
+          '<div class="ctl"><span class="desc">' + esc(a.verifiedAt || "") + "</span></div></div>";
+      }).join("") + "</div>";
+  } catch (e) {
+    box.innerHTML = '<div class="card error"><h3>目录加载失败</h3><div class="desc">' +
+      esc(e.message || "未知错误") + "</div></div>";
+  }
+}
+
+function installCard(a) {  const busy = a.busy || a.phase === "running";
   const ver = a.version ? "v" + esc(a.version) : "未安装";
   const statusTag = a.found
     ? '<span class="tag blue">已安装</span>'
