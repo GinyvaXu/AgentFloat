@@ -1,5 +1,23 @@
 # 更新日志
 
+## [3.17.3] - 2026-10-26（测试版 · Agent 自动更新 + 启动偏好）
+### Added
+- 目录自动更新检查：`npm view` 查询最新版（8s 超时）+ 本机 `--version` 对比，目录项返回 `currentVersion / latestVersion / updateAvailable`；最新版结果进程内缓存 10 分钟，避免每次打开页面都联网
+- `POST /api/catalog/upgrade` 复用后台任务执行全局重装升级；`POST /api/catalog/refresh_versions` 清缓存并重查；安装页显示「有更新 vX」徽章、「升级」与「检查更新」按钮
+- 目录每行新增「官网」链接（`source`，新窗口）；新增 **OpenCode Desktop** 条目（`desktop` 组，官网下载页；未核实安装包直链，因此不写直链）
+- 启动偏好：每个已安装 Agent 可设置「窗口 / 后台」与工作区路径（`GET/POST /api/catalog/prefs`）；`POST /api/catalog/launch` 支持可选 `{mode, workdir}`；后台模式 `CREATE_NO_WINDOW` 不阻塞，工作区不存在时自动回退主目录并提示
+### Changed
+- `installer.launch()` 新增可选 `mode / workdir` 参数；默认仍为新控制台窗口，旧调用保持兼容
+- 安装页「检查更新」单独使用 60s 超时，避免多个 npm 查询触发前端默认 15s 超时
+### Tests
+- 新增 `tests/test_catalog_update.py`（版本查询 / 升级判定 / TTL 缓存）与 `tests/test_catalog_prefs.py`（偏好校验 / launch 参数 / API 路由）
+- 全量 pytest 全绿；pyflakes 零告警；`node --check` 通过
+
+## [3.17.2] - 2026-10-26（测试版 · Agent 快捷启动）
+### Added
+- 已安装的 Agent 支持一键启动：新控制台运行 CLI（受管前缀优先、PATH 兜底），API `POST /api/catalog/launch`；安装页已安装行出现「启动」按钮
+- 全量测试通过（catalog + launch 用例），JS 语法检查通过
+
 ## [3.17.1] - 2026-10-26（测试版 · 目录补全 + 全局安装）
 ### Added
 - 目录新增 **Pi Coding Agent**（`@earendil-works/pi-coding-agent` 1.4.0）与 **DeepSeek Harness**（`@deepseek-ai/dsh` 0.2.1-rc.2，预发布），各带官网 `source`
@@ -793,8 +811,4 @@
 ## [0.1.0] - 2026-08-12
 ### Added
 - 项目初始化（由 ProjectDock 预设生成）
-## [3.17.2] - 2026-10-26（测试版 · Agent 快捷启动）
-### Added
-- 已安装的 Agent 支持一键启动：新控制台运行 CLI（受管前缀优先、PATH 兜底），API `POST /api/catalog/launch`；安装页已安装行出现「启动」按钮
-- 全量测试通过（catalog + launch 用例），JS 语法检查通过
 

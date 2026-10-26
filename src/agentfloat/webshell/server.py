@@ -341,6 +341,25 @@ def create_app(bridge, handlers):
                                  "error": "启动安装失败：%s" % str(e)[:200]},
                                 status_code=500)
 
+    @api.post("/catalog/upgrade")
+    def catalog_upgrade(body: dict | None = None):
+        """升级已安装 Agent：复用后台任务，执行全局重装。"""
+        try:
+            return handlers.catalog_upgrade((body or {}).get("id"))
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"ok": False, "busy": False,
+                                 "error": "启动升级失败：%s" % str(e)[:200]},
+                                status_code=500)
+
+    @api.post("/catalog/refresh_versions")
+    def catalog_refresh_versions():
+        """清空 npm 版本缓存并重查（「检查更新」按钮）。"""
+        try:
+            return handlers.catalog_refresh_versions()
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"ok": False, "error": "检查更新失败：%s" % str(e)[:200]},
+                                status_code=500)
+
     @api.post("/catalog/uninstall")
     def catalog_uninstall(body: dict | None = None):
         try:
@@ -351,11 +370,31 @@ def create_app(bridge, handlers):
 
     @api.post("/catalog/launch")
     def catalog_launch(body: dict | None = None):
-        """启动已安装 Agent（新控制台）；启动失败只回 {ok:false, reason}，不抛 HTTP 异常。"""
+        """启动已安装 Agent；可选 {mode, workdir}，不传则读本机偏好。"""
+        body = body or {}
         try:
-            return handlers.catalog_launch((body or {}).get("id"))
+            return handlers.catalog_launch(body.get("id"), body.get("mode"), body.get("workdir"))
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "reason": "启动失败：%s" % str(e)[:200]}
+
+    @api.get("/catalog/prefs")
+    def catalog_get_prefs(id: str = ""):
+        """读取启动偏好：{ok, id, pref:{mode, workdir}}。"""
+        try:
+            return handlers.catalog_get_prefs(id)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"ok": False, "error": "读取偏好失败：%s" % str(e)[:200]},
+                                status_code=500)
+
+    @api.post("/catalog/prefs")
+    def catalog_set_prefs(body: dict | None = None):
+        """保存启动偏好：{id, mode, workdir}。"""
+        body = body or {}
+        try:
+            return handlers.catalog_set_prefs(body.get("id"), body.get("mode"), body.get("workdir"))
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"ok": False, "error": "保存偏好失败：%s" % str(e)[:200]},
+                                status_code=500)
 
     @api.get("/catalog/job")
     def catalog_job():

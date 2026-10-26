@@ -121,8 +121,16 @@ def test_status_is_copy():
     assert fresh["message"] != "被改"
 
 
+def test_upgrade_action_done():
+    jobs.start(spec(), "upgrade", runner=lambda s: {"ok": True, "seconds": 0.5})
+    state = wait_until(lambda s: not s["running"])
+    assert state["action"] == "upgrade"
+    assert state["phase"] == "done"
+    assert state["message"].startswith("升级完成")
+
+
 def test_unknown_action_rejected_without_starting():
-    result = jobs.start(spec(), "upgrade")
+    result = jobs.start(spec(), "explode")
     assert result["ok"] is False and result["busy"] is False
-    assert "upgrade" in result["error"]
+    assert "explode" in result["error"]
     assert jobs.status()["phase"] == "idle"

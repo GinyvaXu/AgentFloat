@@ -164,6 +164,24 @@ BUILTIN_SPECS: List[Dict] = [
         "source": "https://github.com/deepseek-ai/deepseek-harness",
         "statusNote": "npm registry @deepseek-ai/dsh@0.2.1-rc.2（预发布版）；本机已装 0.1.2-rc.1",
     },
+    {
+        "schemaVersion": 1,
+        "id": "opencode-desktop",
+        "name": "OpenCode Desktop",
+        "vendor": "Anomaly",
+        "group": "desktop",
+        "icon": "opencode.svg",
+        "description": "OpenCode 桌面客户端（官网下载安装）",
+        "platforms": {"windows": "native", "macos": "native", "linux": "none"},
+        "install": [{"type": "download", "packageOrUrl": "https://opencode.ai"}],
+        "launch": {"command": "opencode-desktop", "modes": ["desktop"]},
+        "capability": {"headless": False},
+        "health": {"versionCmd": "opencode-desktop --version", "versionPattern": _VER},
+        "status": "active",
+        "verifiedAt": "2026-10-26",
+        "source": "https://opencode.ai",
+        "statusNote": "官网下载页；未核实安装包直链",
+    },
 ]
 
 

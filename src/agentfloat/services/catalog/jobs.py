@@ -23,7 +23,7 @@ from .schema import AgentSpec
 #: 注入的任务函数：接收 spec，返回 installer.install / uninstall 同形状的 dict
 TaskRunner = Callable[[AgentSpec], Dict[str, Any]]
 
-_ACTIONS = ("install", "uninstall")
+_ACTIONS = ("install", "uninstall", "upgrade")
 _lock = threading.RLock()
 _job: Optional[Dict[str, Any]] = None
 _thread: Optional[threading.Thread] = None
@@ -89,7 +89,7 @@ def start(spec: AgentSpec, action: str = "install",
             return {
                 "ok": False,
                 "busy": True,
-                "error": "已有安装任务正在执行，请等待完成",
+                "error": "已有任务正在执行，请等待完成",
                 "job": copy.deepcopy(_job),
             }
 
@@ -123,15 +123,28 @@ def reset() -> None:
         _thread = None
 
 
+def _install_global(spec: AgentSpec) -> Dict[str, Any]:
+    """升级动作的默认实现：按全局模式重装（任务函数签名保持 ``(spec) -> dict``）。"""
+    return installer.install(spec, target="global")
+
+
 def _work(job: Dict[str, Any], spec: AgentSpec, action: str,
           runner: Optional[TaskRunner]) -> None:
-    verb = "安装" if action == "install" else "卸载"
+    verb = {"install": "安装", "uninstall": "卸载", "upgrade": "升级"}.get(action, "处理")
     target = "%s %s" % (verb, spec.name)
     _set(job, phase="running", message="%s中…" % target)
     _append_log(job, "开始%s（%s）" % (target, spec.id))
 
     try:
-        fn = runner or (installer.install if action == "install" else installer.uninstall)
+        if runner is not None:
+            fn = runner
+        elif action == "install":
+            fn = installer.install
+        elif action == "upgrade":
+            # 升级 = 重新执行全局安装（npm -g 会覆盖旧版本）；与 3.17.1 的安装策略一致
+            fn = _install_global
+        else:
+            fn = installer.uninstall
         result = fn(spec)
         if not isinstance(result, dict):
             result = {"ok": bool(result)}
@@ -150,7 +163,7 @@ def _work(job: Dict[str, Any], spec: AgentSpec, action: str,
             else:
                 seconds = result.get("seconds")
                 suffix = "（%.1fs）" % float(seconds) if isinstance(seconds, (int, float)) else ""
-                message = "安装完成%s" % suffix
+                message = "%s完成%s" % (verb, suffix)
             _append_log(job, message)
             _set(job, phase="done", message=message, running=False,
                  finishedAt=time.time())

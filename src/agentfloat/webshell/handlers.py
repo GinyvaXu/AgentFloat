@@ -222,6 +222,17 @@ class WebAppHandlers(object):
             return {"ok": False, "busy": False, "error": "未知 Agent：%s" % (agent_id or "")}
         return jobs.start(spec, "install")
 
+    def catalog_upgrade(self, agent_id):
+        """启动后台升级任务（重新全局安装）；下载型条目引导去官网。"""
+        from agentfloat.services.catalog import installer, jobs
+        spec = self._catalog_spec(agent_id)
+        if spec is None:
+            return {"ok": False, "busy": False, "error": "未知 Agent：%s" % (agent_id or "")}
+        if installer.install_type(spec) not in ("npm", "pip"):
+            return {"ok": False, "busy": False,
+                    "error": "该条目为官网下载安装，请打开官网手动更新"}
+        return jobs.start(spec, "upgrade")
+
     def catalog_uninstall(self, agent_id):
         """同步卸载受管前缀（不触碰系统全局安装）。"""
         from agentfloat.services.catalog import installer
@@ -230,18 +241,58 @@ class WebAppHandlers(object):
             return {"ok": False, "error": "未知 Agent：%s" % (agent_id or "")}
         return installer.uninstall(spec)
 
-    def catalog_launch(self, agent_id):
-        """启动已安装的 Agent CLI（新控制台，立即返回）；未知 id 明确报错。"""
-        from agentfloat.services.catalog import installer
+    def catalog_launch(self, agent_id, mode=None, workdir=None):
+        """启动已安装的 Agent CLI；未显式传入的字段从本机偏好读取。"""
+        from agentfloat.services.catalog import installer, prefs
         spec = self._catalog_spec(agent_id)
         if spec is None:
             return {"ok": False, "reason": "unknown-agent"}
-        return installer.launch(spec)
+        cfg = getattr(self.widget, "config", None) if self.widget is not None else None
+        pref = prefs.get_pref(agent_id, config=cfg if isinstance(cfg, dict) else None)
+        if mode is None:
+            mode = pref["mode"]
+        if workdir is None:
+            workdir = pref["workdir"]
+        return installer.launch(spec, mode=mode, workdir=workdir)
 
     def catalog_job(self):
-        """当前安装 / 卸载任务快照。"""
+        """当前安装 / 卸载 / 升级任务快照。"""
         from agentfloat.services.catalog import jobs
         return jobs.status()
+
+    def catalog_refresh_versions(self):
+        """清空版本缓存并重查已安装条目（「检查更新」按钮）。"""
+        from agentfloat.services.catalog.report import catalog_payload
+        return catalog_payload(refresh_versions=True)
+
+    def catalog_get_prefs(self, agent_id):
+        """读取某个 Agent 的启动偏好（窗口/后台 + 工作区）。"""
+        from agentfloat.services.catalog import prefs
+        aid = str(agent_id or "").strip()
+        if self._catalog_spec(aid) is None:
+            return {"ok": False, "error": "未知 Agent：%s" % aid}
+        cfg = self.get_config()
+        return {"ok": True, "id": aid, "pref": prefs.get_pref(aid, config=cfg)}
+
+    def catalog_set_prefs(self, agent_id, mode, workdir):
+        """校验并保存启动偏好；同步更新 widget 内存配置，避免下次保存被旧值覆盖。"""
+        from agentfloat.services.catalog import prefs
+        aid = str(agent_id or "").strip()
+        if self._catalog_spec(aid) is None:
+            return {"ok": False, "error": "未知 Agent：%s" % aid}
+        cfg = self.get_config()
+        result = prefs.set_pref(aid, mode, workdir, config=cfg)
+        if result.get("ok") and self.widget is not None:
+            try:
+                # 尽量就地更新，保持主程序持有的 config 对象引用不变
+                current = getattr(self.widget, "config", None)
+                if isinstance(current, dict):
+                    current["catalog"] = cfg.get("catalog")
+                else:
+                    self.widget.config = cfg
+            except Exception:  # noqa: BLE001
+                pass
+        return result
 
     def get_news_state(self, date=None):
         """AI 快报状态（v3.9.0）：报告 + 每源结果 + 统计 + 已读/收藏 + 下次生成时间"""

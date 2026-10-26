@@ -54,7 +54,8 @@ function renderCatalog() {
     ? items.map(function (a) { return catalogRow(a, running); }).join("")
     : '<div class="desc">暂无收录的 Agent。</div>';
   box.innerHTML = renderJobCard() +
-    '<div class="card"><h3>Agent 目录</h3>' +
+    '<div class="card"><h3>Agent 目录 ' +
+    '<button class="btn sm" style="margin-left:8px" onclick="App.catalogRefreshVersions()">检查更新</button></h3>' +
     '<div class="desc">共 ' + items.length + ' 条已核实条目。安装到受管目录后可在浮球菜单直接启动；系统 PATH 里的同名 Agent 只展示、不接管。</div>' +
     rows + "</div>";
 }
@@ -63,6 +64,7 @@ function catalogRow(a, running) {
   const source = a.installSource === "path" ? " · 系统 PATH"
     : (a.installSource === "managed" ? " · 受管目录" : "");
   const meta = [a.command, a.package, a.installType,
+    a.currentVersion ? "当前 v" + a.currentVersion : "",
     a.verifiedAt ? "核验 " + a.verifiedAt : ""].filter(Boolean).join(" · ");
   return '<div class="row"><div class="lbl">' + esc(a.name) + " " + statusTag(a) +
     "<small>" + esc(meta) + esc(source) + "</small></div>" +
@@ -70,24 +72,46 @@ function catalogRow(a, running) {
 }
 
 function statusTag(a) {
-  if (!a.installed) return '<span class="tag gray">未安装</span>';
+  let tag;
+  if (!a.installed) tag = '<span class="tag gray">未安装</span>';
   // 系统 PATH 安装：明确标注，且不提供卸载（避免误删用户全局）
-  if (a.installSource === "path") return '<span class="tag blue">已安装 · 系统</span>';
-  return '<span class="tag green">已安装</span>';
+  else if (a.installSource === "path") tag = '<span class="tag blue">已安装 · 系统</span>';
+  else tag = '<span class="tag green">已安装</span>';
+  if (a.installed && a.updateAvailable) {
+    const ver = a.latestVersion ? " v" + a.latestVersion : "";
+    tag += ' <span class="tag red">有更新' + esc(ver) + "</span>";
+  }
+  return tag;
+}
+
+function websiteLink(a) {
+  if (!a.sourceUrl) return "";
+  return '<a class="btn sm" href="' + esc(a.sourceUrl) +
+    '" target="_blank" rel="noopener noreferrer">官网</a>';
 }
 
 function actionCtl(a, running) {
   if (!a.installed) {
+    // download 型没有可执行安装器：只给官网下载入口，避免点了「安装」必失败
+    if (a.installType === "download") return websiteLink(a);
     const attr = running ? " disabled" : ' onclick="App.catalogInstall(\'' + esc(a.id) + '\')"';
-    return '<button class="btn sm primary"' + attr + ">安装</button>";
+    return '<button class="btn sm primary"' + attr + ">安装</button>" + websiteLink(a);
   }
   // 已安装（受管目录 / 系统 PATH）都可启动；启动不占安装任务，运行中也不禁用
   const launchBtn = '<button class="btn sm primary" onclick="App.catalogLaunch(\'' +
     esc(a.id) + '\')">启动</button>';
+  const prefBtn = '<button class="btn sm" onclick="App.openCatalogPrefs(\'' +
+    esc(a.id) + '\')">设置</button>';
+  let upgradeBtn = "";
+  if (a.updateAvailable && a.installType !== "download") {
+    const attr = running ? " disabled" : ' onclick="App.catalogUpgrade(\'' + esc(a.id) + '\')"';
+    upgradeBtn = '<button class="btn sm" style="color:var(--accent-ink)"' + attr + ">升级</button>";
+  }
+  const tail = websiteLink(a) + prefBtn + upgradeBtn;
   // 系统 PATH 安装不提供卸载（避免误删用户全局）
-  if (a.installSource === "path") return launchBtn;
+  if (a.installSource === "path") return launchBtn + tail;
   const attr = running ? " disabled" : ' onclick="App.catalogUninstall(\'' + esc(a.id) + '\')"';
-  return launchBtn + '<button class="btn sm danger"' + attr + ">卸载</button>";
+  return launchBtn + tail + '<button class="btn sm danger"' + attr + ">卸载</button>";
 }
 
 // ── 任务进度 ───────────────────────────────────────
@@ -101,7 +125,7 @@ function renderJobCard() {
       "</div>";
   }
   if (!job.id) return "";
-  const verb = job.action === "uninstall" ? "卸载" : "安装";
+  const verb = job.action === "uninstall" ? "卸载" : (job.action === "upgrade" ? "升级" : "安装");
   const tag = job.running
     ? '<span class="tag blue">进行中</span>'
     : '<span class="tag green">完成</span>';
@@ -207,6 +231,48 @@ export async function catalogInstall(id) {
     toast("已开始安装，请稍候…", "ok");
   } catch (e) {
     showError("启动安装失败：" + (e.message || e));
+  }
+}
+
+export async function catalogUpgrade(id) {
+  if (busy || (job && job.running)) {
+    toast("已有任务在执行，请稍候", "err");
+    return;
+  }
+  try {
+    const r = await API.api("/api/catalog/upgrade", { method: "POST", body: { id: id } });
+    if (!r || r.ok === false) {
+      if (r && r.busy) {
+        job = r.job || null;
+        renderCatalog();
+        startJobPolling();
+        toast(r.error || "已有任务在执行", "err");
+        return;
+      }
+      showError((r && r.error) || "启动升级失败");
+      return;
+    }
+    job = r.job || null;
+    renderCatalog();
+    startJobPolling();
+    toast("已开始升级，请稍候…", "ok");
+  } catch (e) {
+    showError("启动升级失败：" + (e.message || e));
+  }
+}
+
+export async function catalogRefreshVersions() {
+  try {
+    toast("正在检查更新…", "ok");
+    // npm view 逐个查询可能较慢；单独放宽超时，不拖累其他页面请求
+    const r = await API.api("/api/catalog/refresh_versions", { method: "POST", timeout: 60000 });
+    if (!active) return;
+    items = (r && r.items) || [];
+    renderCatalog();
+    const n = items.filter(function (a) { return a.updateAvailable; }).length;
+    toast(n ? ("发现 " + n + " 个可更新 Agent") : "已是最新版本", "ok");
+  } catch (e) {
+    if (active) toast("检查更新失败：" + (e.message || e), "err");
   }
 }
 

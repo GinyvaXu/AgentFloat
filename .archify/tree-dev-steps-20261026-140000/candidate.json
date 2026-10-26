@@ -11,7 +11,7 @@
   "nodes": [
     { "id": "root", "label": "AgentFloat 开发步骤", "sublabel": "按汇报单元划分" },
 
-    { "id": "done", "label": "已完成", "parent": "root", "sublabel": "10 个单元" },
+    { "id": "done", "label": "已完成", "parent": "root", "sublabel": "12 个单元" },
     { "id": "s1", "label": "1 · 动效落地", "parent": "done", "sublabel": "引擎/令牌 + 逐帧迁移 + 跳过动画" },
     { "id": "s2", "label": "2 · 动效回归", "parent": "done", "sublabel": "reduced-motion 误判 + 跨屏去抖" },
     { "id": "s3", "label": "3 · 前端 B1", "parent": "done", "sublabel": "字号/对比度/危险确认/键盘" },
@@ -21,13 +21,14 @@
     { "id": "s7", "label": "7 · Web 回归", "parent": "done", "sublabel": "修复 \\1 语法错误、统一确认框" },
     { "id": "s8", "label": "8 · 测试收尾", "parent": "done", "sublabel": "夹具隔离红灯 + 安装页骨架/空态" },
     { "id": "s9", "label": "9 · Catalog 地基", "parent": "done", "sublabel": "schema/merge/store + 41 项单测" },
+    { "id": "s12", "label": "12 · Catalog 接 UI", "parent": "done", "sublabel": "内置目录 + 安装适配器 + 安装页" },
+    { "id": "s14", "label": "14 · 更新与启动偏好", "parent": "done", "sublabel": "自动更新 / 官网链接 / 窗口·后台 + 工作区" },
 
     { "id": "current", "label": "进行中", "parent": "root", "sublabel": "1 个单元" },
     { "id": "s10", "label": "10 · 开发步骤图", "parent": "current", "sublabel": "archify 步骤图 + 每次汇报后更新" },
 
-    { "id": "todo", "label": "待开发", "parent": "root", "sublabel": "2 个单元" },
+    { "id": "todo", "label": "待开发", "parent": "root", "sublabel": "1 个单元" },
     { "id": "s11", "label": "11 · Agent 调研", "parent": "done", "sublabel": "6 个已核实（headless 3 个）+ 4 个待定" },
-    { "id": "s12", "label": "12 · Catalog 接 UI", "parent": "todo", "sublabel": "内置+远程 Registry、安装适配器" },
     { "id": "s13", "label": "13 · Hub 页面", "parent": "todo", "sublabel": "Web 先行：列表/详情/一键安装" }
   ]
 }

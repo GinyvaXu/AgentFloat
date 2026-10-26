@@ -13,19 +13,24 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
-from .schema import AgentSpec
+from .schema import AgentSpec, semver_key
 
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 CREATE_NEW_CONSOLE = 0x00000010 if os.name == "nt" else 0
 DEFAULT_INSTALL_TIMEOUT = 480
 DEFAULT_CHECK_TIMEOUT = 40
 DEFAULT_PROBE_TIMEOUT = 30
+
+#: 版本查询超时：npm view 偶发卡住，不能让 /api/catalog 跟着卡住
+DEFAULT_VERSION_TIMEOUT = 8
+_NPM_VERSION_RE = re.compile(r"(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?)")
 
 #: 已核实的 headless 参数（未列出的不做探测）
 HEADLESS_ARGS = {
@@ -115,6 +120,10 @@ def install(spec: AgentSpec, base: Optional[str] = None,
             "log": log, "seconds": round(time.time() - t0, 1)}
 
 
+def _version_pattern(spec: AgentSpec) -> str:
+    return getattr(spec.health, "version_pattern", "") or r"(\d+\.\d+\.\d+)"
+
+
 def check_version(spec: AgentSpec, prefix: Optional[str] = None,
                   runner: Callable[..., Dict] = _run) -> Dict:
     """在受管前缀里跑 --version，解析版本。"""
@@ -122,11 +131,81 @@ def check_version(spec: AgentSpec, prefix: Optional[str] = None,
     if not os.path.isfile(exe):
         return {"ok": False, "version": "", "reason": "未安装（受管前缀无 bin）"}
     r = runner('"%s" --version' % exe, DEFAULT_CHECK_TIMEOUT)
-    import re
-    pattern = getattr(spec.health, "version_pattern", "") or r"(\d+\.\d+\.\d+)"
-    m = re.search(pattern, r.get("out") or "")
+    m = re.search(_version_pattern(spec), r.get("out") or "")
     return {"ok": bool(m), "version": m.group(1) if m else "", "raw": r.get("out", ""),
             "rc": r.get("rc")}
+
+
+def latest_version(spec: AgentSpec, runner: Callable[..., Dict] = _run) -> str:
+    """查询 npm registry 上的最新版；失败 / 非 npm 条目返回空串。
+
+    只做只读查询（``npm view``），静默执行且 8 秒超时；任何异常都收敛为空串，
+    避免目录页因为网络问题整块报错。
+    """
+    if install_type(spec) != "npm" or not spec.install:
+        return ""
+    pkg = spec.install[0].package_or_url
+    if not pkg:
+        return ""
+    npm = "npm.cmd" if os.name == "nt" else "npm"
+    try:
+        r = runner("%s view %s version" % (npm, pkg), DEFAULT_VERSION_TIMEOUT)
+    except Exception:  # noqa: BLE001
+        return ""
+    if r.get("rc") not in (0, None):
+        return ""
+    m = _NPM_VERSION_RE.search(r.get("out") or "")
+    return m.group(1) if m else ""
+
+
+def current_version(spec: AgentSpec, base: Optional[str] = None,
+                    runner: Callable[..., Dict] = _run) -> str:
+    """读取本机已安装版本；未安装 / 执行失败返回空串。"""
+    try:
+        det = detect(spec, base=base)
+        if not det.get("installed"):
+            return ""
+        if det.get("source") == "managed":
+            exe = bin_path(spec, managed_prefix(spec, base))
+        else:
+            exe = det.get("path") or spec.launch.command
+        if not exe:
+            return ""
+        r = runner('"%s" --version' % exe, DEFAULT_CHECK_TIMEOUT)
+        m = re.search(_version_pattern(spec), r.get("out") or "")
+        return m.group(1) if m else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def update_info(spec: AgentSpec, base: Optional[str] = None,
+                runner: Callable[..., Dict] = _run,
+                latest: Optional[str] = None) -> Dict:
+    """返回 ``{current, latest, updateAvailable}``。
+
+    - 有版本号时用 :func:`schema.semver_key` 比较（预发布后缀按基础版本比较）；
+    - 任一侧无法解析为 semver 时退化为「字符串不等即视为有更新」，绝不抛异常；
+    - ``latest`` 可由调用方传入，便于上层做 TTL 缓存。
+    """
+    current = current_version(spec, base=base, runner=runner)
+    if latest is None:
+        latest = latest_version(spec, runner=runner)
+    latest = str(latest or "").strip()
+    current = str(current or "").strip()
+
+    available = False
+    if current and latest:
+        cur_key = semver_key(current)
+        new_key = semver_key(latest)
+        if cur_key is not None and new_key is not None:
+            available = new_key > cur_key
+        else:
+            available = current != latest
+    return {
+        "current": current,
+        "latest": latest,
+        "updateAvailable": bool(available),
+    }
 
 
 def detect(spec: AgentSpec, base: Optional[str] = None) -> Dict:
@@ -140,13 +219,34 @@ def detect(spec: AgentSpec, base: Optional[str] = None) -> Dict:
     return {"installed": False, "source": "", "path": ""}
 
 
-def launch(spec: AgentSpec, base: Optional[str] = None,
-           popen: Optional[Callable[..., Any]] = None) -> Dict:
-    """启动已安装的 Agent CLI（新控制台窗口，不阻塞、不捕获输出）。
+def _resolve_workdir(workdir: Optional[str]) -> Tuple[str, str]:
+    """解析工作区：空 → 用户主目录；不存在 → 回退主目录并给出 warning。"""
+    home = os.path.expanduser("~")
+    raw = str(workdir or "").strip()
+    if not raw:
+        return home, ""
+    path = os.path.expanduser(raw)
+    if os.path.isdir(path):
+        return path, ""
+    return home, "工作区不存在，已回退用户主目录：%s" % raw
 
-    返回 ``{ok, pid, exe, method}``；未安装返回 ``reason=not-installed``，
-    启动异常统一收敛为 ``{ok: False, reason}``，不让异常冒到 HTTP 层。
+
+def launch(spec: AgentSpec, base: Optional[str] = None,
+           popen: Optional[Callable[..., Any]] = None,
+           mode: Optional[str] = None, workdir: Optional[str] = None) -> Dict:
+    """启动已安装的 Agent CLI（默认新控制台窗口，不阻塞、不捕获输出）。
+
+    - ``mode="window"``（默认）：``cmd /k "<exe>"`` + 新控制台；
+    - ``mode="background"``：``cmd /c "<exe>"`` + CREATE_NO_WINDOW；
+    - ``workdir`` 为空使用用户主目录；目录不存在则回退主目录并在 ``warning`` 说明。
+
+    返回 ``{ok, pid, exe, method}``（回退工作区时额外带 ``warning``）；
+    未安装返回 ``reason=not-installed``，启动异常统一收敛为 ``{ok: False, reason}``。
     """
+    mode = str(mode or "window").strip().lower() or "window"
+    if mode not in ("window", "background"):
+        return {"ok": False, "reason": "invalid-mode: %s" % mode}
+
     try:
         det = detect(spec, base=base)
         if not det.get("installed"):
@@ -161,18 +261,31 @@ def launch(spec: AgentSpec, base: Optional[str] = None,
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "reason": "detect-failed: %s" % str(exc)[:200]}
 
+    cwd, warning = _resolve_workdir(workdir)
     spawn = popen or subprocess.Popen
     try:
         if os.name == "nt":
-            # cmd /k：CLI 退出后窗口保留，用户能看到报错；不捕获交互输出
-            proc = spawn(
-                'cmd.exe /k "%s"' % exe,
-                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", CREATE_NEW_CONSOLE),
-            )
+            if mode == "background":
+                # /c：执行完即退出；CREATE_NO_WINDOW 不弹窗，也不阻塞调用方
+                proc = spawn(
+                    'cmd.exe /c "%s"' % exe,
+                    cwd=cwd,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", CREATE_NO_WINDOW),
+                )
+            else:
+                # cmd /k：CLI 退出后窗口保留，用户能看到报错；不捕获交互输出
+                proc = spawn(
+                    'cmd.exe /k "%s"' % exe,
+                    cwd=cwd,
+                    creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", CREATE_NEW_CONSOLE),
+                )
         else:
-            proc = spawn([exe])
-        return {"ok": True, "pid": int(getattr(proc, "pid", 0) or 0),
-                "exe": exe, "method": method}
+            proc = spawn([exe], cwd=cwd)
+        result = {"ok": True, "pid": int(getattr(proc, "pid", 0) or 0),
+                  "exe": exe, "method": method}
+        if warning:
+            result["warning"] = warning
+        return result
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "reason": str(exc)[:200] or "launch-failed"}
 

@@ -6,7 +6,7 @@
 import { $, $$, esc, getPath, setPath, num, deep, toast, loadingCard, errorCard } from "./util.js";
 import {
   renderInstallPage, leaveInstallPage, loadCatalog,
-  catalogInstall, catalogUninstall, catalogLaunch,
+  catalogInstall, catalogUninstall, catalogLaunch, catalogUpgrade, catalogRefreshVersions,
 } from "./install.js";
 
 (function () {
@@ -1437,6 +1437,55 @@ import {
     }));
   }
 
+  // ── Agent 启动偏好（v3.17.3）──────────────────────
+  async function openCatalogPrefs(id) {
+    try {
+      const r = await API.api("/api/catalog/prefs?id=" + encodeURIComponent(id));
+      if (!r || r.ok === false) {
+        toast((r && r.error) || "读取启动偏好失败", "err");
+        return;
+      }
+      const p = r.pref || {};
+      const mode = p.mode === "background" ? "background" : "window";
+      const workdir = p.workdir || "";
+      openModal("<h3>启动偏好 · " + esc(r.id || id) + "</h3>" +
+        '<div class="desc">只影响从本页「启动」按钮拉起的该 Agent，不改动其他 Agent 或系统全局设置。</div>' +
+        '<div class="f"><label>启动模式</label><select id="m-pref-mode">' +
+          '<option value="window"' + (mode === "window" ? " selected" : "") + ">窗口（新控制台，可看到输出）</option>" +
+          '<option value="background"' + (mode === "background" ? " selected" : "") + ">后台（无窗口，不阻塞）</option>" +
+        "</select></div>" +
+        '<div class="f"><label>工作区路径</label><input type="text" id="m-pref-workdir" value="' +
+          esc(workdir) + '" placeholder="留空 = 用户主目录"></div>' +
+        '<div class="desc">目录需已存在；填写不存在的路径会在启动时回退主目录并提示。</div>' +
+        '<div class="modal-actions"><button class="btn" data-close>取消</button>' +
+        '<button class="btn primary" data-save>保存</button></div>');
+      $("#modalBox [data-close]").addEventListener("click", closeModal);
+      $("#modalBox [data-save]").addEventListener("click", async () => {
+        const btn = $("#modalBox [data-save]");
+        btn.disabled = true;
+        try {
+          const saved = await API.api("/api/catalog/prefs", {
+            method: "POST",
+            body: { id: id, mode: $("#m-pref-mode").value,
+                    workdir: $("#m-pref-workdir").value.trim() },
+          });
+          if (!saved || saved.ok === false) {
+            toast((saved && saved.error) || "保存失败", "err");
+            btn.disabled = false;
+            return;
+          }
+          closeModal();
+          toast("已保存启动偏好", "ok");
+        } catch (e) {
+          toast("保存失败：" + (e.message || e), "err");
+          btn.disabled = false;
+        }
+      });
+    } catch (e) {
+      toast("读取启动偏好失败：" + (e.message || e), "err");
+    }
+  }
+
   // ── 模态框 / SSE / 启动 ─────────────────────────
   // v3.15.1：统一加载骨架 / 错误卡片（v3.16.4 起实现移到 util.js，供安装页共用）
   function openModal(html) {
@@ -1601,6 +1650,9 @@ import {
     catalogInstall: catalogInstall,
     catalogUninstall: catalogUninstall,
     catalogLaunch: catalogLaunch,
+    catalogUpgrade: catalogUpgrade,
+    catalogRefreshVersions: catalogRefreshVersions,
+    openCatalogPrefs: openCatalogPrefs,
     runAiServices: () => API.api("/api/run_ai_services", { method: "POST", body: { auto: false } }).then(() => toast("已发起本地 AI 自检服务", "ok")).catch((e) => toast("启动失败：" + e.message, "err")),
     checkUpdate: () => API.api("/api/check_update", { method: "POST" }).then(() => toast("已发起检查更新", "ok")).catch((e) => toast("检查失败：" + e.message, "err")),
     addTimer: () => timerModal(null),
