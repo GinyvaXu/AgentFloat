@@ -326,6 +326,10 @@ def create_app(bridge, handlers):
     def get_news_state(date: str | None = None):
         return handlers.get_news_state(date)
 
+    @api.get("/catalog")
+    def get_catalog():
+        return handlers.get_catalog()
+
     @api.post("/news/generate")
     def news_generate():
         bridge.command("generate_news")

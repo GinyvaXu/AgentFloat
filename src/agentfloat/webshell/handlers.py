@@ -199,6 +199,11 @@ class WebAppHandlers(object):
             applied["keys"] = store.import_secrets(payload["secrets"]["keys"])
         return {"ok": True, "applied": applied, "preview": info}
 
+    def get_catalog(self):
+        """Agent 目录（只读）：内置条目 + 本机安装状态"""
+        from agentfloat.services.catalog.report import catalog_payload
+        return catalog_payload()
+
     def get_news_state(self, date=None):
         """AI 快报状态（v3.9.0）：报告 + 每源结果 + 统计 + 已读/收藏 + 下次生成时间"""
         from agentfloat.webshell.server import _news_payload
