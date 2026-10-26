@@ -67,3 +67,26 @@
 1. 逐批抓官方文档，补齐上表（每批 3-5 个，附 URL + 日期）
 2. 把核实结果落成 `services/catalog/` 可用的数据（内置 + 远程 Registry）
 3. 用 2-3 个真实 Agent 跑通「检测 → 一键启动 → 安装」闭环
+
+
+## 全链路隔离测试结果（2026-10-26）
+
+方式：`npm install --prefix %TEMP%\af-e2e\<agent>`（独立缓存）→ 该前缀下 `--version` → headless 一条 → `npm uninstall` + 删目录；aider 用临时 venv。
+全程静默（CREATE_NO_WINDOW），测完删除，未污染全局。
+
+| Agent | 安装 | 检查（版本） | headless | 卸载/清理 | 耗时 |
+|---|---|---|---|---|---|
+| OpenCode | ✅ | 2.1.4（registry 最新；本机装的是 2.0.18） | 未测（无已核实参数） | ✅ | 30s |
+| Claude Code | ✅ | 2.1.310 | 启动成功，提示需登录/密钥 | ✅ | 21s |
+| Codex CLI | ✅ | 0.164.0 | 启动成功并读到 prompt，API 返回 **401 需登录**；非 git 目录需 `--skip-git-repo-check` | ✅ | 24s |
+| Gemini CLI | ✅ | 0.65.0 | 需登录/密钥 | ✅ | 100s |
+| Qwen Code | ✅ | 0.26.1 | 未测（无已核实参数） | ✅ | 17s |
+| Aider | ❌ | — | — | ✅ | 94s |
+
+### 结论与待办
+
+1. **安装/检测/卸载/清理 4 段链路可用**（5/6 全绿）：npm 前缀隔离方案成立，可直接作为安装适配器的实现基线。
+2. **headless 需鉴权**：claude / codex / gemini 都能启动并读到提示词，缺的是登录态；UI 要能把「未登录」与「启动失败」区分开。
+3. **aider 安装失败**：全新 venv 缺 `setuptools`，`aider-chat` 需要源码构建（`BackendUnavailable: Cannot import 'setuptools.build_meta'`）→ 安装适配器走 pip 时必须先 `pip install setuptools wheel`，或改用 pipx。
+4. **版本漂移**：opencode registry 最新 2.1.4，本机 2.0.18 → 目录不锁版本，UI 可提示「有更新」。
+5. **codex 细节**：非 git 目录要加 `--skip-git-repo-check`，应写进安装/启动参数模板。
