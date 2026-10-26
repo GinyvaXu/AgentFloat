@@ -101,3 +101,28 @@ def test_install_download_returns_page(tmp_path):
     r = installer.install(spec, base=str(tmp_path), runner=fake_ok(calls))
     assert r["ok"] is False and r["reason"] == "download-page"
     assert r["url"].startswith("http") and calls == []
+
+
+def test_install_failure_rolls_back_managed(tmp_path):
+    spec = specs().get("gemini")
+    prefix = tmp_path / "gemini"
+    prefix.mkdir()
+    (prefix / "old.txt").write_text("old", encoding="utf-8")
+
+    def fail(cmd, timeout, cwd=None):
+        return {"rc": 1, "out": "boom", "sec": 0.0, "timeout": False}
+
+    r = installer.install(spec, base=str(tmp_path), runner=fail)
+    assert r["ok"] is False and r["rolledBack"] is True
+    assert (prefix / "old.txt").read_text(encoding="utf-8") == "old"
+
+
+def test_install_success_removes_backup(tmp_path):
+    spec = specs().get("gemini")
+    prefix = tmp_path / "gemini"
+    prefix.mkdir()
+    (prefix / "old.txt").write_text("old", encoding="utf-8")
+    calls = []
+    r = installer.install(spec, base=str(tmp_path), runner=fake_ok(calls))
+    assert r["ok"] is True
+    assert list(tmp_path.glob("gemini.bak-*")) == []

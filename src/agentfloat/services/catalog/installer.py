@@ -78,6 +78,37 @@ def _run(cmd: str, timeout: int, cwd: Optional[str] = None) -> Dict:
         return {"rc": None, "out": str(e)[:200], "sec": round(time.time() - t0, 1), "timeout": False}
 
 
+def _backup_root() -> str:
+    root = os.path.join(os.path.dirname(agents_dir()), "backups")
+    os.makedirs(root, exist_ok=True)
+    return root
+
+
+def backup_config() -> str:
+    """安装前备份 config.json；返回备份路径（失败返回空串）。"""
+    try:
+        from agentfloat.core.config import config_dir
+        src = os.path.join(config_dir(), "config.json")
+        if os.path.isfile(src):
+            dst = os.path.join(_backup_root(), "config-%s.json" % time.strftime("%Y%m%d-%H%M%S"))
+            shutil.copy2(src, dst)
+            return dst
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def restore_config(path: str) -> bool:
+    try:
+        from agentfloat.core.config import config_dir
+        if path and os.path.isfile(path):
+            shutil.copy2(path, os.path.join(config_dir(), "config.json"))
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
 def install(spec: AgentSpec, base: Optional[str] = None,
             runner: Callable[..., Dict] = _run, target: str = "managed") -> Dict:
     """安装到受管前缀；返回 {ok, prefix, log[], seconds}。"""
@@ -95,6 +126,16 @@ def install(spec: AgentSpec, base: Optional[str] = None,
     if kind not in ("npm", "pip", "winget", "script"):
         return {"ok": False, "prefix": prefix, "reason": "unsupported install type: %s" % kind,
                 "log": log, "seconds": 0}
+
+    # v3.17.7：安装前备份（受管前缀改名 + 配置快照），失败时回滚
+    bak = ""
+    cfg_bak = backup_config()
+    if target != "global" and kind in ("npm", "pip") and os.path.isdir(prefix):
+        bak = prefix + ".bak-" + time.strftime("%H%M%S")
+        try:
+            shutil.move(prefix, bak)
+        except Exception:  # noqa: BLE001
+            bak = ""
 
     if kind == "npm":
         if target == "global":
@@ -136,7 +177,24 @@ def install(spec: AgentSpec, base: Optional[str] = None,
         log.append(r3)
         ok = r2.get("rc") == 0 and r3.get("rc") == 0
 
-    return {"ok": bool(ok), "prefix": prefix,
+    rolled_back = False
+    if ok:
+        if bak:
+            shutil.rmtree(bak, ignore_errors=True)
+    else:
+        # 受管模式：删掉半成品，恢复旧前缀
+        if target != "global" and kind in ("npm", "pip"):
+            shutil.rmtree(prefix, ignore_errors=True)
+            if bak and os.path.isdir(bak):
+                try:
+                    shutil.move(bak, prefix)
+                    rolled_back = True
+                except Exception:  # noqa: BLE001
+                    pass
+        if restore_config(cfg_bak):
+            rolled_back = True
+    return {"ok": bool(ok), "prefix": prefix, "rolledBack": rolled_back,
+            "backup": bak, "configBackup": cfg_bak,
             "reason": "" if ok else (log[-1].get("out") or "")[-200:],
             "log": log, "seconds": round(time.time() - t0, 1)}
 
