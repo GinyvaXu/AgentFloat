@@ -36,6 +36,7 @@ class SkillsPanel(kit.PanelShell):
         self._current = None
         self._lang_mode = "both"
         self._lang_cycle = ["en", "zh", "both"]
+        self._mode = "installed"      # installed | discover（C 线）
         self._cjk = "Microsoft YaHei"
         c = get_colors(theme)
         self._accent_hex = "#%02X%02X%02X" % c["ACCENT"]
@@ -57,6 +58,9 @@ class SkillsPanel(kit.PanelShell):
         bar.addWidget(self.search_edit, 3)
         bar.addWidget(self.source_combo, 1)
         bar.addWidget(self.btn_lang, 0)
+        self.btn_discover = kit.ghost_button("发现", on_click=self._toggle_mode)
+        self.btn_discover.setToolTip("查看 Skill 车间发现的条目（只读）")
+        bar.addWidget(self.btn_discover, 0)
         self.body.addLayout(bar)
 
         split = QSplitter(Qt.Horizontal)
@@ -170,6 +174,52 @@ class SkillsPanel(kit.PanelShell):
             parts.append(zh_desc)
         return " ".join(parts).lower()
 
+    def _toggle_mode(self):
+        self._mode = "discover" if self._mode == "installed" else "installed"
+        self.btn_discover.setText("返回已安装" if self._mode == "discover" else "发现")
+        self.search_edit.clear()
+        self._apply_filter()
+
+    def _fill_discover(self):
+        """发现视图（只读）：workshop 的 entries，按自带 category 分组"""
+        self.list.clear()
+        entries = []
+        try:
+            from agentfloat.core.config import load_config
+            from agentfloat.services.skills.workshop import default_workshop
+            payload = default_workshop(config=load_config()).list_entries()
+            entries = payload.get("entries") or []
+        except Exception:  # noqa: BLE001
+            entries = []
+        groups, order = {}, []
+        for e in entries:
+            cat = e.get("category") or "其他"
+            if cat not in groups:
+                groups[cat] = []
+                order.append(cat)
+            groups[cat].append(e)
+        for cat in order:
+            it, w = kit.item_for(self._category_row("%s %s" % ("▾", cat), len(groups[cat])),
+                                 data=("cat", cat))
+            it.setFlags(Qt.ItemIsEnabled)
+            self.list.addItem(it)
+            self.list.setItemWidget(it, w)
+            for e in groups[cat]:
+                badge = "已安装" if e.get("installed") else (
+                    "有更新" if e.get("updateAvailable") else "可安装")
+                color = self._accent_hex if e.get("installed") else "#7F8C8D"
+                sub = (e.get("description") or "")[:56]
+                it2, w2 = kit.item_for(
+                    kit.list_row("   " + (e.get("name") or ""), sub, badge, color),
+                    data=("discover", e))
+                self.list.addItem(it2)
+                self.list.setItemWidget(it2, w2)
+        self.set_subtitle("发现 %d 个条目（只读）" % len(entries))
+        if not entries:
+            self.desc_view.setPlainText(states.empty("暂无可发现的 Skill", "检查网络或稍后刷新"))
+        else:
+            self.desc_view.setPlainText(states.empty("Skill 车间", "从左侧选择一个条目查看说明"))
+
     def _category_row(self, text, count):
         """分类行：强调色粗体 + 右侧计数（比列表行更像"标题"）"""
         w = QWidget()
@@ -192,6 +242,9 @@ class SkillsPanel(kit.PanelShell):
         return w
 
     def _apply_filter(self):
+        if self._mode == "discover":
+            self._fill_discover()
+            return
         kw = self.search_edit.text().strip().lower()
         src = self.source_combo.currentData()
         self.list.clear()
@@ -247,6 +300,11 @@ class SkillsPanel(kit.PanelShell):
             else:
                 self._collapsed.add(payload)
             self._apply_filter()
+            return
+        if kind == "discover":
+            self.lbl_name.setText(payload.get("name") or "")
+            self.lbl_source.setText(payload.get("category") or "")
+            self.desc_view.setPlainText(payload.get("description") or "")
             return
         self._show_skill(payload)
 
