@@ -462,8 +462,6 @@ class NewsWindow(kit.PanelShell):
         v.setContentsMargins(2, 0, 2, 0)
         v.setSpacing(4)
         _t = row.get("title") or "（无标题）"
-        if featured and len(_t) > 26:
-            _t = _t[:25].rstrip("，。；、,. ") + "…"
         title = QLabel(_t)
         f = QFont(self._cjk)
         f.setPixelSize(FONT.title)
