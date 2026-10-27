@@ -11,11 +11,11 @@
 """
 import os
 
-from PyQt5.QtCore import Qt, QSize, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QDesktopServices, QFont
 from PyQt5.QtCore import QUrl
 from PyQt5.QtWidgets import (
-    QFrame, QLabel, QScrollArea, QTextBrowser, QSplitter, QHBoxLayout,
+    QFrame, QLabel, QScrollArea, QSizePolicy, QTextBrowser, QSplitter, QHBoxLayout,
     QVBoxLayout, QWidget,
 )
 
@@ -120,22 +120,29 @@ class NewsWindow(kit.PanelShell):
         self.search_edit = kit.search_box("搜索标题 / 摘要 / 来源 / 理由…",
                                          on_change=lambda _t: self._fill_items())
         mv.addWidget(self.search_edit)
-        self.list = kit.ListView()
-        self.list.setObjectName("pkNewsList")
-        # v3.18.2（B 读卡版）：列表项卡片化——呼吸感来自间距与描边，不靠更强对比
-        _c = get_colors(self._theme)
-        _card = "#2A2A2F" if self._theme == "dark" else "#FFFFFF"
-        self.list.setStyleSheet(
-            "QListWidget#pkNewsList { background: transparent; border: none; padding: 2px 4px; }"
-            "QListWidget#pkNewsList::item { background: %s; border: 1px solid rgba(255,255,255,0.07);"
-            " border-radius: 9px; margin: 3px 2px; padding: 7px 9px; }"
-            "QListWidget#pkNewsList::item:disabled { background: none; border: none;"
-            " margin: 2px 0px; padding: 0px; }"
-            "QListWidget#pkNewsList::item:hover { border-color: rgba(10,132,255,0.45); }"
-            "QListWidget#pkNewsList::item:selected { background: rgba(10,132,255,0.12);"
-            " border-color: rgba(10,132,255,0.55); }" % _card)
-        self.list.itemClicked.connect(self._on_item_clicked)
-        mv.addWidget(self.list, 1)
+        # v3.18.4：列表改为滚动容器（卡片/分类带可完全控制，不再受 QListWidget item 样式限制）
+        self.news_scroll = QScrollArea()
+        self.news_scroll.setWidgetResizable(True)
+        self.news_scroll.setFrameShape(QFrame.NoFrame)
+        self.news_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.news_scroll.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
+            "QFrame#newsCard { background: %s; border: 1px solid rgba(255,255,255,0.07);"
+            " border-radius: 9px; }"
+            "QFrame#newsCard:hover { border-color: rgba(10,132,255,0.45); }"
+            "QFrame#newsCard[selected=\"true\"] { border-color: rgba(10,132,255,0.60);"
+            " background: rgba(10,132,255,0.10); }"
+            "QFrame#newsBand { background: none; border: none; }"
+            % ("#2A2A2F" if self._theme == "dark" else "#FFFFFF"))
+        _holder = QWidget()
+        _holder.setObjectName("newsBody")
+        self.news_layout = QVBoxLayout(_holder)
+        self.news_layout.setContentsMargins(2, 2, 2, 2)
+        self.news_layout.setSpacing(6)
+        self.news_layout.addStretch(1)
+        self.news_scroll.setWidget(_holder)
+        mv.addWidget(self.news_scroll, 1)
         split.addWidget(mid)
 
         # 右栏：详情
@@ -336,8 +343,13 @@ class NewsWindow(kit.PanelShell):
         return out
 
     def _fill_items(self):
-        self.list.clear()
-        self._featured_done = False
+        """重建中栏：分类带 + 卡片（首条头条）"""
+        # 清空（保留末尾 stretch）
+        while self.news_layout.count() > 1:
+            item = self.news_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
         items = self._visible_items()
         groups = {}
         order = []
@@ -347,37 +359,101 @@ class NewsWindow(kit.PanelShell):
                 groups[cat] = []
                 order.append(cat)
             groups[cat].append(it)
+        featured_done = False
         for cat in order:
             rows = groups[cat]
-            cat_item, cat_w = self._cat_row(CAT_LABEL.get(cat, cat), len(rows))
-            cat_item.setFlags(Qt.NoItemFlags)          # disabled → QSS 里透明，不当卡片
-            cat_item.setBackground(Qt.transparent)    # 再兜一层：item 背景置透明
-            self.list.addItem(cat_item)
-            self.list.setItemWidget(cat_item, cat_w)
+            self.news_layout.insertWidget(self.news_layout.count() - 1,
+                                          self._cat_band(CAT_LABEL.get(cat, cat), len(rows)))
             for row in rows:
-                badge, bcolor = "", None
-                if row.get("starred"):
-                    badge, bcolor = "★", self._warning_hex
-                if not getattr(self, "_featured_done", False):
-                    self._featured_done = True
-                    it2, w2 = kit.item_for(self._featured_row(row), data=("item", row))
-                else:
-                    title = row.get("title") or "（无标题）"
-                    if len(title) > 30:
-                        title = title[:29].rstrip("，。；、,. ") + "…"
-                    it2, w2 = kit.item_for(
-                        kit.list_row(title, self._row_meta(row), badge, bcolor, compact=False),
-                        data=("item", row))
-                self.list.addItem(it2)
-                self.list.setItemWidget(it2, w2)
-                # v3.18.1：行高必须跟 widget 一致，否则 QListWidget 按默认高度排布导致文字重叠
-                it2.setSizeHint(QSize(0, max(34, w2.sizeHint().height()) + 18))  # 卡片 padding 7*2 + 边框
+                card = self._news_card(row, featured=not featured_done)
+                featured_done = featured_done or True
+                self.news_layout.insertWidget(self.news_layout.count() - 1, card)
         total = len((self._report or {}).get("items") or [])
         unread = int((self._report or {}).get("unread") or 0)
         self.set_subtitle("%s · 共 %d 条 · 未读 %d" % (self._date or "无数据", total, unread))
         if not items:
-            self._add_static(self.list, self._plain("（当前过滤下没有条目）"))
+            hint = QLabel("（当前过滤下没有条目）")
+            hint.setStyleSheet("color: %s; padding: 12px;" % self._hint_hex)
+            self.news_layout.insertWidget(0, hint)
 
+    def _cat_band(self, text, count):
+        """分类分隔带（透明，不再是小卡片）"""
+        band = QFrame()
+        band.setObjectName("newsBand")
+        h = QHBoxLayout(band)
+        h.setContentsMargins(6, 12, 6, 2)
+        lab = QLabel(text)
+        f = QFont(self._cjk)
+        f.setPixelSize(FONT.body)
+        f.setBold(True)
+        lab.setFont(f)
+        lab.setStyleSheet("color: %s;" % self._accent_hex)
+        h.addWidget(lab, 1)
+        cnt = QLabel(str(count))
+        cf = QFont(self._cjk)
+        cf.setPixelSize(FONT.micro)
+        cnt.setFont(cf)
+        cnt.setStyleSheet("color: %s;" % self._hint_hex)
+        h.addWidget(cnt, 0)
+        return band
+
+    def _news_card(self, row, featured=False):
+        """卡片：普通=标题+元信息；头条=大标题（两行）+摘要+元信息"""
+        card = QFrame()
+        card.setObjectName("newsCard")
+        card.setProperty("selected", False)
+        card.setCursor(Qt.PointingHandCursor)
+        v = QVBoxLayout(card)
+        v.setContentsMargins(10, 8, 10, 8)
+        v.setSpacing(4)
+        top = QHBoxLayout()
+        top.setSpacing(6)
+        _t = row.get("title") or "（无标题）"
+        if featured and len(_t) > 26:
+            _t = _t[:25].rstrip("，。；、,. ") + "…"
+        title = QLabel(_t)
+        tf = QFont(self._cjk)
+        tf.setPixelSize(FONT.title if featured else FONT.body)
+        tf.setBold(featured)
+        title.setFont(tf)
+        title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        if featured:
+            title.setWordWrap(True)
+        top.addWidget(title, 1)
+        if row.get("starred"):
+            star = QLabel("★")
+            sf = QFont(self._cjk)
+            sf.setPixelSize(FONT.micro)
+            star.setFont(sf)
+            star.setStyleSheet("color: %s;" % self._warning_hex)
+            top.addWidget(star, 0)
+        v.addLayout(top)
+        if featured:
+            summary = str(row.get("summary") or "").strip()
+            if summary:
+                sl = QLabel(summary[:60] + ("…" if len(summary) > 60 else ""))
+                sf2 = QFont(self._cjk)
+                sf2.setPixelSize(FONT.caption)
+                sl.setFont(sf2)
+                sl.setStyleSheet("color: %s;" % self._hint_hex)
+                v.addWidget(sl)
+        meta = QLabel(self._row_meta(row))
+        mf = QFont(self._cjk)
+        mf.setPixelSize(FONT.micro)
+        meta.setFont(mf)
+        meta.setStyleSheet("color: %s;" % self._hint_hex)
+        v.addWidget(meta)
+        card.mousePressEvent = lambda ev, r=row, c=card: self._select_card(r, c)
+        return card
+
+    def _select_card(self, row, card):
+        for i in range(self.news_layout.count()):
+            w = self.news_layout.itemAt(i).widget()
+            if w is not None and w.objectName() == "newsCard":
+                w.setProperty("selected", w is card)
+                w.style().unpolish(w)
+                w.style().polish(w)
+        self._show_item(row)
 
     def _featured_row(self, row):
         """头条卡片：两行大标题 + 一行摘要 + 元信息（v3.18.3）"""
@@ -385,7 +461,10 @@ class NewsWindow(kit.PanelShell):
         v = QVBoxLayout(w)
         v.setContentsMargins(2, 0, 2, 0)
         v.setSpacing(4)
-        title = QLabel(row.get("title") or "（无标题）")
+        _t = row.get("title") or "（无标题）"
+        if featured and len(_t) > 26:
+            _t = _t[:25].rstrip("，。；、,. ") + "…"
+        title = QLabel(_t)
         f = QFont(self._cjk)
         f.setPixelSize(FONT.title)
         f.setBold(True)
