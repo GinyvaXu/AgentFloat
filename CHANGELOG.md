@@ -1,5 +1,13 @@
 ﻿# 更新日志
 
+## [3.18.9] - 2026-10-28（测试版 · C-3/C-4 Skill 详情与安装/卸载）
+### Added
+- Web Skills 页：点条目弹详情（名称/分类/来源/说明）+ 安装/卸载按钮
+- `POST /api/skills/install`、`POST /api/skills/uninstall`（卸载未指定 target 时自动解析已装目标）
+### Note
+- 安装同步执行，长任务可能触发前端 15s 超时（后端继续）；下一步改异步任务 + 轮询
+- 逐 Agent 多目标选择、README 预览、Archify 架构图仍未做
+
 ## [3.18.8] - 2026-10-27（测试版 · C-2 Web Skills 车间页）
 ### Added
 - Web 控制台新增「Skills」页：已安装 / 发现 / 可更新 三个标签 + 搜索；条目显示分类、来源与两个排序因子

@@ -155,10 +155,48 @@ import {
           const f = e.factors || {};
           const keys = Object.keys(f).slice(0, 2);
           const extra = keys.map(function (k) { return k + " " + Math.round((f[k] || 0) * 100) + "%"; }).join(" · ");
-          return '<div class="row"><div class="lbl">' + esc(e.name) + " " + badge +
+          return '<div class="row" data-skill-id="' + esc(e.entryId) + '"><div class="lbl">' + esc(e.name) + " " + badge +
             "<small>" + esc(e.category || "") + (extra ? " · " + esc(extra) : "") + "</small></div>" +
             '<div class="ctl"><span class="desc">' + esc(e.source || "") + "</span></div></div>";
         }).join("") + "</div>";
+      $$("#skillsContent .row[data-skill-id]").forEach(function (rowEl) {
+        rowEl.style.cursor = "pointer";
+        rowEl.addEventListener("click", function () {
+          const e = entries.find(function (x) { return x.entryId === rowEl.dataset.skillId; });
+          if (!e) return;
+          openModal("<h3>" + esc(e.name) + "</h3>" +
+            '<div class="desc">' + esc(e.category || "") + " · " + esc(e.source || "") + "</div>" +
+            '<div class="desc" style="margin:10px 0;white-space:pre-wrap">' +
+            esc((e.description || "").slice(0, 600)) + "</div>" +
+            '<div class="modal-actions">' +
+            (e.installed
+              ? '<button class="btn danger" data-skill-uninstall>卸载</button>'
+              : '<button class="btn primary" data-skill-install>安装</button>') +
+            '<button class="btn" data-close>关闭</button></div>');
+          const inst = $("#modalBox [data-skill-install]");
+          if (inst) inst.addEventListener("click", async function () {
+            inst.disabled = true;
+            try {
+              await API.api("/api/skills/install", { method: "POST", body: { id: e.entryId } });
+              toast("已安装：" + e.name, "ok");
+              closeModal();
+              renderSkillsWorkshop();
+            } catch (err) { toast("安装失败：" + err.message, "err"); inst.disabled = false; }
+          });
+          const un = $("#modalBox [data-skill-uninstall]");
+          if (un) un.addEventListener("click", async function () {
+            un.disabled = true;
+            try {
+              await API.api("/api/skills/uninstall", { method: "POST", body: { id: e.entryId } });
+              toast("已卸载：" + e.name, "ok");
+              closeModal();
+              renderSkillsWorkshop();
+            } catch (err) { toast("卸载失败：" + err.message, "err"); un.disabled = false; }
+          });
+          $("#modalBox [data-close]").addEventListener("click", closeModal);
+        });
+      });
+
       const inp = $("#skillSearch");
       if (inp) inp.addEventListener("input", function () { skillsUI.query = inp.value; renderSkillsWorkshop(); });
       $$("#skillsContent [data-skill-tab]").forEach(function (b) {

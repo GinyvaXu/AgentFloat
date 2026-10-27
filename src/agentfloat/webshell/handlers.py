@@ -205,6 +205,16 @@ class WebAppHandlers(object):
         return workshop_payload(tab=tab or "installed", query=query or "",
                                 category=category or "")
 
+    def skills_install(self, body=None):
+        from agentfloat.services.skills.report import install_skill
+        body = body or {}
+        return install_skill(str(body.get("id") or ""), body.get("targets"))
+
+    def skills_uninstall(self, body=None):
+        from agentfloat.services.skills.report import uninstall_skill
+        body = body or {}
+        return uninstall_skill(str(body.get("id") or ""), body.get("target_id"))
+
     def get_catalog(self):
         """Agent 目录（只读）：内置条目 + 本机安装状态"""
         from agentfloat.services.catalog.report import catalog_payload

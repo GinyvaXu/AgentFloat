@@ -328,6 +328,14 @@ def create_app(bridge, handlers):
     def skills_workshop(tab: str = "installed", query: str = "", category: str = ""):
         return handlers.skills_workshop(tab, query, category)
 
+    @api.post("/skills/install")
+    def skills_install(body: dict | None = None):
+        return handlers.skills_install(body)
+
+    @api.post("/skills/uninstall")
+    def skills_uninstall(body: dict | None = None):
+        return handlers.skills_uninstall(body)
+
     @api.get("/catalog")
     def get_catalog():
         return handlers.get_catalog()
