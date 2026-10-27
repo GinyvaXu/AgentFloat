@@ -332,6 +332,10 @@ def create_app(bridge, handlers):
     def skills_install(body: dict | None = None):
         return handlers.skills_install(body)
 
+    @api.get("/skills/job")
+    def skills_job():
+        return handlers.skills_job()
+
     @api.post("/skills/uninstall")
     def skills_uninstall(body: dict | None = None):
         return handlers.skills_uninstall(body)

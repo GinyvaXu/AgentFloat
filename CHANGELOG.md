@@ -1,5 +1,12 @@
 ﻿# 更新日志
 
+## [3.18.10] - 2026-10-28（测试版 · C 线异步 Skill 安装）
+### Added
+- Skill 安装改为后台任务：`POST /api/skills/install` 立即返回，`GET /api/skills/job` 轮询状态（phase/message/ok）
+- Web 安装后每秒轮询，完成/失败提示并刷新；超过 3 分钟仍运行则提示稍后查看
+### Tests
+- 新增 3 项任务状态机测试（done/error/busy）；全量通过
+
 ## [3.18.9] - 2026-10-28（测试版 · C-3/C-4 Skill 详情与安装/卸载）
 ### Added
 - Web Skills 页：点条目弹详情（名称/分类/来源/说明）+ 安装/卸载按钮

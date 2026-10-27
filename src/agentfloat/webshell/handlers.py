@@ -206,9 +206,14 @@ class WebAppHandlers(object):
                                 category=category or "")
 
     def skills_install(self, body=None):
-        from agentfloat.services.skills.report import install_skill
+        """异步安装：立即返回，前端轮询 /skills/job"""
+        from agentfloat.services.skills import jobs
         body = body or {}
-        return install_skill(str(body.get("id") or ""), body.get("targets"))
+        return jobs.start(str(body.get("id") or ""), body.get("targets"))
+
+    def skills_job(self):
+        from agentfloat.services.skills import jobs
+        return jobs.status()
 
     def skills_uninstall(self, body=None):
         from agentfloat.services.skills.report import uninstall_skill

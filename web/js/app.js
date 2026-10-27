@@ -177,10 +177,27 @@ import {
           if (inst) inst.addEventListener("click", async function () {
             inst.disabled = true;
             try {
-              await API.api("/api/skills/install", { method: "POST", body: { id: e.entryId } });
-              toast("已安装：" + e.name, "ok");
-              closeModal();
-              renderSkillsWorkshop();
+              const started = await API.api("/api/skills/install", { method: "POST", body: { id: e.entryId } });
+              if (started && started.busy) { toast("已有安装任务在进行", "err"); inst.disabled = false; return; }
+              const t0 = Date.now();
+              const timer = setInterval(async function () {
+                try {
+                  const st = await API.api("/api/skills/job");
+                  if (!st.running) {
+                    clearInterval(timer);
+                    toast(st.ok ? ("已安装：" + e.name) : (st.message || "安装失败"), st.ok ? "ok" : "err");
+                    closeModal();
+                    renderSkillsWorkshop();
+                  } else if (Date.now() - t0 > 180000) {
+                    clearInterval(timer);
+                    toast("安装仍在后台进行，稍后刷新查看", "err");
+                    inst.disabled = false;
+                  }
+                } catch (pollErr) {
+                  clearInterval(timer);
+                  inst.disabled = false;
+                }
+              }, 1000);
             } catch (err) { toast("安装失败：" + err.message, "err"); inst.disabled = false; }
           });
           const un = $("#modalBox [data-skill-uninstall]");
