@@ -11,7 +11,7 @@
 """
 import os
 
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, QSize, pyqtSignal
 from PyQt5.QtGui import QDesktopServices, QFont
 from PyQt5.QtCore import QUrl
 from PyQt5.QtWidgets import (
@@ -63,7 +63,7 @@ class NewsWindow(kit.PanelShell):
     # ── 界面 ────────────────────────────────────
     def _setup_ui(self):
         self.btn_generate = kit.ghost_button("生成日报", on_click=self.generate_requested.emit)
-        self.footer.insertWidget(0, self.btn_generate)
+        self.footer.addWidget(self.btn_generate)
         self.btn_cancel = kit.ghost_button("取消生成", on_click=self.cancel_requested.emit,
                                            danger=True)
         self.btn_cancel.setVisible(False)
@@ -80,7 +80,20 @@ class NewsWindow(kit.PanelShell):
         self.health_scroll.setWidgetResizable(True)
         self.health_scroll.setFixedHeight(42)
         self.health_scroll.setFrameShape(QFrame.NoFrame)
+        self.health_scroll.setFixedHeight(0)      # 初始不占位，有源状态后再展开
+        try:
+            self.health_scroll.viewport().setAutoFillBackground(False)
+        except Exception:  # noqa: BLE001
+            pass
         self.health_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # v3.18.1：容器/视口透明，避免出现一条未上主题的灰白横条
+        self.health_scroll.setStyleSheet(
+            "QScrollArea#newsHealth, QScrollArea#newsHealth > QWidget > QWidget"
+            " { background: none; border: none; }")
+        try:
+            self.health_scroll.viewport().setStyleSheet("background: none;")
+        except Exception:  # noqa: BLE001
+            pass
         self.health_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.health_host = QWidget()
         self.health_row = QHBoxLayout(self.health_host)
@@ -167,6 +180,8 @@ class NewsWindow(kit.PanelShell):
         self._date = (self._report or {}).get("date") or date or ""
         self._current = None
         self._fill_health()
+        _health = (self._report or {}).get("source_health") or []
+        self.health_scroll.setVisible(bool(_health))
         self._fill_left()
         self._fill_items()
         self._show_placeholder()
@@ -187,6 +202,12 @@ class NewsWindow(kit.PanelShell):
         self.health_row.addWidget(label)
         sources = (self._report or {}).get("sources") or []
         if not sources:
+            # v3.18.1：没有源状态就把高度归零（隐藏仍占位会留一条白带）
+            self.health_scroll.setVisible(False)
+            self.health_scroll.setFixedHeight(0)
+            _box = self.health_row.parentWidget()
+            if _box is not None:
+                _box.setVisible(False)
             hint = QLabel("暂无源状态（生成后显示）")
             hf = QFont(self._cjk)
             hf.setPixelSize(FONT.micro)
@@ -195,6 +216,20 @@ class NewsWindow(kit.PanelShell):
             self.health_row.addWidget(hint)
             self.health_row.addStretch(1)
             return
+        self.health_scroll.setVisible(True)
+        self.health_scroll.setFixedHeight(42)
+        try:
+            self.health_scroll.viewport().setAutoFillBackground(False)
+        except Exception:  # noqa: BLE001
+            pass
+        _box = self.health_row.parentWidget()
+        if _box is not None:
+            _box.setVisible(True)
+            _box.setStyleSheet("background: none; border: none;")
+        try:
+            self.health_scroll.widget().setStyleSheet("background: none;")
+        except Exception:  # noqa: BLE001
+            pass
         for src in sources:
             status = src.get("status") or ("ok" if src.get("ok") else "failed")
             color = {"ok": self._ok_hex, "degraded": self._warning_hex,
@@ -303,16 +338,18 @@ class NewsWindow(kit.PanelShell):
             self._add_static(self.list, self._cat_row(CAT_LABEL.get(cat, cat), len(rows)))
             for row in rows:
                 badge, bcolor = "", None
-                if not row.get("read"):
-                    badge, bcolor = "未读", self._accent_hex
                 if row.get("starred"):
-                    badge, bcolor = (badge + " ★").strip(), self._warning_hex
+                    badge, bcolor = "★", self._warning_hex
+                title = row.get("title") or "（无标题）"
+                if len(title) > 30:
+                    title = title[:29].rstrip("，。；、,. ") + "…"
                 it2, w2 = kit.item_for(
-                    kit.list_row("   " + (row.get("title") or "（无标题）"),
-                                 self._row_meta(row), badge, bcolor, compact=False),
+                    kit.list_row(title, self._row_meta(row), badge, bcolor, compact=False),
                     data=("item", row))
                 self.list.addItem(it2)
                 self.list.setItemWidget(it2, w2)
+                # v3.18.1：行高必须跟 widget 一致，否则 QListWidget 按默认高度排布导致文字重叠
+                it2.setSizeHint(QSize(0, max(34, w2.sizeHint().height())))
         total = len((self._report or {}).get("items") or [])
         unread = int((self._report or {}).get("unread") or 0)
         self.set_subtitle("%s · 共 %d 条 · 未读 %d" % (self._date or "无数据", total, unread))
@@ -320,20 +357,14 @@ class NewsWindow(kit.PanelShell):
             self._add_static(self.list, self._plain("（当前过滤下没有条目）"))
 
     def _row_meta(self, row):
-        """列表第二行：来源 · 分类 · 分数 · 为什么（截断，避免撑爆）"""
+        """列表第二行：来源 · 分数（why/因子只在详情，避免行过高）"""
         parts = []
         if row.get("source"):
             parts.append(str(row["source"]))
-        cat = CAT_LABEL.get(row.get("category") or "", "")
-        if cat:
-            parts.append(cat)
         if row.get("score"):
             parts.append("%s 分" % row["score"])
-        if row.get("why"):
-            why = str(row["why"])
-            if len(why) > 56:
-                why = why[:56].rstrip("；，,. ") + "…"
-            parts.append(why)
+        if not row.get("read"):
+            parts.append("未读")
         return " · ".join(parts)
 
     def _show_placeholder(self):
