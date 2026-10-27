@@ -129,6 +129,8 @@ class SkillsPanel(kit.PanelShell):
     # ── 数据 ────────────────────────────────────
     def refresh(self):
         roots = self._skills_cfg.get("roots") or default_skill_roots()
+        # v3.18.5：workshop 已能 list_entries（38 条），但其条目缺分类根路径，
+        # 直接替换会让分类全落到「其他」；列表暂用扫描器，接「发现/可更新」时再切。
         self._all_skills = scan_skills(roots)
         self._grouped = categorize_skills(self._all_skills)
         self._rebuild_sources()
