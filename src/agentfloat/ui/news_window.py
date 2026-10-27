@@ -1,4 +1,4 @@
-# -*- mode: python ; coding: utf-8 -*-
+﻿# -*- mode: python ; coding: utf-8 -*-
 """AgentFloat — AI 日报独立窗口（B 线 2.0，Qt 三栏阅读器）
 
 左栏：日期（历史期数）/ 过滤（全部·未读·收藏）/ 来源
@@ -121,6 +121,18 @@ class NewsWindow(kit.PanelShell):
                                          on_change=lambda _t: self._fill_items())
         mv.addWidget(self.search_edit)
         self.list = kit.ListView()
+        self.list.setObjectName("pkNewsList")
+        # v3.18.2（B 读卡版）：列表项卡片化——呼吸感来自间距与描边，不靠更强对比
+        _c = get_colors(self._theme)
+        _bd = "#%02X%02X%02X" % _c["SEPARATOR"]
+        _card = "#2A2A2F" if self._theme == "dark" else "#FFFFFF"
+        self.list.setStyleSheet(
+            "QListWidget#pkNewsList { background: transparent; border: none; padding: 2px 4px; }"
+            "QListWidget#pkNewsList::item { background: %s; border: 1px solid %s;"
+            " border-radius: 9px; margin: 3px 2px; padding: 7px 9px; }"
+            "QListWidget#pkNewsList::item:hover { border-color: rgba(10,132,255,0.45); }"
+            "QListWidget#pkNewsList::item:selected { background: rgba(10,132,255,0.12);"
+            " border-color: rgba(10,132,255,0.55); }" % (_card, _bd))
         self.list.itemClicked.connect(self._on_item_clicked)
         mv.addWidget(self.list, 1)
         split.addWidget(mid)
@@ -349,7 +361,7 @@ class NewsWindow(kit.PanelShell):
                 self.list.addItem(it2)
                 self.list.setItemWidget(it2, w2)
                 # v3.18.1：行高必须跟 widget 一致，否则 QListWidget 按默认高度排布导致文字重叠
-                it2.setSizeHint(QSize(0, max(34, w2.sizeHint().height())))
+                it2.setSizeHint(QSize(0, max(34, w2.sizeHint().height()) + 18))  # 卡片 padding 7*2 + 边框
         total = len((self._report or {}).get("items") or [])
         unread = int((self._report or {}).get("unread") or 0)
         self.set_subtitle("%s · 共 %d 条 · 未读 %d" % (self._date or "无数据", total, unread))
@@ -556,10 +568,10 @@ class NewsWindow(kit.PanelShell):
         self.refresh()
 
     def _cat_row(self, text, count):
-        """分类小标题（粗体强调色 + 右侧计数）"""
+        """分类小标题（粗体强调色 + 右侧计数 + 上方细分隔）"""
         w = QWidget()
         h = QHBoxLayout(w)
-        h.setContentsMargins(2, 4, 2, 2)
+        h.setContentsMargins(4, 10, 4, 4)
         lab = QLabel(text)
         f = QFont(self._cjk)
         f.setPixelSize(FONT.body)
