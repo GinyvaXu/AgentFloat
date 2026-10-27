@@ -129,7 +129,7 @@ class NewsWindow(kit.PanelShell):
             "QScrollArea { background: transparent; border: none; }"
             "QScrollArea > QWidget > QWidget { background: transparent; }"
             "QFrame#newsCard { background: %s; border: 1px solid rgba(255,255,255,0.07);"
-            " border-radius: 9px; }"
+            " border-radius: 8px; }"
             "QFrame#newsCard:hover { border-color: rgba(10,132,255,0.45); }"
             "QFrame#newsCard[selected=\"true\"] { border-color: rgba(10,132,255,0.60);"
             " background: rgba(10,132,255,0.10); }"
