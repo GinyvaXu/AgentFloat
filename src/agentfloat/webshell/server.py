@@ -324,6 +324,10 @@ def create_app(bridge, handlers):
     def get_news_state(date: str | None = None):
         return handlers.get_news_state(date)
 
+    @api.get("/skills/workshop")
+    def skills_workshop(tab: str = "installed", query: str = "", category: str = ""):
+        return handlers.skills_workshop(tab, query, category)
+
     @api.get("/catalog")
     def get_catalog():
         return handlers.get_catalog()

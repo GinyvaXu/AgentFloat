@@ -1,5 +1,13 @@
 ﻿# 更新日志
 
+## [3.18.7] - 2026-10-27（测试版 · vNext 革命性方案 + C 线 Web API）
+### Added
+- `docs/vNext-革命性方案-C与D.md`：全量检查、C 车间新方案、D 进度中枢新方案（三层/协议/ETA/统一任务总线）
+- `GET /api/skills/workshop`（只读）：tab/query/category 透传 workshop.list_entries，供 Web 车间使用
+- `services/skills/report.py::workshop_payload` + 2 项测试
+### Changed
+- 修正 4.0 路线图对 D 线的降级：进度中枢确认为 4.0 第一旗舰（方案文档）
+
 ## [3.18.6] - 2026-10-27（测试版 · C 线：发现视图安装/更新）
 ### Added
 - 发现视图条目支持「安装」「更新」：`kit.confirm` 二次确认 → 调 `workshop.install/update` → 刷新列表并提示结果

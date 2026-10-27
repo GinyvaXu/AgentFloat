@@ -199,6 +199,12 @@ class WebAppHandlers(object):
             applied["keys"] = store.import_secrets(payload["secrets"]["keys"])
         return {"ok": True, "applied": applied, "preview": info}
 
+    def skills_workshop(self, tab="installed", query="", category=""):
+        """Skill 车间（只读）：workshop.list_entries 的载荷"""
+        from agentfloat.services.skills.report import workshop_payload
+        return workshop_payload(tab=tab or "installed", query=query or "",
+                                category=category or "")
+
     def get_catalog(self):
         """Agent 目录（只读）：内置条目 + 本机安装状态"""
         from agentfloat.services.catalog.report import catalog_payload
