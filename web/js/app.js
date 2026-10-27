@@ -119,10 +119,54 @@ import {
   // PATCH 3.1.1：补回本地 renderPage（此前只挂在 window.App 上，save 收尾调用时报
   //「renderPage is not defined」→ 明明保存成功却提示失败）
   function renderPage() {
+    if (page === "skills") renderSkillsWorkshop();
     if (page === "settings") renderSettings();
     else if (page === "install") renderInstallPage();
     else if (page === "api") loadApiPage();
     else loadNewsPage();
+  }
+
+
+  // ── Skills 车间（C 线，只读：已安装 / 发现 / 可更新）──────────
+  const skillsUI = { tab: "installed", query: "" };
+  async function renderSkillsWorkshop() {
+    const el = $("#skillsContent");
+    if (!el) return;
+    el.innerHTML = '<div class="card"><div class="desc">加载中…</div></div>';
+    try {
+      const r = await API.api("/api/skills/workshop?tab=" + encodeURIComponent(skillsUI.tab) +
+        "&query=" + encodeURIComponent(skillsUI.query));
+      const entries = r.entries || [];
+      const cats = r.categories || [];
+      const tabs = [["installed", "已安装"], ["discover", "发现"], ["updates", "可更新"]];
+      el.innerHTML = '<div class="card"><div class="news-head"><h3>Skills 车间</h3>' +
+        '<div class="news-tools">' +
+        '<input id="skillSearch" class="news-search" placeholder="搜索 skill" value="' + esc(skillsUI.query) + '">' +
+        '<div class="news-filter">' + tabs.map(function (t) {
+          return '<button class="news-filter-btn' + (skillsUI.tab === t[0] ? " on" : "") +
+            '" data-skill-tab="' + t[0] + '">' + t[1] + "</button>";
+        }).join("") + "</div></div></div>" +
+        '<div class="desc">共 ' + entries.length + " 条" +
+        (cats.length ? " · " + cats.length + " 个分类" : "") + "</div>" +
+        entries.map(function (e) {
+          const badge = e.installed
+            ? '<span class="tag green">已安装</span>'
+            : (e.updateAvailable ? '<span class="tag blue">有更新</span>' : '<span class="tag gray">可安装</span>');
+          const f = e.factors || {};
+          const keys = Object.keys(f).slice(0, 2);
+          const extra = keys.map(function (k) { return k + " " + Math.round((f[k] || 0) * 100) + "%"; }).join(" · ");
+          return '<div class="row"><div class="lbl">' + esc(e.name) + " " + badge +
+            "<small>" + esc(e.category || "") + (extra ? " · " + esc(extra) : "") + "</small></div>" +
+            '<div class="ctl"><span class="desc">' + esc(e.source || "") + "</span></div></div>";
+        }).join("") + "</div>";
+      const inp = $("#skillSearch");
+      if (inp) inp.addEventListener("input", function () { skillsUI.query = inp.value; renderSkillsWorkshop(); });
+      $$("#skillsContent [data-skill-tab]").forEach(function (b) {
+        b.addEventListener("click", function () { skillsUI.tab = b.dataset.skillTab; renderSkillsWorkshop(); });
+      });
+    } catch (err) {
+      el.innerHTML = '<div class="card error"><h3>加载失败</h3><div class="desc">' + esc(err.message || "未知错误") + "</div></div>";
+    }
   }
 
   // ── 页面导航 ────────────────────────────────────
@@ -134,13 +178,14 @@ import {
     if (a.dataset.page === p) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   });
-    ["guide", "settings", "install", "api", "news"].forEach((id) => $("#page-" + id).classList.toggle("hidden", id !== p));
-    $("#pageTitle").textContent = { guide: "使用指南", settings: "设置", install: "Agent 安装", api: "API 用量", news: "AI 快报" }[p];
+    ["guide", "settings", "install", "api", "news", "skills"].forEach((id) => $("#page-" + id).classList.toggle("hidden", id !== p));
+    $("#pageTitle").textContent = { guide: "使用指南", settings: "设置", install: "Agent 安装", api: "API 用量", news: "AI 快报", skills: "Skills 车间" }[p];
     if (p === "guide") renderGuide();
     else if (p === "settings") renderSettings();
     else if (p === "install") renderInstallPage();
     else if (p === "api") loadApiPage();
-    else loadNewsPage();
+    else if (p === "news") loadNewsPage();
+    else renderSkillsWorkshop();
     try { history.replaceState(null, "", "#/" + p); } catch (e) { /* ignore */ }
   }
   function goSub(s) {
