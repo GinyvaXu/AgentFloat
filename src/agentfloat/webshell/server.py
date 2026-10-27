@@ -1,4 +1,4 @@
-# -*- mode: python ; coding: utf-8 -*-
+﻿# -*- mode: python ; coding: utf-8 -*-
 """AgentFloat — Web 套壳后端（FastAPI + uvicorn，参考 ProjectDock 技术栈）
 
 职责：
@@ -39,6 +39,19 @@ def set_token(token: str):
     _TOKEN = str(token or "")
 
 
+def _dev_no_token() -> bool:
+    """开发预览开关：源码运行且显式设置 AGENTFLOAT_DEV_NO_TOKEN=1 时跳过令牌。
+
+    打包版（_IS_FROZEN=True）永不生效，避免发布后失去本地鉴权。
+    """
+    try:
+        from agentfloat.core.paths import _IS_FROZEN
+    except Exception:  # noqa: BLE001
+        _IS_FROZEN = True
+    import os as _os
+    return (not bool(_IS_FROZEN)) and _os.environ.get("AGENTFLOAT_DEV_NO_TOKEN") == "1"
+
+
 def _current_token() -> str:
     return _TOKEN
 
@@ -66,7 +79,7 @@ def _origin_allowed(origin: str, host: str) -> bool:
 
 def _query_token_ok(request) -> bool:
     supplied = request.query_params.get("token") or ""
-    return bool(_TOKEN) and secrets.compare_digest(supplied, _TOKEN)
+    return bool(_TOKEN) and secrets.compare_digest(supplied.encode("utf-8", "ignore"), _TOKEN.encode("utf-8", "ignore"))
 
 
 def _locate_web_dir() -> str:
@@ -178,13 +191,16 @@ def create_app(bridge, handlers):
         if origin and not _origin_allowed(origin, host):
             return JSONResponse({"error": "cross-origin request blocked"}, status_code=403)
 
+        if _dev_no_token():          # 开发预览：跳过 /api 令牌（Host/Origin 仍校验）
+            return await call_next(request)
+
         path = request.url.path
         if path.startswith("/api"):
             supplied = (request.headers.get("x-agentfloat-token")
                         or request.query_params.get("token")
                         or request.cookies.get(TOKEN_COOKIE)
                         or "")
-            if not secrets.compare_digest(supplied, token):
+            if not secrets.compare_digest(supplied.encode("utf-8", "ignore"), token.encode("utf-8", "ignore")):
                 return JSONResponse({"error": "unauthorized", "code": "token_required"},
                                     status_code=401)
 
