@@ -124,15 +124,16 @@ class NewsWindow(kit.PanelShell):
         self.list.setObjectName("pkNewsList")
         # v3.18.2（B 读卡版）：列表项卡片化——呼吸感来自间距与描边，不靠更强对比
         _c = get_colors(self._theme)
-        _bd = "#%02X%02X%02X" % _c["SEPARATOR"]
         _card = "#2A2A2F" if self._theme == "dark" else "#FFFFFF"
         self.list.setStyleSheet(
             "QListWidget#pkNewsList { background: transparent; border: none; padding: 2px 4px; }"
-            "QListWidget#pkNewsList::item { background: %s; border: 1px solid %s;"
+            "QListWidget#pkNewsList::item { background: %s; border: 1px solid rgba(255,255,255,0.07);"
             " border-radius: 9px; margin: 3px 2px; padding: 7px 9px; }"
+            "QListWidget#pkNewsList::item:disabled { background: none; border: none;"
+            " margin: 2px 0px; padding: 0px; }"
             "QListWidget#pkNewsList::item:hover { border-color: rgba(10,132,255,0.45); }"
             "QListWidget#pkNewsList::item:selected { background: rgba(10,132,255,0.12);"
-            " border-color: rgba(10,132,255,0.55); }" % (_card, _bd))
+            " border-color: rgba(10,132,255,0.55); }" % _card)
         self.list.itemClicked.connect(self._on_item_clicked)
         mv.addWidget(self.list, 1)
         split.addWidget(mid)
@@ -336,6 +337,7 @@ class NewsWindow(kit.PanelShell):
 
     def _fill_items(self):
         self.list.clear()
+        self._featured_done = False
         items = self._visible_items()
         groups = {}
         order = []
@@ -347,17 +349,25 @@ class NewsWindow(kit.PanelShell):
             groups[cat].append(it)
         for cat in order:
             rows = groups[cat]
-            self._add_static(self.list, self._cat_row(CAT_LABEL.get(cat, cat), len(rows)))
+            cat_item, cat_w = self._cat_row(CAT_LABEL.get(cat, cat), len(rows))
+            cat_item.setFlags(Qt.NoItemFlags)          # disabled → QSS 里透明，不当卡片
+            cat_item.setBackground(Qt.transparent)    # 再兜一层：item 背景置透明
+            self.list.addItem(cat_item)
+            self.list.setItemWidget(cat_item, cat_w)
             for row in rows:
                 badge, bcolor = "", None
                 if row.get("starred"):
                     badge, bcolor = "★", self._warning_hex
-                title = row.get("title") or "（无标题）"
-                if len(title) > 30:
-                    title = title[:29].rstrip("，。；、,. ") + "…"
-                it2, w2 = kit.item_for(
-                    kit.list_row(title, self._row_meta(row), badge, bcolor, compact=False),
-                    data=("item", row))
+                if not getattr(self, "_featured_done", False):
+                    self._featured_done = True
+                    it2, w2 = kit.item_for(self._featured_row(row), data=("item", row))
+                else:
+                    title = row.get("title") or "（无标题）"
+                    if len(title) > 30:
+                        title = title[:29].rstrip("，。；、,. ") + "…"
+                    it2, w2 = kit.item_for(
+                        kit.list_row(title, self._row_meta(row), badge, bcolor, compact=False),
+                        data=("item", row))
                 self.list.addItem(it2)
                 self.list.setItemWidget(it2, w2)
                 # v3.18.1：行高必须跟 widget 一致，否则 QListWidget 按默认高度排布导致文字重叠
@@ -367,6 +377,37 @@ class NewsWindow(kit.PanelShell):
         self.set_subtitle("%s · 共 %d 条 · 未读 %d" % (self._date or "无数据", total, unread))
         if not items:
             self._add_static(self.list, self._plain("（当前过滤下没有条目）"))
+
+
+    def _featured_row(self, row):
+        """头条卡片：两行大标题 + 一行摘要 + 元信息（v3.18.3）"""
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(2, 0, 2, 0)
+        v.setSpacing(4)
+        title = QLabel(row.get("title") or "（无标题）")
+        f = QFont(self._cjk)
+        f.setPixelSize(FONT.title)
+        f.setBold(True)
+        title.setFont(f)
+        title.setWordWrap(True)
+        title.setMaximumHeight(40)
+        v.addWidget(title)
+        summary = str(row.get("summary") or "").strip()
+        if summary:
+            sl = QLabel(summary[:80] + ("…" if len(summary) > 80 else ""))
+            sf = QFont(self._cjk)
+            sf.setPixelSize(FONT.caption)
+            sl.setFont(sf)
+            sl.setStyleSheet("color: %s;" % self._hint_hex)
+            v.addWidget(sl)
+        meta = QLabel(self._row_meta(row) + (" · ★" if row.get("starred") else ""))
+        mf = QFont(self._cjk)
+        mf.setPixelSize(FONT.micro)
+        meta.setFont(mf)
+        meta.setStyleSheet("color: %s;" % self._hint_hex)
+        v.addWidget(meta)
+        return w
 
     def _row_meta(self, row):
         """列表第二行：来源 · 分数（why/因子只在详情，避免行过高）"""
@@ -568,10 +609,10 @@ class NewsWindow(kit.PanelShell):
         self.refresh()
 
     def _cat_row(self, text, count):
-        """分类小标题（粗体强调色 + 右侧计数 + 上方细分隔）"""
+        """分类小标题（透明分隔带；item 在调用处置为 disabled）"""
         w = QWidget()
         h = QHBoxLayout(w)
-        h.setContentsMargins(4, 10, 4, 4)
+        h.setContentsMargins(4, 12, 4, 4)
         lab = QLabel(text)
         f = QFont(self._cjk)
         f.setPixelSize(FONT.body)
