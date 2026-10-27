@@ -209,9 +209,21 @@ class SkillsPanel(kit.PanelShell):
                     "有更新" if e.get("updateAvailable") else "可安装")
                 color = self._accent_hex if e.get("installed") else "#7F8C8D"
                 sub = (e.get("description") or "")[:56]
-                it2, w2 = kit.item_for(
-                    kit.list_row("   " + (e.get("name") or ""), sub, badge, color),
-                    data=("discover", e))
+                _row = kit.list_row("   " + (e.get("name") or ""), sub, badge, color)
+                _btn = None
+                if e.get("installable") and not e.get("installed"):
+                    _btn = kit.ghost_button("安装", on_click=lambda _c=False, ent=e: self._install_entry(ent))
+                elif e.get("updateAvailable"):
+                    _btn = kit.ghost_button("更新", on_click=lambda _c=False, ent=e: self._update_entry(ent))
+                if _btn is not None:
+                    _wrap = QWidget()
+                    _h = QHBoxLayout(_wrap)
+                    _h.setContentsMargins(0, 0, 0, 0)
+                    _h.setSpacing(6)
+                    _h.addWidget(_row, 1)
+                    _h.addWidget(_btn, 0)
+                    _row = _wrap
+                it2, w2 = kit.item_for(_row, data=("discover", e))
                 self.list.addItem(it2)
                 self.list.setItemWidget(it2, w2)
         self.set_subtitle("发现 %d 个条目（只读）" % len(entries))
@@ -219,6 +231,45 @@ class SkillsPanel(kit.PanelShell):
             self.desc_view.setPlainText(states.empty("暂无可发现的 Skill", "检查网络或稍后刷新"))
         else:
             self.desc_view.setPlainText(states.empty("Skill 车间", "从左侧选择一个条目查看说明"))
+
+    def _install_entry(self, entry):
+        name = entry.get("name") or entry.get("entryId") or "该条目"
+        if not kit.confirm(self, "安装 Skill",
+                           "将安装「%s」。安装前会自动备份，失败可回滚。" % name,
+                           ok_text="安装", theme=self._theme):
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            from agentfloat.core.config import load_config
+            from agentfloat.services.skills.workshop import default_workshop
+            res = default_workshop(config=load_config()).install(entry.get("entryId") or "")
+            ok = (not isinstance(res, dict)) or res.get("ok", True)
+            self.flash(("已安装：%s" % name) if ok else ("安装失败：%s" % (res.get("error") or res)))
+        except Exception as e:  # noqa: BLE001
+            self.flash("安装失败：%s" % e)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if self._mode == "discover":
+            self._fill_discover()
+
+    def _update_entry(self, entry):
+        name = entry.get("name") or entry.get("entryId") or "该条目"
+        if not kit.confirm(self, "更新 Skill",
+                           "将更新「%s」到最新版本。" % name, ok_text="更新", theme=self._theme):
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            from agentfloat.core.config import load_config
+            from agentfloat.services.skills.workshop import default_workshop
+            res = default_workshop(config=load_config()).update(entry.get("entryId") or "")
+            ok = (not isinstance(res, dict)) or res.get("ok", True)
+            self.flash(("已更新：%s" % name) if ok else ("更新失败：%s" % (res.get("error") or res)))
+        except Exception as e:  # noqa: BLE001
+            self.flash("更新失败：%s" % e)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if self._mode == "discover":
+            self._fill_discover()
 
     def _category_row(self, text, count):
         """分类行：强调色粗体 + 右侧计数（比列表行更像"标题"）"""
