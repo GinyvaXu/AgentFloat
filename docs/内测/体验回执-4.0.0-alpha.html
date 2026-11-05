@@ -1,0 +1,221 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentFloat 4.0.0-alpha 体验回执</title>
+<style>
+  :root{--bg:#0f1115;--card:#171a20;--line:rgba(255,255,255,.09);--text:#e8eaf0;--muted:#9aa1ad;--hint:#6f7683;--accent:#0a84ff;--ok:#30d158;--err:#ff453a;--warn:#ff9f0a}
+  @media (prefers-color-scheme: light){:root{--bg:#f6f7f9;--card:#fff;--line:rgba(0,0,0,.09);--text:#1b1d22;--muted:#5b6270;--hint:#8a91a0;--accent:#0a6fd6}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;padding:36px 18px 90px}
+  .wrap{max-width:760px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 6px}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:22px}
+  h2{font-size:16px;margin:30px 0 8px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:12px 0}
+  label{display:block;font-size:13px;color:var(--muted);margin:12px 0 5px}
+  input[type=text],textarea,select{width:100%;background:rgba(127,127,127,.10);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:9px 11px;font:14px/1.5 inherit}
+  textarea{min-height:84px;resize:vertical}
+  .opts{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+  .opt{border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer;user-select:none;color:var(--muted)}
+  .opt input{display:none}
+  .opt.on{background:rgba(10,132,255,.16);border-color:rgba(10,132,255,.5);color:var(--text)}
+  .scale{display:flex;align-items:center;gap:10px;margin:6px 0 2px}
+  .scale input[type=range]{flex:1;accent-color:var(--accent)}
+  .scale b{width:22px;text-align:center;font-variant-numeric:tabular-nums}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .row > div{flex:1;min-width:180px}
+  button{border:1px solid var(--line);background:rgba(127,127,127,.10);color:var(--text);border-radius:9px;padding:10px 16px;font:14px inherit;cursor:pointer}
+  button.primary{background:var(--accent);border-color:transparent;color:#fff;font-weight:600}
+  button:hover{filter:brightness(1.08)}
+  #out{white-space:pre-wrap;font:12.5px/1.6 ui-monospace,Consolas,monospace;min-height:220px}
+  .hint{color:var(--hint);font-size:12.5px}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#22262e;color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;opacity:0;transition:.2s;pointer-events:none}
+  .toast.show{opacity:1}
+  @media print{body{background:#fff;color:#000}.card{border-color:#ddd}button{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>AgentFloat 体验回执<span style="font-size:12px;color:var(--hint)"> · 4.0.0-alpha</span></h1>
+  <div class="sub">大概 3 分钟。填完点「生成回执」，把生成的文字发回给我即可。内容只存在你这台电脑上。</div>
+
+  <h2>1. 基本信息</h2>
+  <div class="card">
+    <div class="row">
+      <div><label>怎么称呼</label><input id="name" type="text" placeholder="昵称即可"></div>
+      <div><label>系统</label>
+        <select id="os">
+          <option>Windows 11</option><option>Windows 10</option><option>macOS</option><option>Linux</option><option>其他</option>
+        </select>
+      </div>
+    </div>
+    <label>用了多久</label>
+    <select id="duration">
+      <option>不到 10 分钟</option><option>10–30 分钟</option><option>半天</option><option>一整天</option><option>连续用了几天</option>
+    </select>
+    <label>主要拿来做什么（可多选）</label>
+    <div class="opts" id="purpose">
+      <label class="opt"><input type="checkbox" value="启动 AI Agent">启动 AI Agent</label>
+      <label class="opt"><input type="checkbox" value="看后台任务进度">看后台任务进度</label>
+      <label class="opt"><input type="checkbox" value="管理 Skills">管理 Skills</label>
+      <label class="opt"><input type="checkbox" value="盯 API 余额">盯 API 余额</label>
+      <label class="opt"><input type="checkbox" value="AI 快报">AI 快报</label>
+      <label class="opt"><input type="checkbox" value="只是试试">只是试试</label>
+    </div>
+  </div>
+
+  <h2>2. 打分（1 很差 → 5 很好）</h2>
+  <div class="card" id="scores">
+    <label>安装与首次启动</label><div class="scale"><input type="range" min="1" max="5" value="3" data-k="安装与首次启动"><b>3</b></div>
+    <label>新手引导是否讲清楚</label><div class="scale"><input type="range" min="1" max="5" value="3" data-k="新手引导"><b>3</b></div>
+    <label>浮球操作（单击 / 长按 / 右键）</label><div class="scale"><input type="range" min="1" max="5" value="3" data-k="浮球操作"><b>3</b></div>
+    <label>进度贴边条与面板</label><div class="scale"><input type="range" min="1" max="5" value="3" data-k="进度贴边条"><b>3</b></div>
+    <label>AI 接入页（余额 / Token）</label><div class="scale"><input type="range" min="1" max="5" value="3" data-k="AI 接入"><b>3</b></div>
+    <label>Skills 车间</label><div class="scale"><input type="range" min="1" max="5" value="3" data-k="Skills 车间"><b>3</b></div>
+  </div>
+
+  <h2>3. 遇到了什么</h2>
+  <div class="card">
+    <div class="opts" id="issues">
+      <label class="opt"><input type="checkbox" value="安装失败">安装失败</label>
+      <label class="opt"><input type="checkbox" value="启动不了">启动不了</label>
+      <label class="opt"><input type="checkbox" value="长按找不到 Agent">长按找不到 Agent</label>
+      <label class="opt"><input type="checkbox" value="贴边条不出现">贴边条不出现</label>
+      <label class="opt"><input type="checkbox" value="界面错位/重叠">界面错位/重叠</label>
+      <label class="opt"><input type="checkbox" value="卡顿/占资源">卡顿/占资源</label>
+      <label class="opt"><input type="checkbox" value="看不懂">看不懂</label>
+      <label class="opt"><input type="checkbox" value="没遇到问题">没遇到问题</label>
+    </div>
+    <label>具体描述（卡在哪一步 / 弹了什么字 / 截图可另发）</label>
+    <textarea id="detail" placeholder="例：长按后弹「命令路径不存在」，路径是 …"></textarea>
+  </div>
+
+  <h2>4. 主观感受</h2>
+  <div class="card">
+    <label>第一眼最不明白的是</label>
+    <input id="confusing" type="text" placeholder="一句话即可">
+    <label>最想加 / 最想改的一件事</label>
+    <textarea id="wish" placeholder="一句话即可"></textarea>
+    <label>还会继续用吗</label>
+    <div class="opts" id="continue">
+      <label class="opt"><input type="radio" name="cont" value="会，日常用">会，日常用</label>
+      <label class="opt"><input type="radio" name="cont" value="可能会，看后续">可能会，看后续</label>
+      <label class="opt"><input type="radio" name="cont" value="暂时不会">暂时不会</label>
+    </div>
+    <label>要不要我加你微信 / 邮箱（可不填）</label>
+    <input id="contact" type="text" placeholder="方便追问细节时联系">
+  </div>
+
+  <div style="display:flex;gap:10px;margin:22px 0">
+    <button class="primary" id="gen">生成回执</button>
+    <button id="copy">复制</button>
+    <button id="download">下载 .md</button>
+    <button id="reset">清空</button>
+  </div>
+
+  <h2>5. 回执内容</h2>
+  <div class="card"><textarea id="out" readonly placeholder="点「生成回执」后，这里会出现一段可直接发送的文字。"></textarea></div>
+  <div class="hint">草稿会自动存在本机浏览器里，关掉网页再回来还在。</div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  const $ = (id) => document.getElementById(id);
+  const KEY = "af_feedback_40alpha";
+  const fields = ["name","os","duration","detail","confusing","wish","contact"];
+  const toasts = (m) => { const t=$("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),1400); };
+
+  // 选项胶囊
+  document.querySelectorAll(".opt").forEach((el)=>{
+    el.addEventListener("click",(e)=>{
+      if(e.target.tagName!=="INPUT"){ const i=el.querySelector("input"); i.checked=!i.checked; }
+      el.classList.toggle("on", el.querySelector("input").checked);
+      save();
+    });
+  });
+  document.querySelectorAll('#scores input[type=range]').forEach((r)=>{
+    r.addEventListener("input",()=>{ r.nextElementSibling.textContent=r.value; save(); });
+  });
+
+  function checkedValues(sel){ return [...document.querySelectorAll(sel+" input:checked")].map(i=>i.value); }
+  function save(){
+    const d = {f:{}, scores:{}, purpose:checkedValues("#purpose"), issues:checkedValues("#issues"), cont:(document.querySelector('#continue input:checked')||{}).value||""};
+    fields.forEach(k=>d.f[k]=$(k).value);
+    document.querySelectorAll('#scores input[type=range]').forEach(r=>d.scores[r.dataset.k]=r.value);
+    localStorage.setItem(KEY, JSON.stringify(d));
+  }
+  function load(){
+    let d; try{ d=JSON.parse(localStorage.getItem(KEY)||"null"); }catch(e){ d=null; }
+    if(!d) return;
+    fields.forEach(k=>{ if(d.f && d.f[k]!=null) $(k).value=d.f[k]; });
+    document.querySelectorAll('#scores input[type=range]').forEach(r=>{
+      if(d.scores && d.scores[r.dataset.k]){ r.value=d.scores[r.dataset.k]; r.nextElementSibling.textContent=r.value; }
+    });
+    document.querySelectorAll("#purpose input,#issues input").forEach(i=>{
+      const arr = i.closest("#purpose") ? d.purpose : d.issues;
+      i.checked = !!(arr||[]).includes(i.value); i.closest(".opt").classList.toggle("on", i.checked);
+    });
+    document.querySelectorAll('#continue input').forEach(i=>{
+      i.checked = (d.cont===i.value); i.closest(".opt").classList.toggle("on", i.checked);
+    });
+  }
+  fields.forEach(k=>$(k).addEventListener("input",save));
+
+  function build(){
+    const now = new Date();
+    const pad = (n)=>String(n).padStart(2,"0");
+    const stamp = now.getFullYear()+"-"+pad(now.getMonth()+1)+"-"+pad(now.getDate())+" "+pad(now.getHours())+":"+pad(now.getMinutes());
+    const sc = {};
+    document.querySelectorAll('#scores input[type=range]').forEach(r=>sc[r.dataset.k]=r.value);
+    const avg = (Object.values(sc).reduce((a,b)=>a+Number(b),0)/Object.keys(sc).length).toFixed(1);
+    const L = [];
+    L.push("# AgentFloat 4.0.0-alpha 体验回执");
+    L.push("");
+    L.push("- 版本：4.0.0-alpha");
+    L.push("- 提交时间：" + stamp);
+    L.push("- 称呼：" + ($("name").value || "（未填）"));
+    L.push("- 系统：" + $("os").value);
+    L.push("- 使用时长：" + $("duration").value);
+    L.push("- 主要用途：" + (checkedValues("#purpose").join("、") || "（未选）"));
+    L.push("");
+    L.push("## 打分（1–5，均分 " + avg + "）");
+    Object.keys(sc).forEach(k=>L.push("- " + k + "：" + sc[k]));
+    L.push("");
+    L.push("## 遇到的问题");
+    L.push("- 类型：" + (checkedValues("#issues").join("、") || "（未选）"));
+    L.push("- 描述：" + ($("detail").value || "（无）"));
+    L.push("");
+    L.push("## 主观感受");
+    L.push("- 第一眼最不明白：" + ($("confusing").value || "（无）"));
+    L.push("- 最想加/改的一件事：" + ($("wish").value || "（无）"));
+    L.push("- 是否继续用：" + ((document.querySelector('#continue input:checked')||{}).value || "（未选）"));
+    if($("contact").value) L.push("- 联系方式：" + $("contact").value);
+    return L.join("\n");
+  }
+
+  $("gen").addEventListener("click",()=>{ $("out").value = build(); toasts("已生成，可直接复制"); });
+  $("copy").addEventListener("click",async ()=>{
+    const text = $("out").value || build(); $("out").value = text;
+    try{ await navigator.clipboard.writeText(text); toasts("已复制"); }
+    catch(e){ $("out").select(); document.execCommand("copy"); toasts("已复制"); }
+  });
+  $("download").addEventListener("click",()=>{
+    const text = $("out").value || build();
+    const blob = new Blob([text], {type:"text/markdown;charset=utf-8"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "AgentFloat-回执-" + ($("name").value||"匿名") + ".md";
+    a.click(); URL.revokeObjectURL(a.href);
+  });
+  $("reset").addEventListener("click",()=>{
+    localStorage.removeItem(KEY); location.reload();
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>
