@@ -7,6 +7,7 @@ PyInstaller 正式版构建 — 确认稳定后执行
 """
 import PyInstaller.__main__
 import os
+import shutil
 import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -33,6 +34,7 @@ add_data = [
     f"{res}{os.pathsep}assets",
     f"{os.path.join(SCRIPT_DIR, 'VERSION')}{os.pathsep}.",
     f"{web_dir}{os.pathsep}web",
+    f"{os.path.join(SCRIPT_DIR, 'skills')}{os.pathsep}skills",
 ]
 
 EXCLUDES = [
@@ -102,6 +104,32 @@ PyInstaller.__main__.run(args)
 # P3：onedir 安全裁剪（未使用的 Qt 组件/插件）
 if not ONE_FILE:
     prune_onedir(os.path.join(SCRIPT_DIR, "dist", "AgentFloat"))
+
+# 附带 af-mcp.exe（独立控制台程序，供 MCP 客户端调用）
+if not ONE_FILE:
+    mcp_dist = os.path.join(SCRIPT_DIR, "dist", "mcp")
+    mcp_args = [
+        os.path.join(SCRIPT_DIR, "mcp_entry.py"),
+        "--paths", os.path.join(SCRIPT_DIR, "src"),
+        "--onefile",
+        "--console",
+        "--name", "af-mcp",
+        "--distpath", mcp_dist,
+        "--workpath", os.path.join(SCRIPT_DIR, "build", "mcp"),
+        "--specpath", os.path.join(SCRIPT_DIR, "build"),
+        "--noconfirm",
+        "--clean",
+        "--exclude-module=PyQt5",
+    ]
+    print("[构建] 开始构建 af-mcp ...")
+    PyInstaller.__main__.run(mcp_args)
+    src_exe = os.path.join(mcp_dist, "af-mcp.exe")
+    dst_exe = os.path.join(SCRIPT_DIR, "dist", "AgentFloat", "af-mcp.exe")
+    if os.path.isfile(src_exe):
+        shutil.copy2(src_exe, dst_exe)
+        print("[完成] af-mcp.exe ->", dst_exe)
+    else:
+        print("[警告] af-mcp.exe 未生成")
 
 write_build_version(CURRENT_VERSION)
 if ONE_FILE:

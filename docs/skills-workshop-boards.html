@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Skills 车间 · 三个方向</title>
+<style>
+  :root{
+    --bg:#141416; --panel:#1B1B1F; --card:#212127; --line:rgba(255,255,255,.08);
+    --text:#F2F2F5; --text2:#A9A9B2; --hint:#6F6F78; --accent:#0A84FF; --ok:#30D158; --warn:#FF9F0A;
+    --r:10px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0D0D0F;color:var(--text);font:13px/1.5 "Inter","Segoe UI","Microsoft YaHei",sans-serif;padding:26px 30px 60px}
+  h1{font-size:15px;font-weight:600;margin-bottom:4px}
+  .sub{color:var(--text2);font-size:12px;margin-bottom:22px}
+  .board{margin-bottom:34px}
+  .bhead{display:flex;gap:10px;align-items:baseline;margin-bottom:9px}
+  .bname{font-size:13px;font-weight:600}
+  .btag{font-size:11px;color:var(--hint);border:1px solid var(--line);padding:1px 7px;border-radius:999px}
+  .bnote{margin-left:auto;font-size:11.5px;color:var(--hint)}
+  .app{display:grid;grid-template-columns:180px 1fr;height:470px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--bg)}
+  .rail{border-right:1px solid var(--line);padding:12px 10px;font-size:12px}
+  .nav{display:flex;gap:8px;align-items:center;height:28px;padding:0 8px;border-radius:7px;color:var(--text2)}
+  .nav.on{background:rgba(10,132,255,.12);color:var(--text)}
+  .nav .k{margin-left:auto;font-size:10px;color:var(--hint)}
+  .main{display:flex;flex-direction:column;min-width:0}
+  .bar{height:44px;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--line)}
+  .bar h2{font-size:13px;font-weight:600}
+  .bar .count{font-size:11px;color:var(--hint)}
+  .btn{height:26px;padding:0 10px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:11.5px;cursor:pointer}
+  .btn.p{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .btn.d{color:#FF6B60;border-color:rgba(255,107,96,.35)}
+  .tab{height:32px;display:flex;align-items:center;gap:14px;padding:0 14px;border-bottom:1px solid var(--line);font-size:11.5px;color:var(--hint)}
+  .tab .t{height:32px;display:flex;align-items:center;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tab .t.on{color:var(--text);border-bottom-color:var(--accent)}
+  .tab .right{margin-left:auto;color:var(--hint)}
+
+  /* A 商店网格 */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:12px 14px;overflow:auto}
+  .gcard{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:11px;display:flex;flex-direction:column;gap:7px}
+  .gcard:hover{border-color:rgba(10,132,255,.45)}
+  .ghead{display:flex;gap:8px;align-items:center}
+  .ico{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#0A84FF,#AF52DE);display:grid;place-items:center;font-size:11px;font-weight:700}
+  .gname{font-weight:600;font-size:12.5px}
+  .gsrc{font-size:10.5px;color:var(--hint)}
+  .gdesc{font-size:11px;color:var(--text2);height:32px;overflow:hidden}
+  .gfoot{display:flex;align-items:center;gap:6px;margin-top:auto}
+  .tag{font-size:10px;padding:1px 6px;border-radius:999px;border:1px solid var(--line);color:var(--text2)}
+  .tag.ok{color:var(--ok);border-color:rgba(48,209,88,.35);background:rgba(48,209,88,.10)}
+  .tag.warn{color:var(--warn);border-color:rgba(255,159,10,.35);background:rgba(255,159,10,.10)}
+  .factor{margin-left:auto;font-size:10px;color:var(--hint)}
+
+  /* B 列表 + 详情 */
+  .split{display:grid;grid-template-columns:46% 1fr;flex:1;min-height:0}
+  .list{border-right:1px solid var(--line);overflow:auto;padding:8px 10px}
+  .row{border:1px solid var(--line);border-radius:9px;padding:9px 10px;margin-bottom:7px;background:var(--card)}
+  .row.sel{border-color:rgba(10,132,255,.6);background:rgba(10,132,255,.10)}
+  .row .t{font-size:12.5px;font-weight:600;display:flex;gap:6px;align-items:center}
+  .row .m{font-size:10.5px;color:var(--hint);margin-top:3px}
+  .detail{padding:14px;overflow:auto}
+  .dhead{font-size:15px;font-weight:700}
+  .dmeta{font-size:11px;color:var(--hint);margin:4px 0 10px}
+  .readme{border:1px solid var(--line);border-radius:9px;background:var(--panel);padding:11px;font-size:11.5px;color:var(--text2);height:150px;overflow:hidden}
+  .readme b{color:var(--text)}
+  .tree{font:11px/1.7 "JetBrains Mono",Consolas,monospace;color:var(--text2);margin-top:8px}
+  .targets{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+  .chip{font-size:10.5px;padding:3px 8px;border-radius:999px;border:1px solid var(--line);color:var(--text2)}
+  .chip.on{border-color:var(--accent);color:#fff;background:rgba(10,132,255,.22)}
+  .actions{display:flex;gap:8px;margin-top:12px}
+
+  /* C 编辑选辑 */
+  .edit{padding:14px;overflow:auto}
+  .hero{display:grid;grid-template-columns:1.2fr 1fr;gap:14px;margin-bottom:14px}
+  .big{background:linear-gradient(135deg,rgba(10,132,255,.20),rgba(175,82,222,.14));border:1px solid rgba(10,132,255,.35);border-radius:12px;padding:16px}
+  .big .k{font-size:10px;letter-spacing:.12em;color:#8FBFFF;text-transform:uppercase}
+  .big h3{font-size:18px;line-height:1.35;margin:8px 0 6px}
+  .big p{font-size:11.5px;color:var(--text2)}
+  .side{display:flex;flex-direction:column;gap:8px}
+  .mini{display:flex;gap:8px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:8px 10px}
+  .mini .n{font-size:11.5px;font-weight:600}
+  .mini .s{font-size:10px;color:var(--hint)}
+  .sect{font-size:10.5px;letter-spacing:.1em;color:var(--hint);text-transform:uppercase;margin:10px 0 8px}
+  .line{display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--line)}
+  .line .n{font-size:12px}
+  .line .d{font-size:10.5px;color:var(--hint)}
+  .line .r{margin-left:auto;display:flex;gap:6px;align-items:center}
+</style>
+</head>
+<body>
+  <h1>Skills 车间 · 三个视觉方向</h1>
+  <div class="sub">同一份数据（已装 40 / 发现 38）、同一套令牌。看的不是功能，是“像不像一个值得逛的车间”。</div>
+
+  <!-- A -->
+  <div class="board">
+    <div class="bhead"><div class="bname">A · 应用商店（卡片网格）</div><div class="btag">密度中 · 逛感强</div>
+      <div class="bnote">适合“发现”，一屏 9 张卡，因子与来源可见</div></div>
+    <div class="app">
+      <aside class="rail">
+        <div class="nav on">🧭 使用指南</div><div class="nav">⚙ 设置</div><div class="nav">⬇ Agent 安装</div>
+        <div class="nav">¥ API 用量</div><div class="nav">N AI 快报</div><div class="nav on">S Skills 车间<span class="k">⌘K</span></div>
+      </aside>
+      <main class="main">
+        <div class="bar"><h2>Skills 车间</h2><span class="count">发现 38 · 已装 40 · 可更新 6</span>
+          <div style="margin-left:auto;display:flex;gap:8px"><button class="btn">检查更新</button><button class="btn p">+ 粘贴仓库 URL</button></div></div>
+        <div class="tab"><span class="t on">发现</span><span class="t">已安装 40</span><span class="t">可更新 6</span>
+          <span class="right">排序：匹配度 ▾</span></div>
+        <div class="grid">
+          <div class="gcard"><div class="ghead"><div class="ico">AB</div><div><div class="gname">agent-browser</div><div class="gsrc">github · 3.4k★</div></div></div>
+            <div class="gdesc">浏览器自动化 CLI，适合测试与抓取；支持截图与表单。</div>
+            <div class="gfoot"><span class="tag ok">已安装</span><span class="factor">热度 92 · 信任 88</span><button class="btn">详情</button></div></div>
+          <div class="gcard"><div class="ghead"><div class="ico">HU</div><div><div class="gname">humanizer</div><div class="gsrc">github · 1.1k★</div></div></div>
+            <div class="gdesc">把 AI 味的文字改得像人写的，附常见反模式清单。</div>
+            <div class="gfoot"><span class="tag">可安装</span><span class="factor">活跃 81 · 匹配 76</span><button class="btn p">安装</button></div></div>
+          <div class="gcard"><div class="ghead"><div class="ico">ON</div><div><div class="gname">onetake</div><div class="gsrc">github · 820★</div></div></div>
+            <div class="gdesc">单文件动效短片工作流，含节拍与运镜规则。</div>
+            <div class="gfoot"><span class="tag warn">有更新</span><span class="factor">信任 85 · 活跃 79</span><button class="btn">更新</button></div></div>
+          <div class="gcard"><div class="ghead"><div class="ico">MO</div><div><div class="gname">motion-ui-design</div><div class="gsrc">github · 640★</div></div></div>
+            <div class="gdesc">动效设计守则：弹簧、平滑、微交互词汇库。</div>
+            <div class="gfoot"><span class="tag ok">已安装</span><span class="factor">热度 74 · 信任 83</span><button class="btn">详情</button></div></div>
+          <div class="gcard"><div class="ghead"><div class="ico">IC</div><div><div class="gname">icon-assets</div><div class="gsrc">本地库 · 37k 图标</div></div></div>
+            <div class="gdesc">本机图标素材库检索与拷贝，含许可核对。</div>
+            <div class="gfoot"><span class="tag ok">已安装</span><span class="factor">匹配 88 · 信任 95</span><button class="btn">详情</button></div></div>
+          <div class="gcard"><div class="ghead"><div class="ico">CN</div><div><div class="gname">cn-deliverables</div><div class="gsrc">github · 410★</div></div></div>
+            <div class="gdesc">中文交付规范：报告风格、md/docx/pdf 流水线。</div>
+            <div class="gfoot"><span class="tag">可安装</span><span class="factor">活跃 70 · 匹配 72</span><button class="btn p">安装</button></div></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- B -->
+  <div class="board">
+    <div class="bhead"><div class="bname">B · 列表 + 详情（工作台）</div><div class="btag">密度高 · 操作顺手</div>
+      <div class="bnote">左侧扫读，右侧 README / 文件树 / 目标 Agent 一次看全</div></div>
+    <div class="app">
+      <aside class="rail">
+        <div class="nav">🧭 使用指南</div><div class="nav">⚙ 设置</div><div class="nav">⬇ Agent 安装</div>
+        <div class="nav">¥ API 用量</div><div class="nav">N AI 快报</div><div class="nav on">S Skills 车间</div>
+      </aside>
+      <main class="main">
+        <div class="bar"><h2>Skills 车间</h2><span class="count">发现 38 · 已装 40 · 可更新 6</span>
+          <div style="margin-left:auto"><button class="btn p">+ 粘贴仓库 URL</button></div></div>
+        <div class="tab"><span class="t on">发现</span><span class="t">已安装 40</span><span class="t">可更新 6</span><span class="right">按匹配度</span></div>
+        <div class="split">
+          <div class="list">
+            <div class="row sel"><div class="t">humanizer <span class="tag">可安装</span></div><div class="m">github · 1.1k★ · 热度 81 · 匹配 76</div></div>
+            <div class="row"><div class="t">onetake <span class="tag warn">有更新</span></div><div class="m">github · 820★ · 信任 85 · 活跃 79</div></div>
+            <div class="row"><div class="t">cn-deliverables <span class="tag">可安装</span></div><div class="m">github · 410★ · 匹配 72</div></div>
+            <div class="row"><div class="t">agent-browser <span class="tag ok">已安装</span></div><div class="m">github · 3.4k★ · 热度 92</div></div>
+          </div>
+          <div class="detail">
+            <div class="dhead">humanizer</div>
+            <div class="dmeta">github.com/…/humanizer · MIT · commit 9f2c1a（固定） · 核验 2026-10-27</div>
+            <div class="readme"><b># Humanizer</b><br>把 AI 味的文字改得像人写的，不改事实。<br><br>• 反模式：不是 X 而是 Y、一句话收尾、三段式排比<br>• 检查项：破折号密度、空泛形容词、口号式结尾</div>
+            <div class="tree">SKILL.md  4.2 KB<br>references/anti-patterns.md  9.1 KB<br>references/examples.md  6.4 KB</div>
+            <div class="targets"><span class="chip on">Claude Code</span><span class="chip on">OpenCode</span><span class="chip">Codex</span><span class="chip">Cursor</span></div>
+            <div class="actions"><button class="btn p">安装到 2 个 Agent</button><button class="btn">查看架构图</button><button class="btn">来源</button></div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- C -->
+  <div class="board">
+    <div class="bhead"><div class="bname">C · 编辑选辑（杂志感）</div><div class="btag">密度低 · 有主张</div>
+      <div class="bnote">头条 + 精选，强调“为什么值得装”；适合首屏</div></div>
+    <div class="app">
+      <aside class="rail">
+        <div class="nav">🧭 使用指南</div><div class="nav">⚙ 设置</div><div class="nav">⬇ Agent 安装</div>
+        <div class="nav">¥ API 用量</div><div class="nav">N AI 快报</div><div class="nav on">S Skills 车间</div>
+      </aside>
+      <main class="main">
+        <div class="bar"><h2>Skills 车间</h2><span class="count">本周精选 6 · 新入库 12</span>
+          <div style="margin-left:auto"><button class="btn">全部条目</button></div></div>
+        <div class="edit">
+          <div class="hero">
+            <div class="big">
+              <div class="k">本周精选 · 动效</div>
+              <h3>motion-ui-design</h3>
+              <p>把“动效僵硬”拆成可执行的参数：两套运动模型、微交互词汇库、反模式清单。装一次，之后每个界面都用得上。</p>
+              <div class="actions"><button class="btn p">安装</button><button class="btn">先看 README</button></div>
+            </div>
+            <div class="side">
+              <div class="mini"><div class="ico">AB</div><div><div class="n">agent-browser</div><div class="s">已安装 · 热度 92</div></div></div>
+              <div class="mini"><div class="ico">ON</div><div><div class="n">onetake</div><div class="s">有更新 · 信任 85</div></div></div>
+              <div class="mini"><div class="ico">IC</div><div><div class="n">icon-assets</div><div class="s">已安装 · 本地 37k</div></div></div>
+            </div>
+          </div>
+          <div class="sect">按分类浏览</div>
+          <div class="line"><span style="width:26px;text-align:center">✍️</span><div><div class="n">写作与文案</div><div class="d">humanizer · cn-deliverables · report</div></div><div class="r"><span class="tag">3 个可装</span></div></div>
+          <div class="line"><span style="width:26px;text-align:center">🎬</span><div><div class="n">视频与动效</div><div class="d">onetake · hyperframes · motion-ui-design</div></div><div class="r"><span class="tag warn">1 个更新</span></div></div>
+          <div class="line"><span style="width:26px;text-align:center">🧩</span><div><div class="n">工程与交付</div><div class="d">ginyva-release · win-cn-env · webapp-testing</div></div><div class="r"><span class="tag ok">已装 2</span></div></div>
+        </div>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

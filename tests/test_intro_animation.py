@@ -131,6 +131,9 @@ def test_intro_emits_landed_then_finished(qapp):
     assert events == ["landed"]
     intro._t0 = FakeClock(t_fly + ia.FLY_MS + ia.RIPPLE_MS + 40)
     intro._on_tick()
+    # 完成前有 160ms 淡出动画（+200ms QTimer 兜底），等真实事件循环
+    from PyQt5.QtTest import QTest
+    QTest.qWait(500)
     assert events == ["landed", "finished"]
 
 

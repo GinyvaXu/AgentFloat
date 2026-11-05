@@ -563,6 +563,133 @@ class SkillWorkshop(object):
         targets = self._select_targets(target_ids)
         return self._perform(entry, targets, "install", source_dir=source_dir)
 
+    def _raw_text(self, repo: str, commit: str, path: str) -> str:
+        import urllib.request
+
+        url = "https://raw.githubusercontent.com/%s/%s/%s" % (repo, commit, path)
+        for _ in range(2):
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "AgentFloat"})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = resp.read(200000).decode("utf-8", "replace")
+                    if data:
+                        return data
+            except Exception:  # noqa: BLE001
+                continue
+        return ""
+
+    def update_diff(self, entry_id: str) -> Dict[str, Any]:
+        """返回当前 commit 与远端 HEAD 的文本差异（SKILL.md / README）。"""
+        import difflib
+        import re
+
+        entry = self._load_entry(entry_id)
+        repo = entry.source.repo if entry.source else ""
+        current = entry.source.commit if entry.source else ""
+        if not repo or not re.match(r"^[0-9a-f]{40}$", current or ""):
+            raise SkillWorkshopError("no_upstream", "该 Skill 没有固定 commit，无法比对")
+        latest = self._remote_head(repo)
+        if not latest:
+            raise SkillWorkshopError("check_failed", "无法获取远端 HEAD（网络或仓库不可达）")
+        result = {"ok": True, "entryId": entry.entry_id, "name": entry.name,
+                  "repo": repo, "current": current, "latest": latest, "files": []}
+        if latest == current:
+            return result
+        cache = getattr(self, "_diff_cache", None)
+        if cache is None:
+            cache = self._diff_cache = {}
+        cache_key = "%s:%s" % (entry.entry_id, latest)
+        if cache_key in cache:
+            return cache[cache_key]
+        sub = str(entry.source.subpath or "").strip("/")
+        base = (sub + "/") if sub else ""
+        from concurrent.futures import ThreadPoolExecutor
+
+        paths = [base + name for name in ("SKILL.md", "README.md")]
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            pairs = list(pool.map(
+                lambda path: (path, self._raw_text(repo, current, path),
+                              self._raw_text(repo, latest, path)),
+                paths,
+            ))
+        for path, old, new in pairs:
+            if not old and not new:
+                continue
+            if bool(old) != bool(new):
+                result["note"] = "部分文件读取失败（网络），已跳过 " + path
+                continue
+            diff = list(difflib.unified_diff(
+                old.splitlines(), new.splitlines(),
+                fromfile="%s@%s" % (path, current[:8]),
+                tofile="%s@%s" % (path, latest[:8]),
+                lineterm="",
+            ))
+            if len(diff) > 400:
+                diff = diff[:400] + ["...（差异过长，已截断）"]
+            result["files"].append({"path": path, "diff": "\n".join(diff)})
+        if not result["files"]:
+            result["note"] = "未找到可读的 SKILL.md/README，只能看到 commit 变化"
+        cache[cache_key] = result
+        return result
+
+    def _remote_head(self, repo: str) -> str:
+        """用 git ls-remote 取远端 HEAD（不消耗 GitHub API 配额）。"""
+        import re
+        import shutil
+        import subprocess
+
+        repo = str(repo or "").strip().strip("/")
+        if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo):
+            return ""
+        git = shutil.which("git")
+        if not git:
+            return ""
+        for attempt in range(2):
+            try:
+                proc = subprocess.run(
+                    [git, "ls-remote", "https://github.com/%s.git" % repo, "HEAD"],
+                    capture_output=True, text=True, timeout=12,
+                )
+                if proc.returncode == 0:
+                    line = (proc.stdout or "").strip().split("\n")[0]
+                    sha = line.split("\t")[0].strip()
+                    if re.match(r"^[0-9a-f]{40}$", sha):
+                        return sha
+            except Exception:  # noqa: BLE001
+                pass
+            if attempt == 0:
+                import time as _time
+                _time.sleep(0.6)
+        return ""
+
+    def check_updates(self, limit: int = 8) -> Dict[str, Any]:
+        """检查带固定 commit 的受管 Skill 是否有新提交（按仓库去重）。"""
+        import re
+
+        entries = [e for e in self._scan_local()
+                   if e.source and e.source.repo
+                   and re.match(r"^[0-9a-f]{40}$", e.source.commit or "")]
+        by_repo: Dict[str, list] = {}
+        for entry in entries:
+            by_repo.setdefault(entry.source.repo, []).append(entry)
+        checked = 0
+        updates = []
+        for repo, group in list(by_repo.items())[:max(1, int(limit or 8))]:
+            latest = self._remote_head(repo)
+            checked += 1
+            if not latest:
+                continue
+            for entry in group:
+                if latest != entry.source.commit:
+                    updates.append({
+                        "entryId": entry.entry_id,
+                        "name": entry.name,
+                        "repo": repo,
+                        "current": entry.source.commit,
+                        "latest": latest,
+                    })
+        return {"ok": True, "checkedAt": now_iso(), "checked": checked, "updates": updates}
+
     def update(self, entry_id: str, target_ids: Optional[Iterable[str]] = None) -> Dict[str, Any]:
         entry = self._load_entry(entry_id)
         managed = [i for i in entry.installed if i.managed]
@@ -576,6 +703,11 @@ class SkillWorkshop(object):
                 "no_upstream",
                 "本地来源的 Skill 没有可检查的上游版本；请重新选择来源后安装",
             )
+        if entry.source.repo:
+            latest = self._remote_head(entry.source.repo)
+            if latest and latest != entry.source.commit:
+                entry.source.commit = latest
+                entry.latest_commit = latest
         targets = self._select_targets(
             target_ids if target_ids is not None else [i.agent for i in managed])
         for target in targets:
@@ -585,9 +717,97 @@ class SkillWorkshop(object):
                     "%s 上没有该 Skill 的受管副本，无法更新" % (
                         target.get("label") or target["id"]),
                 )
-        return self._perform(entry, targets, "update")
+        stage = None
+        if entry.source.repo and entry.source.commit:
+            try:
+                from agentfloat.services.skills import skillsh
+                stage, _info = skillsh.materialize(
+                    entry.source.repo, entry.name, name=entry.name,
+                    ref=entry.source.commit)
+            except Exception:  # noqa: BLE001 - 回退到原有 GitHub API 物化
+                stage = None
+        try:
+            return self._perform(entry, targets, "update", source_dir=stage)
+        finally:
+            if stage:
+                shutil.rmtree(os.path.dirname(stage), ignore_errors=True)
 
     # ── 启停 / 卸载 / 回滚 ─────────────────────────
+    def install_discovered(self, source: str, slug: str,
+                           target_ids=None, name: str = "") -> Dict[str, Any]:
+        """从 skills.sh 条目一键安装（下载仓库归档，提取对应 skill 目录）。"""
+        import shutil
+
+        from agentfloat.services.skills import skillsh
+
+        targets = self._select_targets(target_ids)
+        if not targets:
+            raise SkillWorkshopError("target_required", "请选择至少一个安装位置")
+        safe_name = slugify(name or slug or "skill")
+        entry_id = "skillssh:%s/%s" % (source, slug)
+        plan = InstallPlan.build(entry_id, safe_name, targets, action="install")
+        try:
+            src, info = skillsh.materialize(source, slug, name=name or "")
+        except skillsh.SkillShError as exc:
+            for target in targets:
+                plan.fail(target["id"], exc.message, exc.code)
+            return plan.to_dict()
+        except Exception as exc:  # noqa: BLE001
+            for target in targets:
+                plan.fail(target["id"], "获取 skill 失败：%s" % exc, "source_error")
+            return plan.to_dict()
+        try:
+            for target in targets:
+                plan.begin(target["id"])
+                try:
+                    result = installer.install_tree(
+                        src, target["root"], safe_name,
+                        meta={
+                            "entryId": entry_id,
+                            "repo": source,
+                            "sourceType": "skills_sh",
+                            "source": {
+                                "type": "skills_sh",
+                                "repo": source,
+                                "url": "https://github.com/%s" % source,
+                                "commit": "",
+                            },
+                            "commit": "",
+                            "version": "",
+                            "description": info.get("description") or "",
+                            "license": info.get("license") or "",
+                        },
+                        backups_root=self.backups_dir, entry_id=entry_id,
+                    )
+                    plan.complete(target["id"], install_id=result["record"]["installId"],
+                                  path=result["path"], backup=result.get("backup") or "")
+                    for warning in result.get("warnings") or []:
+                        if warning not in plan.warnings:
+                            plan.warnings.append(warning)
+                except installer.SkillInstallError as exc:
+                    plan.fail(target["id"], exc.message, exc.code)
+                except Exception as exc:  # noqa: BLE001
+                    plan.fail(target["id"], "安装异常：%s" % exc, "install_failed")
+            return plan.to_dict()
+        finally:
+            shutil.rmtree(os.path.dirname(src), ignore_errors=True)
+
+    def adopt(self, entry_id: str, target_id: str) -> Dict[str, Any]:
+        """接管手动安装的 Skill（写标记，不改变原文件）。"""
+        entry = self._load_entry(entry_id)
+        inst = self._find_install(entry, str(target_id or ""))
+        if inst is None:
+            raise SkillWorkshopError("not_installed", "该 Agent 上没有这个 Skill")
+        target_name = os.path.basename(str(inst.path or "").rstrip("/\\")) or inst.name
+        result = installer.adopt_tree(inst.root, target_name, entry_id=entry.entry_id)
+        return {
+            "ok": True,
+            "action": "adopt",
+            "already": bool(result.get("already")),
+            "path": result.get("path") or inst.path,
+            "entry": self.get_entry(entry_id)["entry"],
+        }
+
     def set_enabled(self, entry_id: str, target_id: str, enabled: bool) -> Dict[str, Any]:
         entry = self._load_entry(entry_id)
         inst = self._find_install(entry, str(target_id or ""))
@@ -613,8 +833,12 @@ class SkillWorkshop(object):
                 "该 Skill 不是 AgentFloat 安装，来源未知；为避免误删，请在文件管理器中手动处理",
             )
         result = installer.uninstall_tree(inst.root, inst.name, self.backups_dir, self.trash_dir)
+        try:
+            snapshot = self.get_entry(entry_id)["entry"]
+        except Exception:  # noqa: BLE001 - 最后一个副本移除后条目已消失
+            snapshot = None
         return {"ok": True, "action": "uninstall", "backup": result.get("backup") or "",
-                "trash": result.get("trash") or "", "entry": self.get_entry(entry_id)["entry"]}
+                "trash": result.get("trash") or "", "entry": snapshot}
 
     def rollback(self, entry_id: str, target_id: str) -> Dict[str, Any]:
         """安装事务的逐 Agent 回滚：备份后移入回收站。"""
@@ -622,6 +846,117 @@ class SkillWorkshop(object):
         result["action"] = "rollback"
         result["message"] = "已回滚该 Agent 上的安装（备份保留在 AgentFloat 数据目录）"
         return result
+
+    def inspect_bundle(self, entry_id: str, target_id: str = "") -> Dict[str, Any]:
+        """读取某个安装副本的 README / SKILL.md / 文件树 / 许可证。"""
+        from agentfloat.services.skills import bundle, metadata
+
+        entry = self._load_entry(entry_id)
+        inst = self._find_install(entry, str(target_id or "")) if target_id else (
+            entry.installed[0] if entry.installed else None)
+        if inst is None:
+            raise SkillWorkshopError("not_installed", "没有可读取的安装副本")
+        data = bundle.read_bundle(inst.path)
+        if data.get("ok") and not data.get("license"):
+            marker = metadata.read_marker(inst.path) or {}
+            if marker.get("license"):
+                data["license"] = str(marker.get("license"))
+        data["target"] = {"id": inst.agent, "path": inst.path,
+                          "enabled": bool(inst.enabled), "managed": bool(inst.managed)}
+        return data
+
+    def list_backups(self, limit: int = 100) -> Dict[str, Any]:
+        """列出 backups/installId/stamp 下的备份，按时间倒序。"""
+        import time as _time
+
+        rows = []
+        root = self.backups_dir
+        if os.path.isdir(root):
+            for install_id in sorted(os.listdir(root)):
+                folder = os.path.join(root, install_id)
+                if not os.path.isdir(folder):
+                    continue
+                for stamp in sorted(os.listdir(folder)):
+                    path = os.path.join(folder, stamp)
+                    if not os.path.isdir(path):
+                        continue
+                    marker = installer.read_marker(path) or {}
+                    size = 0
+                    files = 0
+                    for cur, dirs, names in os.walk(path):
+                        dirs[:] = [d for d in dirs if d not in (".git", "__pycache__")]
+                        for name in names:
+                            try:
+                                size += os.path.getsize(os.path.join(cur, name))
+                            except OSError:
+                                pass
+                            files += 1
+                    try:
+                        mtime = os.path.getmtime(path)
+                    except OSError:
+                        mtime = 0
+                    rows.append({
+                        "id": install_id + "/" + stamp,
+                        "installId": install_id,
+                        "stamp": stamp,
+                        "name": str(marker.get("name") or stamp),
+                        "entryId": str(marker.get("entryId") or ""),
+                        "agent": str(marker.get("agent") or ""),
+                        "version": str(marker.get("version") or ""),
+                        "commit": str(marker.get("commit") or ""),
+                        "path": path,
+                        "size": size,
+                        "files": files,
+                        "createdAt": _time.strftime("%Y-%m-%d %H:%M", _time.localtime(mtime)),
+                        "mtime": mtime,
+                    })
+        rows.sort(key=lambda x: x.get("mtime") or 0, reverse=True)
+        return {"ok": True, "root": root, "backups": rows[:max(1, int(limit or 100))]}
+
+    def restore_backup(self, backup_id: str, target_id: str = "") -> Dict[str, Any]:
+        """把一份备份恢复到指定（或原）Agent 目录；恢复前会再备份当前版本。"""
+        parts = str(backup_id or "").replace("\\", "/").split("/")
+        if len(parts) != 2 or any(x in ("", ".", "..") for x in parts):
+            raise SkillWorkshopError("backup_invalid", "备份标识不合法")
+        path = os.path.abspath(os.path.join(self.backups_dir, parts[0], parts[1]))
+        if not installer.is_within(self.backups_dir, path) or not os.path.isdir(path):
+            raise SkillWorkshopError("backup_missing", "备份不存在")
+        marker = installer.read_marker(path) or {}
+        name = str(marker.get("name") or "").strip()
+        if not name:
+            raise SkillWorkshopError("backup_invalid", "备份缺少 Skill 名称")
+        if target_id:
+            targets = self._select_targets([target_id])
+        else:
+            root = str(marker.get("root") or "")
+            targets = [t for t in self.targets
+                       if root and os.path.normcase(os.path.abspath(t["root"])) ==
+                       os.path.normcase(os.path.abspath(root))]
+            if not targets:
+                raise SkillWorkshopError("target_required", "请选择恢复位置")
+        target = targets[0]
+        meta = {
+            "entryId": marker.get("entryId") or "",
+            "sourceType": marker.get("sourceType") or "local",
+            "repo": marker.get("repo") or "",
+            "source": marker.get("source") or {},
+            "version": marker.get("version") or "",
+            "commit": marker.get("commit") or "",
+            "license": marker.get("license") or "",
+        }
+        result = installer.install_tree(
+            path, target["root"], name, meta=meta,
+            backups_root=self.backups_dir,
+            entry_id=str(marker.get("entryId") or ""),
+        )
+        return {
+            "ok": True,
+            "action": "restore",
+            "target": target["id"],
+            "path": result.get("path"),
+            "backup": result.get("backup") or "",
+            "name": name,
+        }
 
     # ── Qt / 路径快捷接口 ──────────────────────────
     def install_for_path(self, path: str) -> Optional[Dict[str, Any]]:

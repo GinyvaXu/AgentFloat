@@ -303,6 +303,24 @@ def _find_windows_apps_mirror(cmd):
     return None
 
 
+def _find_under_programs(basename):
+    """在 %LOCALAPPDATA%\\Programs 下按文件名兜底查找（Electron 应用目录名常改）。"""
+    base = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs")
+    if not basename or not os.path.isdir(base):
+        return None
+    direct = os.path.join(base, basename)
+    if os.path.isfile(direct):
+        return direct
+    try:
+        for name in os.listdir(base):
+            candidate = os.path.join(base, name, basename)
+            if os.path.isfile(candidate):
+                return candidate
+    except OSError:
+        return None
+    return None
+
+
 def resolve_command(agent):
     """解析可执行命令路径。
 
@@ -315,6 +333,15 @@ def resolve_command(agent):
     if os.path.sep in cmd or (cmd.lower().endswith(".exe")):
         if os.path.exists(cmd):
             return os.path.abspath(cmd), None
+        # 路径失效时按文件名兜底（OpenCode 桌面版目录从 @opencodedesktop 改成 ai.opencode.desktop）
+        fallback = _find_under_programs(os.path.basename(cmd))
+        if not fallback:
+            # 配置里偶尔会存成快捷方式名（.lnk/.ink），按同名 exe 再找一次
+            stem, ext = os.path.splitext(os.path.basename(cmd))
+            if ext.lower() in (".lnk", ".ink"):
+                fallback = _find_under_programs(stem + ".exe")
+        if fallback:
+            return os.path.abspath(fallback), None
         return None, "命令路径不存在: %s" % cmd
     found = shutil.which(cmd)
     if found:

@@ -1,5 +1,140 @@
 ﻿# 更新日志
 
+## [4.0.0] - 2026-11-02（4.0 交付 · 测试构建）
+### Added
+- D 线进度中枢：L0 贴边条 / L1 快面板 / L2 驾驶舱、CLI + MCP + progress-protocol、注意力路由
+- Skills 车间：skills.sh 榜单、装前检查、多目标安装、矩阵/作用域、备份恢复、分享/锁文件
+- AI 接入：供应商卡片、一键切换、金额/订阅余额、Token 今日/本月/分用途统计
+- 首次教程居中与弹性动效、右键菜单分组、服务绿点、启动动画淡出衔接
+### Tests
+- 全量 pytest 592 收集 / 590 通过 / 2 个既有 floatball 失败；pyflakes 0；node --check 0
+
+## [3.24.0] - 2026-10-29（测试版 · 细节优化）
+### Added
+- 进度雷达默认收起为贴边灰色小弧条，点击展开；支持简略/最小化/关闭
+- 教程气泡改为弹性移动（OutBack 340ms）
+- AI 快报导出后自动打开所在文件夹
+- 服务运行绿点改为极光微光 + 主题切换弹跳
+### Fixed
+- 运行中任务需持续 2 分钟才出现；旧会话过期；关闭状态持久化
+
+## [3.23.0] - 2026-10-29（测试版 · MCP 自动接入 + 进度视觉）
+### Added
+- 设置 Skills 页「自动接入 MCP」：检测并写入 OpenCode / Claude / Claude Desktop / Cursor / Codex 配置，先备份原文件
+- 首次教程结束后询问是否自动接入 MCP 并安装内置 Skills
+- 雷达/驾驶舱使用方块分段进度（▰▱），比细进度线更直观
+### Fixed
+- 雷达运行中任务 2 分钟后才出现；旧会话自动过期；关闭状态持久化
+- API 用量 / 快报设置页两列对齐，窄屏堆叠，长控件换行
+
+## [3.22.1] - 2026-10-29（测试版 · 雷达显示逻辑修正）
+### Fixed
+- 运行中任务改为持续 2 分钟才浮现，避免启动即挡屏
+- 旧会话不再常驻：运行中 10 分钟无更新、阻塞/失败超 4 小时自动忽略
+- 手动关闭记住签名，重启后不再重复弹出（QSettings）
+- L0 压缩为 260px 单行 30px 行高，降低存在感
+- 设置行在窄屏/长控件时允许换行，缓解 API/快报栏目错位
+
+## [3.22.0] - 2026-10-29（测试版 · MCP/Skills 打包 + 教程与动效修复）
+### Added
+- 安装包内置 `af-mcp.exe`（独立控制台 MCP 服务）与 `skills/` 内置技能
+- 设置 → Skills 新增「MCP 与内置 Skills」卡片：显示 MCP 路径/状态、内置技能安装状态、一键安装到通用 Agents、MCP 配置示例
+### Fixed
+- Web 设置/API 页面 `_guideBanner is not defined` 崩溃（变量作用域错误）
+- 首次教程固定到屏幕中央，结束时恢复原位置；环绕菜单步骤加大气泡间距，避免菜单遮挡文字
+### Changed
+- 启动动画节奏重调：更柔和的回弹、五阶缓出、扩散环渐隐更自然、文字上浮更顺
+
+## [3.21.0] - 2026-10-29（测试版 · 注意力路由 + 窗口聚焦）
+### Added
+- 注意力路由：任务首次进入 need_input / failed 时托盘提醒一次，点击消息打开驾驶舱
+- 任务事件支持 `window`（plan --window / MCP window 字段），仓库持久化
+- L1 与 L2 新增「聚焦」按钮：按窗口标题恢复并置前对应窗口
+### Tests
+- 进度总线 / 雷达 / 驾驶舱 / 注意力 11 项测试通过
+
+## [3.20.0] - 2026-10-29（测试版 · D 线 L2 驾驶舱）
+### Added
+- L2 进度驾驶舱：左侧项目列表，右侧步骤耗时条、实际/预估对照、总用时与 ETA
+- 回放：逐步高亮步骤（QTimer），用于复盘哪一步慢了
+- 入口：L1「驾驶舱」按钮 + 托盘菜单「进度驾驶舱」
+- 窗口几何记忆（QSettings），支持拖到副屏
+- plan 步骤支持 `estimateMinutes`（MCP/CLI 可传）
+### Tests
+- 进度总线 / 雷达 / 驾驶舱 9 项测试通过；pyflakes 0
+
+## [3.19.1] - 2026-10-29（测试版 · 雷达稳定性修复）
+### Fixed
+- 雷达反复跳动：改为内容签名驱动，只在任务内容变化时重建；移动仅在位置变化 >1px 时执行
+- 雷达无法关闭：右上角新增 ×；关闭后仅在出现新任务内容时恢复；Esc 先收 L1 再关 L0
+- L1 文字重叠/残影：重建前立即 hide + setParent(None)，不再等待 deleteLater
+- 高度忽大忽小：按头部/行数/L1 步数一次计算固定高度
+### Changed
+- 视觉收敛：300px 宽、展开行蓝色底、need_input 黄 / failed 红、步骤块内聚
+
+## [3.19.0] - 2026-10-29（测试版 · D 线 M1 进度中枢）
+### Added
+- 统一进度总线：状态文件原子写（plan/step/next/done/fail/need_input/cancel）、ETA 投影
+- CLI `python -m agentfloat.services.progress` 与 MCP `af-mcp`（progress 工具）
+- L0 雷达条：贴浮球侧边，显示项目/步骤/当前步/ETA；need_input、failed 置顶；结束 10s 收起
+- L1 快面板：步骤列表、失败/需要确认信息、中断/继续/复制会话 ID
+- Skills 安装任务接入同一进度总线（准备/下载/部署/完成）
+- `skills/progress-protocol` Skill 协议说明
+### Tests
+- 进度总线 + 雷达逻辑 6 项测试通过；pyflakes 0
+
+## [Unreleased] - 2026-10-28（C 线：发现详情 / 一键安装 / 作用域 / 分享）
+### Added
+- 发现页接入 skills.sh 公开榜单（HTML，无需 Token），杂志布局展示排名、安装量、分类与仓库
+- 发现详情弹层：它做什么（摘要）、优势（安装量 / GitHub 星标 / 安全审计）、SKILL.md 摘要
+- 一键安装：选择安装位置（Codex / Claude Code / OpenCode / 通用 Agents），后台任务下载仓库归档并提取目标 Skill（30 MB 上限）
+- 已安装「作用域」视图：按 Agent 分组，支持单个启用/停用、全部启用/停用、移除、复制目录
+- 手动安装 Skill 可「接管」（仅写入标记，不改动原文件），接管后纳入统一作用域管理
+- 分享：生成 Markdown（名字 / 用途 / 用法 / 安装位置 / 获取方式），支持复制与下载 .md
+- 新接口：`GET /api/skills/discover/detail`、`POST /api/skills/discover/install`、`POST /api/skills/toggle`、`POST /api/skills/adopt`
+- 发现页默认进入「发现」，完整渲染 60 条榜单（含分类全量），新增搜索空态/清除
+- 发现详情新增「装前检查」（来源/版本/许可/退路/目标），安装位置前置，目标默认只勾选「通用 Agents」
+- 新增 Skill × Agent 矩阵视图（38×4 单元格，受管可启停，手动/未装可查看）
+- 发现页合并本机已安装状态，已安装条目不再默认勾选安装目标
+- 新增 `POST /api/skills/check`（git ls-remote，不耗 GitHub API）与 `POST /api/skills/update`
+- 更新前先取远端最新 commit，再用最新版本物化（修复「更新装回旧版」）
+- 静态资源改为 no-cache；非设置页隐藏「保存」按钮
+
+- 已安装 Skill 内容查看：README / SKILL.md / 文件树 / 许可证（`GET /api/skills/bundle`）
+- 备份时间线：按时间列出自动备份、复制路径、恢复到指定 Agent（`GET /api/skills/backups`、`POST /api/skills/restore`）
+- 锁文件导出：`agentfloat-skills.json`（entryId / repo / commit / 各 Agent 启停状态）
+- 安装时自动识别并记录许可证（marker.license），内容查看优先展示
+
+- 更新差异预览：`GET /api/skills/diff`，按 commit 拉取 SKILL.md / README 做 unified diff
+- 批量更新：更新列表「全部更新」，顺序执行、逐条备份、成功/失败汇总
+- 锁文件导入：读取 `agentfloat-skills.json`，预览本机匹配情况，只应用已安装 Skill 的启用/停用作用域（缺失项不自动安装）
+
+- D 线开工：统一进度总线（原子写状态文件）+ `python -m agentfloat.services.progress` CLI（plan/step/next/done/fail/need-input/list/show）+ ETA 投影
+### Fixed
+- 接管（adopt）改为按真实目录名操作并沿用原 entryId，避免接管错目录/条目分裂
+- skills.sh 安装 marker 修正为 installer 识别的 camelCase（entryId/sourceType/source），repo 统一存 owner/repo
+- 「全部卸载」正确读取条目快照并按 agent 去重；前端检查 `ok:false`，不再误报成功
+- 卸载最后一个副本后不再因旧 entryId 反查而报错
+- `#/skills` 刷新/深链不再回落到设置页
+- 徽标优先显示「有更新」，不再被「已安装」吞掉
+- 作用域开关改用 `.scope-switch` 命名空间，修复设置页开关尺寸错乱
+- 分享安装命令规范化 repo，避免重复拼 GitHub 前缀
+- 搜索框输入不再失焦（debounce + 中文 IME 保护 + 焦点/光标恢复）
+- 切换 tab/视图增加请求序号，过期响应不再覆盖当前页面；切换后滚动回顶部
+- 弹层增加焦点陷阱与关闭后焦点恢复；发现详情增加请求序号与 5 分钟缓存，加载态可关闭
+- 批量作用域操作只作用于当前搜索可见的 Skill，并显示影响数量
+- `factors` 兼容数组结构，避免未来出现 `NaN`
+- 作用域批量/统计区分「全部」与「匹配」；手动安装项提供接管入口
+
+- 恢复备份前自动备份当前版本；备份恢复后仍保留原备份
+- 修复内容查看按钮绑定位置错误（此前只在 README 弹层内绑定）
+
+- 候选链路验证：造真实旧 commit 候选 → 检查 1 条更新 → 更新成功（marker 前进）→ 自动备份 3 份 → 恢复旧内容 → 清理候选
+### Tests
+- `pytest -k skill` 36 项通过；pyflakes 0；`node --check` 0
+### Note
+- 未构建、未装机、未改 VERSION；远端更新比对仍待实现
+
 ## [3.18.10] - 2026-10-28（测试版 · C 线异步 Skill 安装）
 ### Added
 - Skill 安装改为后台任务：`POST /api/skills/install` 立即返回，`GET /api/skills/job` 轮询状态（phase/message/ok）

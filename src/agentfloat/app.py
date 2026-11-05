@@ -26,12 +26,16 @@ from agentfloat.core.sysutil import _open_url, ensure_utf8_stdio
 from agentfloat.core.theme import FONT_FAMILY, get_colors
 from agentfloat.core.version import VERSION, version_label
 from agentfloat.services.dsh import status as dsh_status, stop as stop_dsh
+from agentfloat.services.progress import store as progress_store
+from agentfloat.services.progress.attention import new_attention
 from agentfloat.services.skills.ai_service import ensure_translator_skill
 from agentfloat.services.update import updater
 from agentfloat.services.update.updater import DownloadWorker, UpdateWorker
 from agentfloat.ui.dialogs import _update_box
 from agentfloat.ui.floatball import FloatingWidget
 from agentfloat.ui.loading_indicator import LoadingIndicator
+from agentfloat.ui.progress_cockpit import open_cockpit
+from agentfloat.ui.progress_radar import ProgressRadar
 from agentfloat.webshell import window as web_ui
 from agentfloat.webshell.bridge import WebBridge
 from agentfloat.webshell.handlers import WebAppHandlers
@@ -375,6 +379,12 @@ def _main():
 
     widget = FloatingWidget()
 
+    # ── D 线 L0 雷达条 / L1 快面板 ──
+    radar = ProgressRadar(anchor=widget, theme=getattr(widget, "theme", "dark"))
+    widget.progress_radar = radar
+    if (widget.config.get("progress") or {}).get("enabled", True):
+        radar.start()
+
     # ── 动画加载指示器（dsh 启动 / Web 壳打开）──
     loading = LoadingIndicator(anchor=widget)
     _prev_dsh_phase = ["idle"]
@@ -628,6 +638,7 @@ def _main():
             tray_sub.addAction(a.get("name"), lambda a=a: launch_agent(a, widget.config))
     tray_menu.addAction("Skills 辅助窗", widget._open_skills_panel)
     tray_menu.addAction("AI 快报", widget._open_news_panel)
+    tray_menu.addAction("进度驾驶舱", lambda: open_cockpit(theme=getattr(widget, "theme", "dark")))
     tray_menu.addAction("喝水助手", widget._open_water_panel)
     tray_menu.addAction("停止 DSH Web 服务", lambda: stop_dsh())
     tray_menu.addSeparator()
@@ -658,6 +669,28 @@ def _main():
     tray_icon.activated.connect(lambda r: widget.show() if r == QSystemTrayIcon.DoubleClick else None)
     tray_icon.show()
     tray_icon.showMessage("AgentFloat", "AI Agent 浮窗助手已启动", QSystemTrayIcon.Information, 2000)
+
+    # ── 注意力路由：need_input / failed 只提醒一次 ──
+    _seen_attention = set()
+
+    def _poll_attention():
+        try:
+            rows = progress_store.list_sessions()
+        except Exception:  # noqa: BLE001
+            return
+        for item in new_attention(rows, _seen_attention):
+            title = item.get("title") or item.get("project") or item.get("sessionId")
+            detail = item.get("question") if item.get("status") == "need_input" else item.get("error")
+            tray_icon.showMessage("AgentFloat · 需要关注", "%s：%s" % (title, detail or ""),
+                                  QSystemTrayIcon.Information, 4000)
+            tray_icon.setToolTip("AgentFloat · " + str(title))
+
+    _attention_timer = QTimer(widget)
+    _attention_timer.setInterval(3000)
+    _attention_timer.timeout.connect(_poll_attention)
+    _attention_timer.start()
+    tray_icon.messageClicked.connect(
+        lambda: open_cockpit(theme=getattr(widget, "theme", "dark")))
     if _OTHER_INSTANCES:
         QTimer.singleShot(1200, lambda: tray_icon.showMessage(
             "AgentFloat — 检测到其他实例",

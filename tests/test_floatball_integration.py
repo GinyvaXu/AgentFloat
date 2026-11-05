@@ -139,6 +139,57 @@ def test_apply_settings_merges_plain_keys(ball, qapp):
     assert w.config["hide_delay_ms"] == 1234
 
 
+def test_apply_settings_merges_progress_toggle(ball, qapp, tmp_path, monkeypatch):
+    """P0：设置页「进度贴边条」开关写入后必须落盘，重启加载仍为 False。"""
+    import copy
+    import json
+    import agentfloat.ui.floatball as fb
+    from agentfloat.core import config as cfgmod
+
+    saved = {}
+    monkeypatch.setattr(fb, "save_config",
+                        lambda cfg: saved.update(copy.deepcopy(cfg)))
+    w = ball
+    cfg = copy.deepcopy(w.config)
+    cfg["progress"] = {"enabled": False}
+    w.apply_settings(cfg, preview_only=False)
+    assert w.config.get("progress", {}).get("enabled") is False
+    assert saved.get("progress", {}).get("enabled") is False
+
+    # save_config 实际收到的快照 → 重新加载
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(cfgmod, "CONFIG_PATH", str(path))
+    monkeypatch.setattr(cfgmod, "_OLD_CONFIG_PATH", str(tmp_path / "old.json"))
+    loaded = cfgmod.load_config()
+    assert loaded.get("progress", {}).get("enabled") is False
+
+
+def test_onboarding_finish_respects_progress_disabled(ball, qapp, monkeypatch):
+    """P1-A：设置里关掉贴边条后，引导结束不得把雷达重新拉起。"""
+    import agentfloat.ui.floatball as fb
+
+    monkeypatch.setattr(fb, "save_config", lambda cfg: None)
+    calls = []
+
+    class _Radar(object):
+        def resume(self):
+            calls.append("resume")
+
+        def pause(self):
+            calls.append("pause")
+
+    w = ball
+    w.progress_radar = _Radar()
+    w.config["progress"] = {"enabled": False}
+    w._on_onboarding_finished(False)
+    assert calls == [], calls
+
+    w.config["progress"] = {"enabled": True}
+    w._on_onboarding_finished(False)
+    assert calls == ["resume"], calls
+
+
 def test_hold_ring_renders(ball, qapp):
     """PATCH 3.3.0：按住启动环形进度条应能正常出图"""
     w = ball

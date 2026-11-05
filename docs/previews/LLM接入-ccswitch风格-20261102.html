@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>LLM 接入 · ccswitch 风格预览</title>
+<style>
+:root{--bg:#0B0B0D;--panel:#1B1B1F;--card:#212127;--line:rgba(255,255,255,.09);--text:#F2F2F5;--muted:#A9A9B2;--hint:#6F6F78;--accent:#0A84FF;--ok:#30D158;--warn:#FF9F0A}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:13px/1.55 "Segoe UI","Microsoft YaHei",sans-serif;padding:24px 28px 50px}
+h1{font-size:15px;font-weight:650}.sub{color:var(--muted);font-size:12px;margin:4px 0 18px}
+.layout{display:grid;grid-template-columns:320px 1fr;gap:16px;max-width:1080px}
+.col{display:flex;flex-direction:column;gap:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+.provider{position:relative;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 12px;cursor:pointer;transition:border-color .15s,background .15s}
+.provider:hover{border-color:rgba(10,132,255,.35)}
+.provider.active{border-color:rgba(10,132,255,.65);background:rgba(10,132,255,.08)}
+.provider .top{display:flex;align-items:center;gap:8px}
+.provider .name{font-size:12.5px;font-weight:650}.provider .model{font-size:10px;color:var(--hint);margin-top:2px}
+.provider .meta{display:flex;gap:6px;align-items:center;margin-top:7px;font-size:9.5px;color:var(--hint)}
+.badge{font-size:9px;padding:1px 6px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.badge.on{color:var(--ok);border-color:rgba(48,209,88,.35);background:rgba(48,209,88,.08)}
+.badge.token{color:var(--accent);border-color:rgba(10,132,255,.35);background:rgba(10,132,255,.08)}
+.provider .act{position:absolute;right:10px;top:10px;font-size:10px;padding:3px 9px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}
+.provider.active .act{background:var(--accent);border-color:var(--accent);color:#fff}
+.add{height:38px;border:1px dashed rgba(255,255,255,.16);border-radius:10px;background:transparent;color:var(--muted);font-size:11px;cursor:pointer}
+.add:hover{border-color:var(--accent);color:var(--text)}
+.card h2{font-size:12.5px;font-weight:650;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.field{display:grid;grid-template-columns:82px 1fr;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}
+.field:last-child{border-bottom:none}.field label{font-size:11px;color:var(--muted)}
+.inp{height:30px;border-radius:7px;border:1px solid var(--line);background:#151518;color:var(--text);padding:0 9px;font-size:11px;width:100%}
+.mono{font-family:Consolas,monospace}.row{display:flex;gap:7px;align-items:center}
+.btn{height:28px;padding:0 11px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:10.5px;cursor:pointer}
+.btn.p{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.note{font-size:10px;color:var(--hint);margin-top:10px;line-height:1.5}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:6px}
+.stat{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.stat .k{font-size:9.5px;color:var(--hint)}.stat .v{font-size:14px;font-weight:650;margin-top:2px}
+.stat .v small{font-size:9px;color:var(--hint);font-weight:400}
+.usage{margin-top:8px;font-size:10.5px}
+.usage .line{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line);color:var(--muted)}
+</style></head><body>
+<h1>AI 模型接入 · ccswitch 风格</h1>
+<div class="sub">参考 CC Switch：供应商卡片 + 一键切换 + 预设；只改连接字段，不动其他设置；token 用量直接显示在卡片上。</div>
+<div class="layout">
+  <div class="col">
+    <div class="card" style="padding:10px">
+      <div class="row" style="justify-content:space-between;font-size:10.5px;color:var(--hint)">
+        <span>总余额 <b style="color:var(--text);font-size:13px">¥15.60</b></span>
+        <span>今日消耗 <b style="color:var(--text)">¥0.06</b></span>
+        <span>订阅 <b style="color:var(--text)">1 个</b></span>
+        <span class="badge on">余额监控 60s</span>
+      </div>
+    </div>
+    <div class="card" style="padding:10px">
+      <div class="provider active" data-name="DeepSeek" data-base="https://api.deepseek.com/v1" data-model="deepseek-chat" data-balance="https://api.deepseek.com/user/balance" data-field="balance_infos[0].total_balance"><div class="top"><span class="name">DeepSeek</span><span class="badge on">当前使用</span></div><div class="model">deepseek-chat · api.deepseek.com</div><div class="meta"><span class="badge token">42.8K tokens 今日</span><span>余额 ¥12.40</span><span class="badge">12:03 刷新</span></div><button class="act">使用中</button></div>
+      <div style="height:8px"></div>
+      <div class="provider" data-name="OpenRouter" data-base="https://openrouter.ai/api/v1" data-model="claude-sonnet-4.5" data-balance="https://openrouter.ai/api/v1/credits" data-field="data.total_credits"><div class="top"><span class="name">OpenRouter</span></div><div class="model">claude-sonnet-4.5 · openrouter.ai</div><div class="meta"><span class="badge token">8.4K tokens 今日</span><span>余额 $3.20</span><span class="badge">12:03 刷新</span></div><button class="act">切换</button></div>
+      <div style="height:8px"></div>
+      <div class="provider" data-name="OpenCode Go" data-base="https://opencode.ai/zen/go" data-model="zen/go" data-balance="https://opencode.ai/zen/go/v1/usage" data-field="usage.rolling.percent" data-kind="sub"><div class="top"><span class="name">OpenCode Go</span><span class="badge">订阅用量</span></div><div class="model">zen/go · 5h / 周 / 月配额</div><div class="meta"><span class="badge token">5h 78%</span><span>周 45%</span><span>月 60%</span></div><button class="act">切换</button></div>
+      <div style="height:8px"></div>
+      <div class="provider" style="cursor:default"><div class="model" style="margin:0;color:var(--hint);font-size:9.5px">订阅型显示“已用百分比”，不折算金额、不参与总余额。</div></div>
+      <div style="height:8px"></div>
+      <div class="provider"><div class="top"><span class="name">自定义 OpenAI 兼容</span></div><div class="model">未配置模型</div><div class="meta"><span class="badge">未测试</span><span class="badge">无余额接口</span></div><button class="act">切换</button></div>
+      <div style="height:8px"></div>
+      <button class="add">+ 添加供应商（预设 / 自定义）</button>
+    </div>
+    <div class="card">
+      <h2>今日 / 本月</h2>
+      <div class="stats">
+        <div class="stat"><div class="k">今日</div><div class="v">42.8K</div></div>
+        <div class="stat"><div class="k">本月</div><div class="v">1.24M</div></div>
+        <div class="stat"><div class="k">快报</div><div class="v">31.2K</div></div>
+        <div class="stat"><div class="k">翻译</div><div class="v">8.4K</div></div>
+      </div>
+      <div class="usage"><div class="line"><span>最近调用</span><span>18:42 · deepseek-chat</span></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>编辑供应商 <span class="badge" id="editName">DeepSeek</span></h2>
+    <div class="field"><label>预设</label><select class="inp"><option>DeepSeek</option><option>OpenRouter</option><option>OpenAI</option><option>自定义</option></select></div>
+    <div class="field"><label>Base URL</label><input class="inp mono" id="baseUrl" value="https://api.deepseek.com/v1"></div>
+    <div class="field"><label>模型</label><input class="inp mono" id="modelName" value="deepseek-chat"></div>
+    <div class="field"><label>API Key</label><div class="row"><input class="inp mono" type="password" value="sk-••••••••••••"><button class="btn">测试</button></div></div>
+    <div class="field"><label>用途</label><div class="row"><span class="badge on">AI 快报</span><span class="badge on">Skills 翻译</span><span class="badge">余额监控</span></div></div>
+    <div class="field"><label>余额接口</label><input class="inp mono" id="balanceUrl" value="https://api.deepseek.com/user/balance"></div>
+    <div class="field"><label>余额字段</label><input class="inp mono" id="balanceField" value="balance_infos[0].total_balance"></div>
+    <div class="field"><label>监控</label><div class="row"><select class="inp" style="width:110px"><option>每 60 秒</option><option>每 5 分钟</option><option>手动</option></select><input class="inp" style="width:100px" value="低余额 ¥5"><button class="btn">立即刷新</button></div></div>
+    <div class="field"><label>显示</label><div class="row"><span class="badge on">浮球徽标</span><span class="badge on">Web 控制台</span><span class="badge">仅本页</span></div></div>
+    <div class="field"><label>备注</label><input class="inp" placeholder="可选，例如：主力 / 备用"></div>
+    <div class="row" style="margin-top:12px"><button class="btn p">保存</button><button class="btn">设为当前</button><button class="btn">删除</button></div>
+    <div class="note">切换只改 Base URL / Key / 模型，不覆盖钩子、权限、MCP 等其他配置。保存前自动备份。直连模式；本地路由/故障转移暂不做。</div>
+    <div class="note" style="color:var(--muted)"><b>订阅型供应商（OpenCode Go）</b>：固定接口 <span class="mono">GET /zen/go/v1/usage</span>，读取 <span class="mono">usage.rolling / weekly / monthly.percent</span>，显示已用百分比；不支持自定义余额字段，也不计入总余额。</div>
+  </div>
+</div>
+
+<script>
+  const cards = Array.from(document.querySelectorAll('.provider[data-name]'));
+  const editName = document.getElementById('editName');
+  const baseUrl = document.getElementById('baseUrl');
+  const modelName = document.getElementById('modelName');
+  const balanceUrl = document.getElementById('balanceUrl');
+  const balanceField = document.getElementById('balanceField');
+  cards.forEach(card => {
+    card.addEventListener('click', () => {
+      cards.forEach(c => {
+        c.classList.toggle('active', c === card);
+        const act = c.querySelector('.act');
+        if (act) act.textContent = (c === card) ? '使用中' : '切换';
+      });
+      editName.textContent = card.dataset.name;
+      baseUrl.value = card.dataset.base;
+      modelName.value = card.dataset.model;
+      balanceUrl.value = card.dataset.balance;
+      balanceField.value = card.dataset.field;
+      if (card.dataset.kind === 'sub') {
+        balanceField.value = 'usage.rolling.percent（订阅用量，只读）';
+      }
+    });
+  });
+</script>
+</body></html>

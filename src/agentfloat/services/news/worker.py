@@ -19,6 +19,7 @@ import time
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from agentfloat.services.skills.ai_service import run_headless, build_headless_command
+from agentfloat.services import llm as llm_service
 from agentfloat.services.news.fetcher import (
     DEFAULT_NEWS, NEWS_PROMPT_VERSION, AI_CATEGORIES, fetch_with_retry,
     filter_blocked, prefilter_items, rank_items, guess_category, item_id,
@@ -85,6 +86,43 @@ def _interests_block(interests):
         "用户关注主题（权重从高到低，越靠前越要优先覆盖）：\n%s\n\n"
         "要求：优先收录与上述主题相关的条目；若某主题当日无相关内容可跳过，不要硬凑。\n\n" % lines
     )
+
+
+def _ai_ok(result, meta) -> bool:
+    """AI 结果是否可用（≥2 条通过校验的条目）。"""
+    return bool(result and int((meta or {}).get("valid") or 0) >= 2)
+
+
+def generate_ai_with_fallback(llm_ready, agent_ready, run_llm, run_agent,
+                              emit=None, log=None):
+    """按「AI 接入 → 本地 CLI Agent」优先级生成摘要，LLM 失败/输出不足时回退。
+
+    返回 (result, meta, used_ai, channel)，channel ∈ {"llm", "agent", ""}。
+    抽成独立函数便于单测：4.0 的回归面就是「LLM 坏了不再回退 Agent」。
+    """
+    emit = emit or (lambda label="": None)
+    log = log or logger
+    if llm_ready:
+        emit("调用「AI 接入」当前供应商生成摘要…")
+        result, meta = run_llm()
+        if _ai_ok(result, meta):
+            return result, meta, True, "llm"
+        errors = list((meta or {}).get("errors") or [])
+        if agent_ready:
+            why = str(errors[0] if errors else "无有效结果")[:120]
+            log.warning("AI 接入不可用（%s），回退本地 CLI Agent", why)
+            emit("AI 接入不可用（%s），回退本地 CLI Agent…" % why[:60])
+            result2, meta2 = run_agent()
+            return result2, meta2, _ai_ok(result2, meta2), "agent"
+        return result, meta, False, "llm"
+    if agent_ready:
+        emit("调用本地 CLI Agent 生成摘要…")
+        result, meta = run_agent()
+        return result, meta, _ai_ok(result, meta), "agent"
+    emit("未找到可用的 AI 通道（CLI Agent / AI 接入供应商），跳过 AI 摘要")
+    log.info("AI 摘要跳过：没有可 headless 的 CLI Agent，也没有可用的 AI 接入供应商")
+    return None, {"valid": 0, "errors": [], "repaired": False, "cache": False,
+                  "translation_coverage": 0.0}, False, ""
 
 
 def build_ai_prompt(items, language="zh", max_items=6, interests=None, date=""):
@@ -317,12 +355,13 @@ class NewsWorker(QThread):
         "save": "写入快报",
     }
 
-    def __init__(self, news_cfg, agents, parent=None):
+    def __init__(self, news_cfg, agents, parent=None, llm_cfg=None):
         super().__init__(parent)
         cfg = dict(DEFAULT_NEWS)
         cfg.update(news_cfg or {})
         self._cfg = cfg
         self._agents = agents or []
+        self._llm_cfg = dict(llm_cfg or {})
         self._cancel = threading.Event()
 
     def cancel(self):
@@ -412,21 +451,21 @@ class NewsWorker(QThread):
 
         used_ai = False
         ai_result = None
+        ai_channel = ""
         ai_meta = {"valid": 0, "errors": [], "repaired": False, "cache": False,
                    "translation_coverage": 0.0}
         if cfg.get("use_ai", True):
+            llm_ready = llm_service.has_active_provider({"llm": self._llm_cfg})
             agent = _pick_agent(self._agents, cfg.get("agent_id"))
-            if agent and build_headless_command(agent, "ping")[0] is not None:
-                ai_result, ai_meta = self._generate_ai(
-                    agent, ranked, date, language, ai_max, interests)
-                used_ai = bool(ai_result and ai_meta.get("valid", 0) >= 2)
-                if self._cancel.is_set():
-                    self.failed.emit("已取消生成")
-                    return
-            else:
-                self._emit("ai", 0, 0,
-                           "未找到可用于 headless 的 CLI Agent（桌面/Web 型不可用），跳过 AI 摘要")
-                logger.info("AI 摘要跳过：没有可用于 headless 的 CLI Agent")
+            agent_ready = bool(agent and build_headless_command(agent, "ping")[0] is not None)
+            ai_result, ai_meta, used_ai, ai_channel = generate_ai_with_fallback(
+                llm_ready, agent_ready,
+                lambda: self._generate_ai_llm(ranked, date, language, ai_max, interests),
+                lambda: self._generate_ai(agent, ranked, date, language, ai_max, interests),
+                emit=lambda label: self._emit("ai", 0, 0, label))
+            if self._cancel.is_set():
+                self.failed.emit("已取消生成")
+                return
         else:
             self._emit("ai", 0, 0, "已关闭 AI 摘要，使用标题列表")
 
@@ -511,14 +550,40 @@ class NewsWorker(QThread):
             cleanup_old(cfg.get("retention_days", 14))
         except Exception as e:  # noqa: BLE001
             logger.warning("清理历史快报失败: %s", e)
-        logger.info("AI 日报完成: date=%s count=%d used_ai=%s blocked=%d "
+        logger.info("AI 日报完成: date=%s count=%d used_ai=%s channel=%s blocked=%d "
                     "duplicate=%d fallback=%s",
-                    date, len(final_items), used_ai, blocked_count, duplicate,
-                    not used_ai)
+                    date, len(final_items), used_ai, ai_channel or "-", blocked_count,
+                    duplicate, not used_ai)
         self.done.emit(payload)
 
     def _generate_ai(self, agent, ranked, date, language, ai_max, interests):
         """调用 CLI Agent 生成摘要；缓存 → 校验 → 修复 1 次 → 逐条降级"""
+        def invoke(prompt, timeout):
+            return run_headless(agent, prompt, cancel=self._cancel, timeout=timeout)
+        return self._generate_ai_core(ranked, date, language, ai_max, interests,
+                                      invoke, agent.get("name") or "本地 Agent")
+
+    def _generate_ai_llm(self, ranked, date, language, ai_max, interests):
+        """通过「AI 接入」当前供应商生成摘要（purpose=news）。"""
+        llm_config = {"llm": self._llm_cfg}
+
+        def invoke(prompt, timeout):
+            try:
+                result = llm_service.chat(
+                    llm_config,
+                    [{"role": "user", "content": prompt}],
+                    purpose="news", timeout=timeout)
+                return result.get("content") or "", None
+            except llm_service.LLMError as exc:
+                return None, str(exc)
+            except Exception as exc:  # noqa: BLE001
+                return None, "AI 接入调用异常：%s" % exc
+
+        return self._generate_ai_core(ranked, date, language, ai_max, interests,
+                                      invoke, "AI 接入")
+
+    def _generate_ai_core(self, ranked, date, language, ai_max, interests,
+                          invoke, source_label):
         cache_key = ai_cache_key(date, language, interests, ranked)
         cached = load_ai_cache(cache_key)
         if cached:
@@ -536,9 +601,8 @@ class NewsWorker(QThread):
                     "translation_coverage": result.get("translation_coverage", 0.0),
                 }
         prompt = build_ai_prompt(ranked, language, ai_max, interests, date=date)
-        self._emit("ai", 0, 2, "调用 %s 生成摘要…" % (agent.get("name") or "本地 Agent"))
-        out, err = run_headless(agent, prompt, cancel=self._cancel,
-                                timeout=AI_SUMMARY_TIMEOUT_S)
+        self._emit("ai", 0, 2, "调用 %s 生成摘要…" % source_label)
+        out, err = invoke(prompt, AI_SUMMARY_TIMEOUT_S)
         if out is None:
             logger.warning("AI 摘要失败: %s", err)
             self._emit("ai", 0, 2, "AI 摘要失败：%s" % (err or "无输出"))
@@ -550,8 +614,7 @@ class NewsWorker(QThread):
             self._emit("ai", 1, 2, "校验未通过，自动修复 1 次…")
             repaired = True
             prompt2 = build_repair_prompt(out, errors)
-            out2, err2 = run_headless(agent, prompt2, cancel=self._cancel,
-                                      timeout=AI_SUMMARY_TIMEOUT_S)
+            out2, err2 = invoke(prompt2, AI_SUMMARY_TIMEOUT_S)
             if out2:
                 result2, errors2 = self._parse_and_validate(out2, ranked, language)
                 if result2 is not None and (

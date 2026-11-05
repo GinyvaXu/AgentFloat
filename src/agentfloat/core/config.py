@@ -24,6 +24,7 @@ from agentfloat.core.theme import DEFAULT_SIZE
 from agentfloat.services.api_monitor.config import (
     DEFAULTS as API_MONITOR_DEFAULTS,
 )
+from agentfloat.services.llm import DEFAULTS as LLM_DEFAULTS
 from agentfloat.services.news.fetcher import DEFAULT_NEWS as _NEWS_DEFAULTS
 from agentfloat.services.water.reminder import DEFAULT_WATER
 
@@ -75,6 +76,8 @@ def load_config():
         "radial_menu": copy.deepcopy(DEFAULT_RADIAL_MENU),
         "skills": copy.deepcopy(DEFAULT_SKILLS),
         "api_monitor": _default_api_monitor(),
+        # v3.28：统一 AI 模型接入（供应商 / 当前供应商 / 余额与 Token 统计）
+        "llm": copy.deepcopy(LLM_DEFAULTS),
         "services": {"ai_first_run_done": False, "last_run": ""},
         "news": copy.deepcopy(_NEWS_DEFAULTS),
         "water": copy.deepcopy(DEFAULT_WATER),
@@ -82,6 +85,8 @@ def load_config():
         "process_panel": {"enabled": True, "hover_delay_ms": 250, "opacity": 1.0, "scale": 1.0},
         # v3.6.2：启动动画（屏幕中心光晕 + 圆环 + 放大浮球 → 飞向落点）
         "intro": {"enabled": True, "sound": True, "volume": 0.6, "greeting": ""},
+        # 4.0：D 线进度贴边条（L0 雷达 / L1 快面板）
+        "progress": {"enabled": True},
         # v3.9.0：新用户引导（首次运行自动播放；右键「使用教程」可重播）
         "onboarding_done": False,
         "onboarding_version": 0,
@@ -228,6 +233,17 @@ def load_config():
             if len(_cleaned) != len(_eps):
                 _am_cfg["endpoints"] = _cleaned
                 _migrated = True
+
+    # v3.28：统一 AI 接入配置（旧配置缺 llm 时补齐；可从现有 API 端点复用供应商）
+    try:
+        from agentfloat.services.llm import normalize_config as _normalize_llm
+        _llm_cfg, _llm_changed = _normalize_llm(defaults)
+        if _llm_changed:
+            _migrated = True
+            _log().info("配置迁移：AI 接入供应商 %d 个（active=%s）",
+                        len(_llm_cfg.get("providers") or []), _llm_cfg.get("active") or "无")
+    except Exception as _llm_exc:  # noqa: BLE001
+        _log().warning("AI 接入配置迁移失败（保留原值）：%s", _llm_exc)
 
     if _migrated and (loaded or not parse_error):
         save_config(defaults)

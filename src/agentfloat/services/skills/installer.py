@@ -237,6 +237,7 @@ def _build_marker(meta: Dict[str, Any], install_id: str, name: str, target_root:
         "repo": str(meta.get("repo") or source.get("repo") or ""),
         "source": source,
         "version": str(meta.get("version") or ""),
+        "license": str(meta.get("license") or ""),
         "commit": str(meta.get("commit") or source.get("commit") or ""),
         "backup": backup or "",
         "enabled": True,
@@ -335,6 +336,36 @@ def install_tree(src: str, target_root: str, name: str, meta: Optional[Dict[str,
 
 
 # ── 启停 ────────────────────────────────────────────
+def adopt_tree(target_root: str, name: str, entry_id: str = "") -> Dict[str, Any]:
+    """接管手动安装的 Skill：只写入受管标记，不移动/修改原文件。"""
+    root = validate_target_root(target_root)
+    dest = safe_join(root, name)
+    if not os.path.isdir(dest):
+        raise SkillInstallError("not_found", "目标目录不存在")
+    marker = read_marker(dest)
+    if marker is not None and marker.get("managed"):
+        return {"ok": True, "already": True, "path": dest, "record": marker}
+    active = os.path.join(dest, "SKILL.md")
+    disabled = os.path.join(dest, "SKILL.md.disabled")
+    if not os.path.isfile(active) and not os.path.isfile(disabled):
+        raise SkillInstallError("not_a_skill", "目录中没有 SKILL.md，不能接管")
+    info = inspect_tree(dest)
+    enabled = os.path.isfile(active)
+    install_id = str((marker or {}).get("installId") or "")
+    if not install_id:
+        install_id = "af-adopt-" + _stamp()
+    record = _build_marker(
+        {"entryId": entry_id or ("local:%s" % name), "agent": agent_from_root(root),
+         "sourceType": "local", "repo": ""},
+        install_id, name, root, "", info.digest,
+        installed_at=str((marker or {}).get("installedAt") or ""),
+    )
+    record["enabled"] = enabled
+    record["adopted"] = True
+    write_marker(dest, record)
+    return {"ok": True, "adopted": True, "path": dest, "record": record}
+
+
 def set_enabled(target_root: str, name: str, enabled: bool) -> Dict[str, Any]:
     """启停受管 Skill：通过重命名 SKILL.md 实现，可逆且对全部 Agent 生效。"""
     root = validate_target_root(target_root)

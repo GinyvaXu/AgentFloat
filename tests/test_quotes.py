@@ -215,7 +215,7 @@ def test_context_menu_items_unique():
     from agentfloat.ui import floatball
     src = inspect.getsource(floatball.FloatingWidget)
     for label in ('addAction("设置…", self.settings_requested.emit)',
-                  'addAction("使用教程"', 'addAction("换一条语录"'):
+                  'addAction("使用教程"', 'addAction("下一条语录"'):
         assert src.count(label) == 1, "菜单项重复构建：%s" % label
     assert "_build_context_menu()" in inspect.getsource(
         floatball.FloatingWidget._context_menu), "_context_menu 应复用唯一构建器"

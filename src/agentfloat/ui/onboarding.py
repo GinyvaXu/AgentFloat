@@ -12,8 +12,8 @@
 import math
 import time as _time
 
-from PyQt5.QtCore import (QEasingCurve, QPointF, QPropertyAnimation, QRect, QRectF, Qt,
-                          QTimer, pyqtSignal)
+from PyQt5.QtCore import (QEasingCurve, QPoint, QPointF, QPropertyAnimation, QRect, QRectF,
+                          Qt, QTimer, pyqtSignal)
 from PyQt5.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt5.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
                              QWidget)
@@ -74,7 +74,7 @@ MARGIN = 16       # 气泡与屏幕边界的间距
 HOLE_PAD = 12     # 光环相对浮球的额外留白
 
 
-def bubble_geometry(ball_rect, screen_rect, size=(BUBBLE_W, BUBBLE_MIN_H)):
+def bubble_geometry(ball_rect, screen_rect, size=(BUBBLE_W, BUBBLE_MIN_H), gap=GAP):
     """计算气泡位置：优先放浮球右侧，其次左侧，再上/下；并收进屏幕内。
 
     屏幕比气泡还小时先收缩气泡尺寸（保证任何分辨率下都不越界）。
@@ -85,10 +85,10 @@ def bubble_geometry(ball_rect, screen_rect, size=(BUBBLE_W, BUBBLE_MIN_H)):
     # 先按屏幕可用空间收缩尺寸（极小屏/高 DPI 缩放场景）
     bw = max(180, min(int(size[0]), s.width() - 2 * MARGIN))
     bh = max(110, min(int(size[1]), s.height() - 2 * MARGIN))
-    right = QRect(b.right() + GAP, b.center().y() - bh // 2, bw, bh)
-    left = QRect(b.left() - GAP - bw, b.center().y() - bh // 2, bw, bh)
-    below = QRect(b.center().x() - bw // 2, b.bottom() + GAP, bw, bh)
-    above = QRect(b.center().x() - bw // 2, b.top() - GAP - bh, bw, bh)
+    right = QRect(b.right() + gap, b.center().y() - bh // 2, bw, bh)
+    left = QRect(b.left() - gap - bw, b.center().y() - bh // 2, bw, bh)
+    below = QRect(b.center().x() - bw // 2, b.bottom() + gap, bw, bh)
+    above = QRect(b.center().x() - bw // 2, b.top() - gap - bh, bw, bh)
 
     def fits(r):
         return r.left() >= s.left() + MARGIN and r.right() <= s.right() - MARGIN \
@@ -108,6 +108,24 @@ def bubble_geometry(ball_rect, screen_rect, size=(BUBBLE_W, BUBBLE_MIN_H)):
 def spotlight_rect(ball_rect):
     """聚光灯高亮区域（浮球外扩一点，形成光环）"""
     return QRect(ball_rect).adjusted(-HOLE_PAD, -HOLE_PAD, HOLE_PAD, HOLE_PAD)
+
+
+def context_menu_pos(ball_rect, menu_size, screen_rect, gap=8):
+    """引导第 5 步演示菜单的位置：优先放浮球左侧，避免压住右侧气泡。
+
+    「右键 = 更多入口」这一步的气泡在浮球右侧（GAP=26），真实菜单若也从右侧弹
+    会正好盖住标题和说明。这里统一放左侧；左侧不够时再退回右侧并夹进屏幕。
+    """
+    b = QRect(ball_rect)
+    s = QRect(screen_rect)
+    mw, mh = max(1, int(menu_size[0])), max(1, int(menu_size[1]))
+    x = b.left() - gap - mw
+    if x < s.left() + MARGIN:
+        x = b.right() + gap
+    y = b.center().y() - mh // 2
+    x = max(s.left() + MARGIN, min(x, s.right() - MARGIN - mw))
+    y = max(s.top() + MARGIN, min(y, s.bottom() - MARGIN - mh))
+    return QPoint(x, y)
 
 
 class OnboardingOverlay(QWidget):
@@ -142,8 +160,8 @@ class OnboardingOverlay(QWidget):
         except Exception:  # noqa: BLE001
             self._bubble_fx = None
         self._bubble_anim = QPropertyAnimation(self._bubble, b"pos", self)
-        self._bubble_anim.setDuration(260)
-        self._bubble_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._bubble_anim.setDuration(340)
+        self._bubble_anim.setEasingCurve(QEasingCurve.OutBack)
         self._apply_step()
 
     def _on_pulse(self):
@@ -245,13 +263,14 @@ class OnboardingOverlay(QWidget):
         self._prev.setVisible(self._index > 0)
         self._next.setText("开始使用" if self._index == len(STEPS) - 1 else "下一步")
         rect, side = bubble_geometry(self._ball, self.geometry(),
-                                     (BUBBLE_W, self._bubble.sizeHint().height()))
+                                     (BUBBLE_W, self._bubble.sizeHint().height()),
+                                     gap=160 if self._index == 3 else GAP)
         self._side = side
         # 气泡：淡入 + 从下方滑入（每步都播，形成节奏感）
         try:
             self._bubble.resize(rect.size())
             start = QRect(rect)
-            start.moveTop(rect.top() + 14)
+            start.moveTop(rect.top() + 18)
             self._bubble.move(start.topLeft())
             self._bubble_anim.stop()
             self._bubble_anim.setStartValue(start.topLeft())

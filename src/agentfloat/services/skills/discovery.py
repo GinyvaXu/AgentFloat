@@ -598,3 +598,108 @@ def materialize(entry: SkillEntry, dest: str,
             fh.write(blob)
     return {"ok": True, "path": dest, "files": len(files), "commit": commit,
             "source": "github"}
+
+
+# ── skills.sh 公开榜单（HTML 解析，无需 Token）────────────────
+
+SKILLSH_VIEWS = {"all-time": "", "trending": "trending", "hot": "hot"}
+SKILLSH_LINK_RE = re.compile(
+    r'<a[^>]+href="/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)"[^>]*>(.*?)</a>',
+    re.S,
+)
+SKILLSH_NAME_RE = re.compile(r"<h3[^>]*>(.*?)</h3>", re.S)
+SKILLSH_SRC_RE = re.compile(r"<p[^>]*>\s*([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\s*</p>", re.S)
+SKILLSH_INSTALLS_RE = re.compile(
+    r'<span class="font-mono text-sm text-foreground">\s*([\d.,]+[KMB]?)\s*</span>'
+)
+SKILLSH_RANK_RE = re.compile(r'font-mono">\s*(\d+)\s*</span>')
+
+SKILLSH_CATEGORY_HINTS = (
+    ("视频与动效", ("video", "animation", "motion", "frame", "audio", "music",
+                 "slideshow", "hyperframe", "avatar", "imagegen", "image-generation")),
+    ("设计与前端", ("design", "ui-", "-ui", "ux", "frontend", "react", "next", "mobile",
+                 "ios", "css", "tailwind", "shadcn", "figma", "taste", "visual")),
+    ("数据与后端", ("database", "postgres", "prisma", "supabase", "neon", "backend",
+                 "api", "sql", "driver")),
+    ("增长与文案", ("seo", "copywriting", "marketing", "social", "twitter", "reddit",
+                 "content", "brand", "launch")),
+    ("质量与测试", ("test", "review", "debug", "audit", "security", "lint", "verify")),
+    ("企业与办公", ("azure", "lark", "feishu", "google", "microsoft", "office",
+                 "doc", "slide", "sheet", "notion")),
+    ("Agent 工作流", ("agent", "skill", "workflow", "subagent", "handoff", "plan",
+                    "grill", "brainstorm", "spec", "implement")),
+)
+
+
+def _skillsh_category(name: str, source: str) -> str:
+    text = ("%s %s" % (name or "", source or "")).lower()
+    for label, keys in SKILLSH_CATEGORY_HINTS:
+        if any(k in text for k in keys):
+            return label
+    return "其他"
+
+
+def _parse_installs(text: str) -> int:
+    raw = (text or "").strip().upper().replace(",", "")
+    if not raw:
+        return 0
+    mult = 1
+    if raw.endswith("K"):
+        mult, raw = 1000, raw[:-1]
+    elif raw.endswith("M"):
+        mult, raw = 1000000, raw[:-1]
+    elif raw.endswith("B"):
+        mult, raw = 1000000000, raw[:-1]
+    try:
+        return int(float(raw) * mult)
+    except ValueError:
+        return 0
+
+
+def fetch_skills_sh(view: str = "trending", limit: int = 60,
+                    fetcher: Optional[Fetcher] = None) -> List[Dict[str, Any]]:
+    """抓取 skills.sh 公开榜单（HTML），返回技能条目列表。
+
+    不依赖 GitHub API，也不需要 Token；仅用于“发现/榜单”展示。
+    """
+    f = fetcher or default_fetcher()
+    path = SKILLSH_VIEWS.get(str(view or "trending"), "trending")
+    url = "https://skills.sh/" + path
+    html = f.get_text(url)
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for match in SKILLSH_LINK_RE.finditer(html or ""):
+        href, block = match.group(1), match.group(2)
+        parts = href.split("/")
+        if len(parts) != 3:
+            continue
+        source = "/".join(parts[:2])
+        slug = parts[2]
+        name_m = SKILLSH_NAME_RE.search(block)
+        src_m = SKILLSH_SRC_RE.search(block)
+        if not name_m or not src_m:
+            continue
+        key = "%s/%s" % (source, slug)
+        if key in seen:
+            continue
+        seen.add(key)
+        inst = SKILLSH_INSTALLS_RE.search(block)
+        rank = SKILLSH_RANK_RE.search(block)
+        name = re.sub(r"<[^>]+>", "", name_m.group(1)).strip()
+        installs_text = inst.group(1) if inst else ""
+        out.append({
+            "id": key,
+            "name": name or slug,
+            "slug": slug,
+            "source": src_m.group(1),
+            "installs": _parse_installs(installs_text),
+            "installsText": installs_text,
+            "rank": int(rank.group(1)) if rank else len(out) + 1,
+            "category": _skillsh_category(name, source),
+            "url": "https://skills.sh/%s" % key,
+            "installUrl": "https://github.com/%s" % src_m.group(1),
+            "installCommand": "npx skills add %s" % src_m.group(1),
+        })
+        if len(out) >= max(1, int(limit or 60)):
+            break
+    return out

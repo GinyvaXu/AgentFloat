@@ -2,6 +2,7 @@
 """AgentFloat — Web 壳后端适配层（只读状态 + 命令投递，不直接触碰 Qt）"""
 import copy
 import os
+from typing import Any, Dict
 
 from agentfloat.core.autostart import is_auto_start_enabled
 from agentfloat.core.config import load_config, save_config
@@ -391,3 +392,201 @@ class WebAppHandlers(object):
 
     def open_url(self, url):
         _open_url(url)
+
+
+# ── Skills 发现（skills.sh 榜单，10 分钟缓存）────────────────
+
+_SKILLSH_CACHE: Dict[str, Any] = {}
+
+
+def skills_discover(view: str = "trending") -> Dict[str, Any]:
+    """返回 skills.sh 公开榜单；失败时返回缓存（若有）。"""
+    import time
+
+    from agentfloat.services.skills import discovery as _discovery
+
+    view = str(view or "trending").strip().lower()
+    if view not in ("all-time", "trending", "hot"):
+        view = "trending"
+    cached = _SKILLSH_CACHE.get(view)
+    now = time.time()
+    if cached and now - cached.get("ts", 0) < 600:
+        return cached["payload"]
+    try:
+        rows = _discovery.fetch_skills_sh(view=view, limit=60)
+        payload = {
+            "ok": True,
+            "source": "skills.sh",
+            "view": view,
+            "entries": rows,
+            "total": len(rows),
+        }
+    except Exception as exc:  # noqa: BLE001
+        payload = {
+            "ok": False,
+            "source": "skills.sh",
+            "view": view,
+            "entries": (cached or {}).get("payload", {}).get("entries", []),
+            "error": str(exc)[:200],
+        }
+    _SKILLSH_CACHE[view] = {"ts": now, "payload": payload}
+    return payload
+
+
+# ── Skills：启用/停用、发现详情、榜单安装（模块级，供路由调用）──────
+
+def skills_toggle(body=None):
+    from agentfloat.services.skills.report import toggle_skill
+
+    body = body or {}
+    try:
+        return toggle_skill(str(body.get("id") or ""), str(body.get("target_id") or ""),
+                            bool(body.get("enabled")))
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
+
+def skills_discover_detail(source: str = "", slug: str = ""):
+    from agentfloat.services.skills import skillsh
+
+    try:
+        return skillsh.fetch_detail(source, slug)
+    except skillsh.SkillShError as exc:
+        return {"ok": False, "error": exc.message, "code": exc.code}
+
+
+def skills_discover_install(body=None):
+    from agentfloat.services.skills import jobs
+
+    body = body or {}
+    source = str(body.get("source") or "").strip()
+    slug = str(body.get("slug") or "").strip()
+    name = str(body.get("name") or "").strip()
+    targets = body.get("targets")
+    eid = "skillssh:%s/%s" % (source, slug)
+
+    def runner(_entry_id, _targets):
+        from agentfloat.services.skills.report import install_discovered
+
+        return install_discovered(source, slug, _targets, name=name)
+
+    return jobs.start(eid, targets, runner=runner)
+
+
+def skills_adopt(body=None):
+    from agentfloat.services.skills.report import adopt_skill
+
+    body = body or {}
+    try:
+        return adopt_skill(str(body.get("id") or ""), str(body.get("target_id") or ""))
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
+
+def skills_check(body=None):
+    from agentfloat.services.skills.report import check_updates
+
+    try:
+        return check_updates()
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
+
+def integrations_status():
+    from agentfloat.services import integrations
+
+    try:
+        return integrations.status()
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc), "mcp": {}, "skills": []}
+
+
+def integrations_install(body=None):
+    from agentfloat.services import integrations
+
+    body = body or {}
+    try:
+        return integrations.install_skills(str(body.get("target") or "agents"))
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
+
+def integrations_auto(body=None):
+    from agentfloat.services import integrations
+
+    body = body or {}
+    try:
+        return integrations.auto_connect(str(body.get("target") or "agents"))
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
+
+def reveal_path(body=None):
+    """打开文件所在文件夹（仅允许用户主目录内）。"""
+    import os
+
+    body = body or {}
+    path = os.path.abspath(str(body.get("path") or ""))
+    home = os.path.abspath(os.path.expanduser("~"))
+    if not path or not os.path.exists(path):
+        return {"ok": False, "error": "路径不存在"}
+    folder = path if os.path.isdir(path) else os.path.dirname(path)
+    if os.path.commonpath([home, folder]) != home:
+        return {"ok": False, "error": "不允许打开该路径"}
+    try:
+        os.startfile(folder)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "path": folder}
+
+
+def skills_update(body=None):
+    from agentfloat.services.skills import jobs
+
+    body = body or {}
+    eid = str(body.get("id") or "")
+    targets = body.get("targets")
+
+    def runner(_entry_id, _targets):
+        from agentfloat.services.skills.report import update_skill
+
+        return update_skill(eid, _targets)
+
+    return jobs.start(eid, targets, runner=runner)
+
+
+def skills_bundle(entry_id: str = "", target_id: str = ""):
+    from agentfloat.services.skills.report import inspect_bundle
+
+    try:
+        return inspect_bundle(entry_id, target_id)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
+
+def skills_backups():
+    from agentfloat.services.skills.report import list_backups
+
+    try:
+        return list_backups()
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc), "backups": []}
+
+
+def skills_restore(body=None):
+    from agentfloat.services.skills.report import restore_backup
+
+    body = body or {}
+    try:
+        return restore_backup(str(body.get("backup") or ""), str(body.get("target_id") or ""))
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+
+
+def skills_diff(entry_id: str = ""):
+    from agentfloat.services.skills.report import update_diff
+
+    try:
+        return update_diff(entry_id)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}

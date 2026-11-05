@@ -484,12 +484,34 @@ def _build_summary(result):
     return "\n".join(lines)
 
 
+def _run_llm_chat(config, prompt, purpose):
+    """通过「AI 接入」当前供应商执行一次性任务；返回 (文本, 错误)。"""
+    from agentfloat.services import llm
+    try:
+        result = llm.chat(
+            config,
+            [{"role": "system", "content": "你是 AgentFloat 的内置助手，只按用户要求输出结果。"},
+             {"role": "user", "content": prompt}],
+            purpose=purpose, timeout=SERVICE_TIMEOUT_SECONDS)
+        return result.get("content") or "", None
+    except llm.LLMError as exc:
+        return None, str(exc)
+    except Exception as exc:  # noqa: BLE001
+        return None, "AI 接入调用异常：%s" % exc
+
+
 # ── 服务主流程 ─────────────────────────────────────
 def run_services(config, agent, tasks=("api", "skills"), only_skills=None):
-    """同步执行全部服务；返回结构化结果 dict"""
+    """同步执行全部服务；返回结构化结果 dict
+
+    v3.28：若「AI 接入」配置了当前供应商，Skills 翻译优先走该供应商
+    （purpose=translate）；未配置时仍复用原 CLI Agent 通道。
+    """
     result = {"ok": False, "agent_name": (agent or {}).get("name") or "Agent"}
-    if not agent:
-        result["error"] = "未配置主 Agent，请先在「设置 → Agent 管理」中配置。"
+    from agentfloat.services import llm as llm_service
+    use_llm = llm_service.has_active_provider(config)
+    if not agent and not use_llm:
+        result["error"] = "未配置主 Agent，也没有可用的「AI 接入」供应商，请先配置其中之一。"
         return result
     report_lines = ["AgentFloat 本地 AI 服务报告",
                     "Agent: %s" % result["agent_name"],
@@ -524,15 +546,36 @@ def run_services(config, agent, tasks=("api", "skills"), only_skills=None):
             prompt = _skills_task_prompt(missing)
         else:
             continue
-        logger.info("[%s] 正在调用本地 Agent 执行任务…", task)
-        out, err = _run_headless(agent, prompt, cancel=cancel)
+        if task == "api" and not agent:
+            msg = "未配置主 Agent，跳过 API 配置修正（该任务仍使用本地 CLI Agent）"
+            logger.info("[api] %s", msg)
+            result["api"] = {"changed": 0, "notes": [msg], "api_config": None}
+            result.setdefault("warnings", []).append(msg)
+            report_lines.append("[api] %s" % msg)
+            continue
+        if task == "skills" and use_llm:
+            logger.info("[skills] 正在调用「AI 接入」当前供应商执行翻译…")
+            out, err = _run_llm_chat(config, prompt, "translate")
+            source_label = "AI 接入"
+            if out is None and agent:
+                # 4.0 回归面：LLM 通道坏了必须回退原有 CLI Agent，不能整体报错
+                msg = "AI 接入翻译失败（%s），已回退本地 Agent" % (err or "无输出")
+                logger.warning("[skills] %s", msg)
+                result.setdefault("warnings", []).append(msg)
+                report_lines.append("[skills] %s" % msg)
+                out, err = _run_headless(agent, prompt, cancel=cancel)
+                source_label = "Agent（AI 接入回退）"
+        else:
+            logger.info("[%s] 正在调用本地 Agent 执行任务…", task)
+            out, err = _run_headless(agent, prompt, cancel=cancel)
+            source_label = "Agent"
         if out is None:
             result["error"] = "%s 任务失败：%s" % (task, err)
             report_lines.append("[%s] 执行失败：%s" % (task, err))
             result["report"] = "\n".join(report_lines)
             _save_report(result["report"])
             return result
-        report_lines.append("[%s] Agent 原始输出长度 %d 字符" % (task, len(out)))
+        report_lines.append("[%s] %s 原始输出长度 %d 字符" % (task, source_label, len(out)))
         try:
             data = extract_json(out)
         except Exception as e:

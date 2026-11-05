@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>细节优化 · 方案预览</title>
+<style>
+  :root{
+    --bg:#0D0D0F; --panel:#1B1B1F; --card:#212127; --line:rgba(255,255,255,.09);
+    --text:#F2F2F5; --text2:#A9A9B2; --hint:#6F6F78; --accent:#0A84FF; --ok:#30D158; --warn:#FF9F0A;
+    --r:10px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0B0B0D;color:var(--text);font:13px/1.55 "Segoe UI","Microsoft YaHei",sans-serif;padding:28px 32px 60px}
+  h1{font-size:16px;font-weight:650;letter-spacing:.2px}
+  .sub{color:var(--text2);font-size:12px;margin:4px 0 24px}
+  .grid{display:grid;grid-template-columns:1.15fr .85fr;gap:22px;align-items:start}
+  .box{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .box h2{font-size:13px;font-weight:650;margin-bottom:2px}
+  .box .desc{font-size:11.5px;color:var(--hint);margin-bottom:14px}
+  .stage{position:relative;height:390px;border-radius:12px;background:
+    radial-gradient(600px 300px at 30% 20%, rgba(10,132,255,.07), transparent 60%), #111114;
+    border:1px solid var(--line);overflow:hidden}
+  .fake-desktop{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:32px 32px}
+  .ball{position:absolute;left:64px;top:160px;width:52px;height:52px;border-radius:50%;
+    background:linear-gradient(135deg,#0A84FF,#AF52DE);box-shadow:0 8px 30px rgba(10,132,255,.35);}
+  .ball:after{content:"";position:absolute;inset:16px;border-radius:50%;background:rgba(255,255,255,.22)}
+  .tab{position:absolute;left:116px;top:176px;height:20px;width:7px;border-radius:0 6px 6px 0;
+    background:linear-gradient(180deg,#3A3A40,#26262B);border:1px solid rgba(255,255,255,.10);border-left:none;
+    cursor:pointer;transition:width .18s cubic-bezier(.2,.9,.2,1),height .18s,top .18s,background .18s;display:flex;align-items:center;justify-content:center}
+  .tab:hover{width:11px;background:linear-gradient(180deg,#4A4A52,#2E2E34)}
+  .tab .n{font-size:9px;color:#C9C9D1;opacity:0;transition:opacity .15s}
+  .tab:hover .n,.tab.has .n{opacity:1}
+  .tab.has{width:9px;background:linear-gradient(180deg,#5B6470,#2E3238)}
+  .panel{position:absolute;left:128px;top:86px;width:0;opacity:0;overflow:hidden;
+    background:rgba(27,27,31,.97);border:1px solid var(--line);border-radius:12px;
+    box-shadow:0 18px 50px rgba(0,0,0,.45);transform-origin:left center;
+    transition:width .28s cubic-bezier(.2,.9,.2,1),opacity .18s;backdrop-filter:blur(14px)}
+  .panel.open{width:300px;opacity:1}
+  .panel-in{width:300px;padding:10px 10px 8px}
+  .ph{display:flex;align-items:center;gap:6px;padding:0 2px 8px;border-bottom:1px solid var(--line);margin-bottom:6px}
+  .ph .t{font-size:10.5px;font-weight:650;color:var(--text2);letter-spacing:.04em}
+  .ph .sp{flex:1}
+  .mini{height:20px;padding:0 7px;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--hint);font-size:10.5px;cursor:pointer}
+  .mini:hover{background:rgba(255,255,255,.06);color:var(--text)}
+  .row{display:flex;align-items:center;gap:9px;padding:7px 6px;border-radius:8px;cursor:pointer}
+  .row:hover{background:rgba(10,132,255,.08)}
+  .row.sel{background:rgba(10,132,255,.13)}
+  .dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--hint)}
+  .dot.run{background:#8E8E96}.dot.warn{background:var(--warn)}.dot.err{background:#FF453A}
+  .row .body{flex:1;min-width:0}
+  .row .name{font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row .meta{font-size:10px;color:var(--hint);margin-top:1px}
+  .segs{display:flex;gap:2px;margin-top:4px}
+  .seg{height:3px;flex:1;border-radius:2px;background:rgba(255,255,255,.10)}
+  .seg.on{background:var(--accent)}.seg.cur{background:rgba(10,132,255,.55)}
+  .row .eta{font-size:9.5px;color:var(--hint);font-variant-numeric:tabular-nums}
+  .panel.compact .row{padding:5px 6px}
+  .panel.compact .segs,.panel.compact .meta{display:none}
+  .panel.compact .row .eta{display:block}
+  .detail{display:none;margin:2px 6px 8px;padding:8px 9px;border-radius:8px;background:rgba(255,255,255,.035)}
+  .panel.open .detail.show{display:block}
+  .detail .step{display:flex;gap:8px;align-items:center;font-size:10.5px;color:var(--text2);padding:2px 0}
+  .detail .ic{width:12px;color:var(--hint)}
+  .detail .acts{display:flex;gap:6px;margin-top:7px}
+  .hintline{position:absolute;left:18px;bottom:14px;font-size:10.5px;color:var(--hint)}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:10.5px;color:var(--hint);margin-top:12px}
+  .legend b{color:var(--text2);font-weight:600}
+
+  /* LLM 设置 */
+  .field{display:grid;grid-template-columns:86px 1fr;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}
+  .field:last-child{border-bottom:none}
+  .field label{font-size:11.5px;color:var(--text2)}
+  .inp{height:30px;border-radius:7px;border:1px solid var(--line);background:#151518;color:var(--text);
+    padding:0 9px;font-size:11.5px;width:100%}
+  .inp.mono{font-family:Consolas,monospace}
+  .row2{display:flex;gap:7px}
+  .chip{font-size:9.5px;padding:2px 7px;border-radius:999px;border:1px solid var(--line);color:var(--text2)}
+  .chip.ok{color:var(--ok);border-color:rgba(48,209,88,.35);background:rgba(48,209,88,.08)}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+  .stat{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .stat .k{font-size:10px;color:var(--hint)}.stat .v{font-size:15px;font-weight:650;margin-top:2px}
+  .stat .v small{font-size:10px;color:var(--hint);font-weight:400}
+
+  /* 绿点 */
+  .dots{display:flex;gap:26px;align-items:center;margin-top:8px;flex-wrap:wrap}
+  .dotdemo{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text2)}
+  .gd{position:relative;width:9px;height:9px;border-radius:50%;background:var(--ok)}
+  .gd.pulse:after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1px solid rgba(48,209,88,.45);animation:pulse 1.8s ease-out infinite}
+  @keyframes pulse{0%{transform:scale(.7);opacity:.9}100%{transform:scale(1.6);opacity:0}}
+  .gd.radar:before{content:"";position:absolute;inset:-6px;border-radius:50%;background:conic-gradient(from 0deg,transparent 0 70%,rgba(48,209,88,.55) 85%,transparent 100%);animation:spin 2.4s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .gd.aurora{box-shadow:0 0 0 2px rgba(48,209,88,.18),0 0 10px rgba(48,209,88,.65);background:linear-gradient(135deg,#30D158,#6EF7A0)}
+</style>
+</head>
+<body>
+  <h1>细节优化 · 方案预览</h1>
+  <div class="sub">进度贴边条 / LLM API 接入 / 服务运行绿点。点击左侧灰色小条展开面板，试试「简略」「最小化」。</div>
+
+  <div class="grid">
+    <div class="box">
+      <h2>① 进度贴边条（默认收起）</h2>
+      <div class="desc">默认是一条贴浮球右侧的灰色小弧条；有任务才出现，悬停变宽并显示数量，点击向侧面弹性展开。</div>
+      <div class="stage">
+        <div class="fake-desktop"></div>
+        <div class="ball"></div>
+        <div class="tab has" id="tab" title="3 个任务"><span class="n">3</span></div>
+        <div class="panel" id="panel">
+          <div class="panel-in">
+            <div class="ph">
+              <span class="t">后台任务 · 3</span><span class="sp"></span>
+              <button class="mini" id="compact">简略</button>
+              <button class="mini" id="minimize" title="最小化">—</button>
+              <button class="mini" title="关闭">×</button>
+            </div>
+            <div class="row warn sel" data-detail="d1">
+              <span class="dot warn"></span>
+              <div class="body"><div class="name">安装 find-skills</div><div class="meta">等待确认 · 覆盖同名 Skill？</div>
+                <div class="segs"><i class="seg on"></i><i class="seg"></i><i class="seg"></i><i class="seg"></i><i class="seg"></i><i class="seg"></i></div>
+              </div><span class="eta">0/3</span>
+            </div>
+            <div class="detail show" id="d1">
+              <div class="step"><span class="ic">✓</span> 准备源</div>
+              <div class="step"><span class="ic">▸</span> 下载仓库 · 进行中</div>
+              <div class="step"><span class="ic">○</span> 部署到 Agent</div>
+              <div class="acts"><button class="mini" style="background:rgba(10,132,255,.22);color:#fff">继续</button><button class="mini">中断</button><button class="mini">驾驶舱</button></div>
+            </div>
+            <div class="row err">
+              <span class="dot err"></span>
+              <div class="body"><div class="name">生成早报</div><div class="meta">失败 · GitHub 超时</div>
+                <div class="segs"><i class="seg on"></i><i class="seg on"></i><i class="seg"></i><i class="seg"></i><i class="seg"></i><i class="seg"></i></div>
+              </div><span class="eta">2/6</span>
+            </div>
+            <div class="row">
+              <span class="dot run"></span>
+              <div class="body"><div class="name">D 线 M1 进度中枢</div><div class="meta">雷达条 · 已用 18m</div>
+                <div class="segs"><i class="seg on"></i><i class="seg on"></i><i class="seg cur"></i><i class="seg"></i><i class="seg"></i><i class="seg"></i></div>
+              </div><span class="eta">~18m</span>
+            </div>
+          </div>
+        </div>
+        <div class="hintline">默认：灰色小弧条 · 有任务才出现 · 无任务自动消失</div>
+      </div>
+      <div class="legend"><span><b>简略</b>：只留名称 + 进度</span><span><b>最小化</b>：收回小条</span><span><b>关闭</b>：本组任务不再弹出</span></div>
+    </div>
+
+    <div class="box">
+      <h2>② 接入 LLM API（AI 快报 / Skills 翻译）</h2>
+      <div class="desc">一处配置，两个用途共用；保存前可测试；显示 token 用量。</div>
+      <div class="field"><label>服务商</label><select class="inp"><option>OpenAI 兼容</option><option>DeepSeek</option><option>OpenRouter</option><option>自定义</option></select></div>
+      <div class="field"><label>Base URL</label><input class="inp mono" value="https://api.deepseek.com/v1"></div>
+      <div class="field"><label>模型</label><input class="inp mono" value="deepseek-chat"></div>
+      <div class="field"><label>API Key</label><div class="row2"><input class="inp mono" type="password" value="sk-••••••••••••••••"><button class="mini" style="border:1px solid var(--line);height:30px;padding:0 10px">测试</button></div></div>
+      <div class="field"><label>用途</label><div class="row2"><span class="chip ok">AI 快报</span><span class="chip ok">Skills 翻译</span><span class="chip">余额监控</span></div></div>
+      <div class="stats">
+        <div class="stat"><div class="k">今日 tokens</div><div class="v">42.8K <small>≈ ¥0.06</small></div></div>
+        <div class="stat"><div class="k">本月 tokens</div><div class="v">1.24M <small>≈ ¥1.74</small></div></div>
+      </div>
+      <div class="legend" style="margin-top:12px"><span>请求失败不扣配额；超限自动降级为本地规则</span></div>
+
+      <h2 style="margin-top:22px">③ 服务运行绿点</h2>
+      <div class="desc">同一个“运行中”状态，三种科技感强度。</div>
+      <div class="dots">
+        <div class="dotdemo"><span class="gd pulse"></span>呼吸环</div>
+        <div class="dotdemo"><span class="gd radar"></span>雷达扫描</div>
+        <div class="dotdemo"><span class="gd aurora"></span>极光微光</div>
+      </div>
+      <div class="legend"><span>推荐：<b>呼吸环</b>（低干扰）或 <b>极光微光</b>（更强科技感）</span></div>
+    </div>
+  </div>
+
+<script>
+  const tab = document.getElementById('tab');
+  const panel = document.getElementById('panel');
+  tab.addEventListener('click', () => {
+    panel.classList.add('open');
+    tab.classList.remove('has');
+  });
+  document.getElementById('minimize').addEventListener('click', (e) => {
+    e.stopPropagation();
+    panel.classList.remove('open');
+    tab.classList.add('has');
+  });
+  document.getElementById('compact').addEventListener('click', (e) => {
+    e.stopPropagation();
+    panel.classList.toggle('compact');
+    e.target.textContent = panel.classList.contains('compact') ? '详细' : '简略';
+  });
+  document.querySelectorAll('.row[data-detail]').forEach(row => {
+    row.addEventListener('click', () => {
+      const d = document.getElementById(row.dataset.detail);
+      d.classList.toggle('show');
+    });
+  });
+</script>
+</body>
+</html>

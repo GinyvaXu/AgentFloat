@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import json
+import copy
+import logging
 import os
 import secrets
 import socket
@@ -221,6 +223,13 @@ def create_app(bridge, handlers):
         if not isinstance(cfg, dict):
             return JSONResponse({"error": "配置格式错误"}, status_code=400)
         changed_keys = body.get("changed_keys") or []
+        # LLM 页的写操作走 /api/llm/*，不会回写前端 cfg；设置页保存的是旧快照。
+        # 未声明改动 llm 时保留磁盘（内存）里的现有 llm，避免静默回滚供应商 / Key。
+        if "llm" not in changed_keys:
+            current = handlers.get_config() or {}
+            if isinstance(current.get("llm"), dict):
+                cfg = dict(cfg)
+                cfg["llm"] = copy.deepcopy(current["llm"])
         handlers.save_config(cfg)                           # 先原子落盘（兜底）
         applied = handlers.apply_config(cfg, changed_keys)  # 同步应用并回读（PATCH 3.1.1）
         return {"ok": True, "config": applied}
@@ -336,9 +345,241 @@ def create_app(bridge, handlers):
         bridge.command("restart_api_monitor")
         return {"ok": True}
 
+    # ── v3.28：统一 AI 模型接入 / 余额 / Token 统计 ──────────────
+    def _llm_config():
+        from agentfloat.services import llm
+        cfg = handlers.get_config()
+        llm.normalize_config(cfg)
+        return cfg
+
+    def _llm_persist(cfg):
+        """保存并同步到 Qt 内存配置（llm 变更也要让主进程看到）。"""
+        handlers.save_config(cfg)
+        try:
+            applied = handlers.apply_config(cfg, ["llm"])
+            return applied if isinstance(applied, dict) else cfg
+        except Exception as exc:  # noqa: BLE001
+            # 单元测试 / 无 Qt 主循环场景：落盘成功即可
+            logging.getLogger("AgentFloat.WebServer").warning(
+                "LLM 配置同步到 Qt 失败（已落盘）：%s", exc)
+            return cfg
+
+    def _llm_error(exc, status_code=400):
+        return JSONResponse({"ok": False, "error": str(exc)[:400]},
+                            status_code=status_code)
+
+    @api.get("/llm/providers")
+    def llm_providers(refresh: int = 0):
+        from agentfloat.services import llm
+        try:
+            cfg = _llm_config()
+            llm_cfg = cfg.get("llm") or {}
+            all_providers = llm.list_providers(cfg)
+            enabled = [p for p in all_providers if p.get("enabled", True)]
+            balances = llm.balances_for(cfg, force=bool(refresh))
+            usage = llm.summarize_usage()
+            today_by_provider = usage.get("by_provider_today") or {}
+            items = []
+            for provider in all_providers:
+                pid = str(provider.get("id") or "")
+                today = today_by_provider.get(pid) or {}
+                item = llm.mask_provider(provider)
+                item["balance"] = balances.get(pid) or {
+                    "ok": False, "kind": provider.get("kind") or "money",
+                    "error": "尚未刷新",
+                }
+                item["today_tokens"] = int(today.get("total_tokens") or 0)
+                item["today_calls"] = int(today.get("calls") or 0)
+                items.append(item)
+            totals = llm.summarize_balances(all_providers, balances)
+            totals.update({
+                "today_tokens": int((usage.get("today") or {}).get("total_tokens") or 0),
+                "today_calls": int((usage.get("today") or {}).get("calls") or 0),
+                "today_estimated_calls": int(
+                    (usage.get("today") or {}).get("estimated_calls") or 0),
+                "month_tokens": int((usage.get("month") or {}).get("total_tokens") or 0),
+            })
+            return {
+                "ok": True,
+                "active": llm_cfg.get("active") or "",
+                "providers": items,
+                "enabled_count": len(enabled),
+                "presets": copy.deepcopy(llm.PRESETS),
+                "totals": totals,
+                "usage": usage,
+            }
+        except Exception as exc:  # noqa: BLE001
+            return _llm_error("读取 AI 供应商失败：%s" % exc, 500)
+
+    @api.post("/llm/providers")
+    def llm_provider_save(body: dict | None = None):
+        from agentfloat.services import llm
+        try:
+            cfg = _llm_config()
+            body = body or {}
+            data = body.get("provider") if isinstance(body.get("provider"), dict) else body
+            provider = llm.upsert_provider(cfg, data)
+            _llm_persist(cfg)
+            return {"ok": True, "provider": llm.mask_provider(provider),
+                    "active": (cfg.get("llm") or {}).get("active") or ""}
+        except llm.LLMError as exc:
+            return _llm_error(exc)
+        except Exception as exc:  # noqa: BLE001
+            return _llm_error("保存供应商失败：%s" % exc, 500)
+
+    @api.post("/llm/providers/{provider_id}/activate")
+    def llm_provider_activate(provider_id: str):
+        from agentfloat.services import llm
+        try:
+            cfg = _llm_config()
+            provider = llm.activate_provider(cfg, provider_id)
+            _llm_persist(cfg)
+            return {"ok": True, "active": provider.get("id"),
+                    "provider": llm.mask_provider(provider)}
+        except llm.LLMError as exc:
+            return _llm_error(exc)
+        except Exception as exc:  # noqa: BLE001
+            return _llm_error("切换供应商失败：%s" % exc, 500)
+
+    @api.post("/llm/providers/{provider_id}/delete")
+    def llm_provider_delete(provider_id: str):
+        from agentfloat.services import llm
+        try:
+            cfg = _llm_config()
+            if not llm.delete_provider(cfg, provider_id):
+                return _llm_error("供应商不存在：%s" % provider_id, 404)
+            _llm_persist(cfg)
+            return {"ok": True, "active": (cfg.get("llm") or {}).get("active") or ""}
+        except Exception as exc:  # noqa: BLE001
+            return _llm_error("删除供应商失败：%s" % exc, 500)
+
+    @api.delete("/llm/providers/{provider_id}")
+    def llm_provider_delete_rest(provider_id: str):
+        return llm_provider_delete(provider_id)
+
+    @api.post("/llm/test")
+    def llm_test(body: dict | None = None):
+        from agentfloat.services import llm
+        try:
+            cfg = _llm_config()
+            body = body or {}
+            candidate = body.get("provider") if isinstance(body.get("provider"), dict) else None
+            result = llm.test_provider(cfg, provider=candidate,
+                                       provider_id=str(body.get("id") or ""))
+            return result
+        except llm.LLMError as exc:
+            return _llm_error(exc)
+        except Exception as exc:  # noqa: BLE001
+            return _llm_error("测试失败：%s" % exc, 500)
+
+    @api.post("/llm/refresh")
+    def llm_refresh():
+        from agentfloat.services import llm
+        llm.clear_balance_cache()
+        return {"ok": True}
+
+    @api.get("/llm/usage")
+    def llm_usage():
+        from agentfloat.services import llm
+        try:
+            summary = llm.summarize_usage()
+            return {"ok": True, **summary}
+        except Exception as exc:  # noqa: BLE001
+            return _llm_error("读取 Token 统计失败：%s" % exc, 500)
+
     @api.get("/news/state")
     def get_news_state(date: str | None = None):
         return handlers.get_news_state(date)
+
+    @api.get("/skills/discover/detail")
+    def skills_discover_detail(source: str = "", slug: str = ""):
+        from agentfloat.webshell.handlers import skills_discover_detail as _detail
+
+        return _detail(source, slug)
+
+    @api.post("/skills/discover/install")
+    def skills_discover_install(body: dict | None = None):
+        from agentfloat.webshell.handlers import skills_discover_install as _install
+
+        return _install(body)
+
+    @api.post("/skills/adopt")
+    def skills_adopt(body: dict | None = None):
+        from agentfloat.webshell.handlers import skills_adopt as _adopt
+
+        return _adopt(body)
+
+    @api.post("/skills/update")
+    def skills_update(body: dict | None = None):
+        from agentfloat.webshell.handlers import skills_update as _update
+
+        return _update(body)
+
+    @api.post("/skills/check")
+    def skills_check(body: dict | None = None):
+        from agentfloat.webshell.handlers import skills_check as _check
+
+        return _check(body)
+
+    @api.post("/skills/toggle")
+    def skills_toggle(body: dict | None = None):
+        from agentfloat.webshell.handlers import skills_toggle as _toggle
+
+        return _toggle(body)
+
+    @api.get("/skills/discover")
+    def skills_discover(view: str = "trending"):
+        from agentfloat.webshell.handlers import skills_discover as _discover
+
+        return _discover(view)
+
+    @api.get("/integrations")
+    def integrations_status():
+        from agentfloat.webshell.handlers import integrations_status as _status
+
+        return _status()
+
+    @api.post("/integrations/install")
+    def integrations_install(body: dict | None = None):
+        from agentfloat.webshell.handlers import integrations_install as _install
+
+        return _install(body)
+
+    @api.post("/integrations/auto")
+    def integrations_auto(body: dict | None = None):
+        from agentfloat.webshell.handlers import integrations_auto as _auto
+
+        return _auto(body)
+
+    @api.post("/reveal")
+    def reveal_path(body: dict | None = None):
+        from agentfloat.webshell.handlers import reveal_path as _reveal
+
+        return _reveal(body)
+
+    @api.get("/skills/bundle")
+    def skills_bundle(id: str = "", target: str = ""):
+        from agentfloat.webshell.handlers import skills_bundle as _bundle
+
+        return _bundle(id, target)
+
+    @api.get("/skills/diff")
+    def skills_diff(id: str = ""):
+        from agentfloat.webshell.handlers import skills_diff as _diff
+
+        return _diff(id)
+
+    @api.get("/skills/backups")
+    def skills_backups():
+        from agentfloat.webshell.handlers import skills_backups as _backups
+
+        return _backups()
+
+    @api.post("/skills/restore")
+    def skills_restore(body: dict | None = None):
+        from agentfloat.webshell.handlers import skills_restore as _restore
+
+        return _restore(body)
 
     @api.get("/skills/workshop")
     def skills_workshop(tab: str = "installed", query: str = "", category: str = ""):

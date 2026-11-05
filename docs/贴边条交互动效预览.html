@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>贴边条 · 交互动效预览</title>
+<style>
+  :root{
+    --bg:#0D0D0F;--panel:#1B1B1F;--card:#212127;--line:rgba(255,255,255,.09);
+    --text:#F2F2F5;--text2:#A9A9B2;--hint:#6F6F78;--accent:#0A84FF;--ok:#30D158;--warn:#FF9F0A;--err:#FF453A;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0B0B0D;color:var(--text);font:13px/1.55 "Segoe UI","Microsoft YaHei",sans-serif;padding:26px 30px 50px}
+  h1{font-size:15px;font-weight:650}.sub{color:var(--text2);font-size:12px;margin:4px 0 20px}
+  .stage{position:relative;height:460px;border:1px solid var(--line);border-radius:14px;overflow:hidden;
+    background:radial-gradient(700px 340px at 25% 20%,rgba(10,132,255,.08),transparent 60%),#111114}
+  .fake{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:34px 34px}
+  .anchor{position:absolute;left:150px;top:200px}
+  .ball{width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#0A84FF,#AF52DE);
+    box-shadow:0 8px 30px rgba(10,132,255,.35);position:relative}
+  .ball:after{content:"";position:absolute;inset:16px;border-radius:50%;background:rgba(255,255,255,.22)}
+
+  .tab{position:absolute;left:58px;top:4px;width:16px;height:44px;border-radius:0 8px 8px 0;
+    background:linear-gradient(180deg,#50505A 0%,#2D2D34 100%);border:1px solid rgba(255,255,255,.18);
+    border-top:2px solid rgba(10,132,255,.9);border-radius:8px;color:#E8E8EE;font-size:9px;font-weight:700;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;
+    transition:width .14s cubic-bezier(.2,.9,.2,1),opacity .18s,background .12s;z-index:3}
+  .tab:hover{width:20px;background:linear-gradient(180deg,#5E5E69,#34343B)}
+  .tab .dots{font-size:10px;line-height:7px;letter-spacing:0}
+  .tab .count{font-size:9px}
+
+
+  .dotbtn{position:absolute;left:58px;top:14px;width:20px;height:20px;border-radius:50%;
+    background:linear-gradient(135deg,#4A4A54,#26262C);border:1px solid rgba(255,255,255,.28);
+    box-shadow:0 2px 10px rgba(0,0,0,.35),0 0 0 2px rgba(10,132,255,.12);
+    color:#E8E8EE;font-size:9px;font-weight:700;display:none;align-items:center;justify-content:center;
+    cursor:pointer;z-index:6}
+  .dotbtn.show{display:flex;animation:dotIn .22s cubic-bezier(.2,1.3,.3,1)}
+  @keyframes dotIn{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
+
+  .panel{position:absolute;left:74px;top:-8px;width:0;height:0;opacity:0;overflow:hidden;z-index:4;
+    background:rgba(27,27,31,.97);border:1px solid var(--line);border-radius:12px;
+    box-shadow:0 18px 50px rgba(0,0,0,.5);backdrop-filter:blur(14px);
+    transition:width .32s cubic-bezier(.2,1.18,.3,1),opacity .16s ease-out,height .24s cubic-bezier(.2,1,.3,1),transform .32s cubic-bezier(.2,1.18,.3,1);transform:scale(.97);transform-origin:left center}
+  .panel.open{width:300px;height:auto;opacity:1;transform:scale(1)}
+  .pin{width:300px;padding:10px 10px 8px}
+  .head{display:flex;align-items:center;gap:6px;padding:0 2px 8px;border-bottom:1px solid var(--line);margin-bottom:6px}
+  .head .t{font-size:10.5px;font-weight:650;color:var(--text2);letter-spacing:.04em}
+  .head .sp{flex:1}
+  .mini{height:20px;padding:0 7px;border-radius:6px;border:1px solid transparent;background:transparent;
+    color:var(--hint);font-size:10.5px;cursor:pointer}
+  .mini:hover{background:rgba(255,255,255,.06);color:var(--text)}
+
+  .row{position:relative;display:flex;gap:9px;align-items:flex-start;padding:8px 6px;border-radius:8px;
+    cursor:pointer;opacity:0;transform:translateY(6px);
+    transition:opacity .18s ease,transform .18s cubic-bezier(.2,.8,.2,1),background .12s}
+  .panel.open .row{opacity:1;transform:none}
+  .panel.open .row:nth-child(2){transition-delay:.035s}
+  .panel.open .row:nth-child(3){transition-delay:.07s}
+  .panel.open .row:nth-child(4){transition-delay:.105s}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+  .row:hover{background:rgba(10,132,255,.08)}
+  .row.sel{background:rgba(10,132,255,.13)}
+  .dot{width:7px;height:7px;border-radius:50%;flex:none;margin-top:5px;background:#8E8E96}
+  .dot.warn{background:var(--warn);box-shadow:0 0 6px rgba(255,159,10,.55)}
+  .dot.err{background:var(--err)}
+  .body{flex:1;min-width:0}
+  .name{font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .meta{font-size:10px;color:var(--hint);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .segs{display:flex;gap:2px;margin-top:5px}
+  .seg{height:3px;flex:1;border-radius:2px;background:rgba(255,255,255,.10)}
+  .seg.on{background:var(--accent)}
+  .seg.cur{background:rgba(10,132,255,.55)}
+  .eta{font-size:9.5px;color:var(--hint);font-variant-numeric:tabular-nums;margin-top:2px}
+  .quick{position:absolute;right:6px;top:6px;display:none;gap:4px}
+  .row:hover .quick{display:flex}
+  .quick button{border:none;background:rgba(255,255,255,.08);color:#D8D8DF;border-radius:5px;
+    font-size:9.5px;padding:2px 6px;cursor:pointer}
+  .quick button:hover{background:rgba(10,132,255,.28)}
+
+  .detail{display:none;margin:0 6px 6px 22px;padding:7px 9px;border-radius:8px;background:rgba(255,255,255,.035)}
+  .detail.show{display:block}
+  .step{display:flex;gap:7px;align-items:center;font-size:10.5px;color:var(--text2);padding:2px 0}
+  .step .ic{width:12px;color:var(--hint)}
+  .step .t{flex:1}.step .dur{color:var(--hint);font-size:9.5px}
+  .detail .acts{display:flex;gap:6px;margin-top:6px}
+  .detail .acts button{border:none;border-radius:5px;font-size:10px;padding:3px 9px;cursor:pointer;
+    background:rgba(10,132,255,.22);color:#fff}
+  .detail .acts button.ghost{background:rgba(255,255,255,.07);color:var(--text2)}
+
+  .panel.compact .row{padding:6px}
+  .panel.compact .segs,.panel.compact .meta,.panel.compact .eta{display:none}
+  .foot{display:flex;gap:6px;padding:7px 2px 0;border-top:1px solid var(--line);margin-top:4px}
+  .foot button{flex:1;height:24px;border:1px solid var(--line);border-radius:6px;background:transparent;
+    color:var(--text2);font-size:10px;cursor:pointer}
+  .foot button:hover{background:rgba(255,255,255,.06);color:var(--text)}
+  .hintbar{position:absolute;left:16px;bottom:14px;font-size:10.5px;color:var(--hint)}
+  .reset{position:absolute;right:14px;bottom:12px;height:26px;padding:0 10px;border-radius:7px;
+    border:1px solid var(--line);background:transparent;color:var(--text2);font-size:10.5px;cursor:pointer}
+  .reset:hover{background:rgba(255,255,255,.06)}
+</style>
+</head>
+<body>
+  <h1>贴边条 · 交互动效预览</h1>
+  <div class="sub">点击灰色竖条展开。试试悬停行、点行展开步骤、头部「简略 / 最小化 / ×」。</div>
+
+  <div class="stage">
+    <div class="fake"></div>
+    <div class="anchor">
+      <div class="ball" id="ball"></div>
+      <div class="tab" id="tab" title="3 个后台任务">
+        <span class="dots">•••</span><span class="count">3</span>
+      </div>
+      <div class="panel" id="panel">
+        <div class="pin">
+          <div class="head">
+            <span class="t">后台任务 · 3</span><span class="sp"></span>
+            <button class="mini" id="compact">简略</button>
+            <button class="mini" id="minimize">—</button>
+          </div>
+
+          <div class="row warn" data-detail="d1">
+            <span class="dot warn"></span>
+            <div class="body">
+              <div class="name">安装 find-skills</div>
+              <div class="meta">需要确认：覆盖同名 Skill？</div>
+              <div class="segs"><i class="seg on"></i><i class="seg"></i><i class="seg"></i><i class="seg"></i><i class="seg"></i><i class="seg"></i></div>
+            </div>
+            <div class="eta">0/3</div>
+            <div class="quick"><button>去处理</button></div>
+          </div>
+          <div class="detail" id="d1">
+            <div class="step"><span class="ic">✓</span><span class="t">准备源</span><span class="dur">2s</span></div>
+            <div class="step"><span class="ic">▸</span><span class="t">下载仓库</span><span class="dur">进行中</span></div>
+            <div class="step"><span class="ic">○</span><span class="t">部署到 Agent</span><span class="dur">—</span></div>
+            <div class="acts"><button>继续</button><button class="ghost">中断</button><button class="ghost">驾驶舱</button></div>
+          </div>
+
+          <div class="row err" data-detail="d2">
+            <span class="dot err"></span>
+            <div class="body">
+              <div class="name">生成早报</div>
+              <div class="meta">失败：GitHub 超时</div>
+              <div class="segs"><i class="seg on"></i><i class="seg on"></i><i class="seg"></i><i class="seg"></i><i class="seg"></i><i class="seg"></i></div>
+            </div>
+            <div class="eta">2/6</div>
+            <div class="quick"><button>重试</button></div>
+          </div>
+          <div class="detail" id="d2">
+            <div class="step"><span class="ic">✓</span><span class="t">抓取源</span><span class="dur">18s</span></div>
+            <div class="step"><span class="ic">✓</span><span class="t">筛选</span><span class="dur">9s</span></div>
+            <div class="step"><span class="ic">×</span><span class="t">生成摘要</span><span class="dur">失败</span></div>
+            <div class="acts"><button>重试</button><button class="ghost">驾驶舱</button></div>
+          </div>
+
+          <div class="row" data-detail="d3">
+            <span class="dot"></span>
+            <div class="body">
+              <div class="name">D 线 M1 进度中枢</div>
+              <div class="meta">正在做：分段进度条</div>
+              <div class="segs"><i class="seg on"></i><i class="seg on"></i><i class="seg cur"></i><i class="seg"></i><i class="seg"></i><i class="seg"></i></div>
+            </div>
+            <div class="eta">~18m</div>
+            <div class="quick"><button>聚焦</button><button>驾驶舱</button></div>
+          </div>
+          <div class="detail" id="d3">
+            <div class="step"><span class="ic">✓</span><span class="t">设计协议</span><span class="dur">6m</span></div>
+            <div class="step"><span class="ic">✓</span><span class="t">实现总线</span><span class="dur">15m</span></div>
+            <div class="step"><span class="ic">▸</span><span class="t">分段进度条</span><span class="dur">进行中</span></div>
+            <div class="step"><span class="ic">○</span><span class="t">验收</span><span class="dur">—</span></div>
+            <div class="acts"><button class="ghost">中断</button><button class="ghost">驾驶舱</button></div>
+          </div>
+
+          <div class="foot">
+            <button>打开驾驶舱</button><button>全部暂停</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="hintbar">动画：展开 320ms 轻回弹 · 行错峰 35/70/105ms · 关闭 280ms 缩成圆点 · 驾驶舱 = 完整任务时间线窗口</div>
+    <button class="reset" id="reset">重置演示</button>
+  </div>
+
+<script>
+  const tab = document.getElementById('tab');
+  const panel = document.getElementById('panel');
+  const ball = document.getElementById('ball');
+
+  function openPanel() {
+    tab.style.display = 'flex';
+    tab.style.opacity = '0';
+    requestAnimationFrame(() => panel.classList.add('open'));
+  }
+  function closeToDot() {
+    panel.classList.remove('open');
+    setTimeout(() => { tab.style.opacity = '1'; }, 280);
+  }
+  function minimize() {
+    panel.classList.remove('open');
+    setTimeout(() => { tab.style.opacity = '1'; }, 280);
+  }
+  function reset() {
+    panel.classList.remove('open', 'compact');
+    panel.querySelectorAll('.detail').forEach(d => d.classList.remove('show'));
+    tab.style.opacity = '1';
+    tab.style.display = 'flex';
+    document.getElementById('compact').textContent = '简略';
+  }
+  tab.addEventListener('click', openPanel);
+  document.getElementById('minimize').addEventListener('click', closeToDot);
+  document.getElementById('compact').addEventListener('click', e => {
+    panel.classList.toggle('compact');
+    e.target.textContent = panel.classList.contains('compact') ? '详细' : '简略';
+  });
+  document.querySelectorAll('.row[data-detail]').forEach(row => {
+    row.addEventListener('click', e => {
+      if (e.target.closest('.quick')) return;
+      const d = document.getElementById(row.dataset.detail);
+      d.classList.toggle('show');
+      row.classList.toggle('sel');
+    });
+  });
+  document.getElementById('reset').addEventListener('click', reset);
+</script>
+</body>
+</html>

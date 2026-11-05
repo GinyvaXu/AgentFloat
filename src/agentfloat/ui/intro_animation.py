@@ -25,13 +25,13 @@ from agentfloat.core.logging_setup import _log
 from agentfloat.core.theme import get_colors
 from agentfloat.ui import ball_render, chime, motion
 
-FADE_IN_END = 260
-POP_END = 900
-SETTLE_END = 1300
-RING1 = (0, 1100)
-RING2 = (350, 1600)
-SPARKLES = (500, 1700)
-TEXT_IN = (800, 1500)
+FADE_IN_END = 240
+POP_END = 980
+SETTLE_END = 1420
+RING1 = (0, 1250)
+RING2 = (320, 1780)
+SPARKLES = (520, 1750)
+TEXT_IN = (760, 1500)
 MIN_HOLD_END = 2200
 MAX_HOLD_END = 5200
 FLY_MS = 700
@@ -77,6 +77,16 @@ def ease_out_cubic(t):
     return 1.0 - (1.0 - t) ** 3
 
 
+def ease_out_quint(t):
+    t = max(0.0, min(1.0, t))
+    return 1.0 - (1.0 - t) ** 5
+
+
+def ease_in_out_cubic(t):
+    t = max(0.0, min(1.0, t))
+    return 4.0 * t * t * t if t < 0.5 else 1.0 - (-2.0 * t + 2.0) ** 3 / 2.0
+
+
 def _span(t, start, end):
     """区间内的归一化进度（0–1）"""
     if end <= start:
@@ -87,10 +97,10 @@ def _span(t, start, end):
 def ball_scale_at(t):
     """浮球相对基准尺寸的缩放（基准 = 中心大球直径）"""
     if t <= POP_END:
-        return 0.15 + (1.12 - 0.15) * ease_out_back(_span(t, 0, POP_END), 1.25)
+        return 0.15 + (1.10 - 0.15) * ease_out_back(_span(t, 0, POP_END), 1.12)
     if t <= SETTLE_END:
         p = _span(t, POP_END, SETTLE_END)
-        return 1.12 + (1.06 - 1.12) * ease_out_cubic(p)
+        return 1.10 + (1.06 - 1.10) * ease_out_quint(p)
     return 1.06
 
 
@@ -102,7 +112,7 @@ def timeline(t, t_fly=None):
         "ball_scale": ball_scale_at(t),
         "overlay_a": int(58 * _span(t, 0, FADE_IN_END)),
         "text_a": int(255 * _span(t, TEXT_IN[0], TEXT_IN[1])),
-        "text_dy": int(16 * (1.0 - _span(t, TEXT_IN[0], TEXT_IN[1]))),
+        "text_dy": int(18 * (1.0 - ease_out_cubic(_span(t, TEXT_IN[0], TEXT_IN[1])))),
         "ring1": (0.0, 0),
         "ring2": (0.0, 0),
         "arc_a": 0,                      # 旋转弧环
@@ -116,14 +126,15 @@ def timeline(t, t_fly=None):
     for key, span in (("ring1", RING1), ("ring2", RING2)):
         p = _span(t, span[0], span[1])
         if 0.0 < p < 1.0:
-            state[key] = (0.55 + 1.75 * ease_out_cubic(p), int(150 * (1.0 - p)))
+            state[key] = (0.55 + 1.75 * ease_out_quint(p),
+                          int(150 * (1.0 - ease_in_out_cubic(p))))
     sp = _span(t, SPARKLES[0], SPARKLES[1])
     if 0.0 < sp < 1.0:
         state["sparkles"] = sp
     # 旋转弧环（比圆环更快、更有方向感）
     arc = _span(t, 260, 1900)
     if 0.0 < arc < 1.0:
-        state["arc_a"] = int(150 * (1.0 - arc))
+        state["arc_a"] = int(150 * (1.0 - ease_in_out_cubic(arc)))
     if t < POP_END + 900:
         state["bob"] = 6.0 * math.sin(t / 300.0)
         state["tilt"] = 7.0 * math.sin(t / 380.0)
@@ -277,14 +288,37 @@ class IntroAnimation(QWidget):
             return
         self._finished = True
         self._tick.stop()
-        self.hide()
         _log().info("[启动动画] 完成（%.0fms）", t)
-        self.finished.emit()
-        # v3.13.0：释放全屏位图与光晕缓存（原来只 hide，对象与缓存常驻）
+        # 淡出 160ms 再交接，避免全屏画面瞬间消失
+        done_called = {"v": False}
+
+        def _done():
+            # 动画结束与 QTimer 兜底可能都触发，必须幂等
+            if done_called["v"]:
+                return
+            done_called["v"] = True
+            self.hide()
+            self.finished.emit()
+            try:
+                self.deleteLater()
+            except Exception:  # noqa: BLE001
+                pass
+
         try:
-            self.deleteLater()
+            from PyQt5.QtCore import QEasingCurve, QPropertyAnimation
+            anim = QPropertyAnimation(self, b"windowOpacity", self)
+            anim.setDuration(160)
+            anim.setStartValue(1.0)
+            anim.setEndValue(0.0)
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+            anim.finished.connect(_done)
+            self._fade_out_anim = anim
+            anim.start()
+            # 系统禁用动画 / 窗口不可见时 anim.finished 可能不触发：
+            # 160ms 后兜底交接，避免启动画面停住。
+            QTimer.singleShot(200, _done)
         except Exception:  # noqa: BLE001
-            pass
+            _done()
 
     # ── 跳过交互（点击/按键）────────────────────────
     def mousePressEvent(self, event):

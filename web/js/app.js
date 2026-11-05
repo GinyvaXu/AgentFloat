@@ -8,6 +8,7 @@ import {
   renderInstallPage, leaveInstallPage, loadCatalog,
   catalogInstall, catalogUninstall, catalogLaunch, catalogUpgrade, catalogRefreshVersions,
 } from "./install.js";
+import { renderLlmPage } from "./llm.js";
 
 (function () {
   "use strict";
@@ -17,6 +18,7 @@ import {
   let baseStr = "";
   let page = "settings";
   let sub = "general";
+  let _guideBanner = "";
   let version = "";
   let apiState = { results: [], testing: {}, error: "", presets: null, rowPresets: null, badgePreview: [], fetchedAt: null };
   let newsState = { report: null, dates: [], generating: false, phase: "" };
@@ -60,6 +62,12 @@ import {
   // ── 主题 / 脏检测 / 预览 ────────────────────────
   function applyTheme() {
     document.documentElement.dataset.theme = (cfg && cfg.theme === "dark") ? "dark" : "light";
+    const line = document.getElementById("statusLine");
+    if (line) {
+      line.classList.remove("bump");
+      void line.offsetWidth;
+      line.classList.add("bump");
+    }
   }
   let previewTimer = null;
   function schedulePreview() {
@@ -123,109 +131,1234 @@ import {
     if (page === "settings") renderSettings();
     else if (page === "install") renderInstallPage();
     else if (page === "api") loadApiPage();
+    else if (page === "llm") renderLlmPage();
     else loadNewsPage();
   }
 
 
   // ── Skills 车间（C 线，只读：已安装 / 发现 / 可更新）──────────
-  const skillsUI = { tab: "installed", query: "" };
-  async function renderSkillsWorkshop() {
-    const el = $("#skillsContent");
-    if (!el) return;
-    el.innerHTML = '<div class="card"><div class="desc">加载中…</div></div>';
-    try {
-      const r = await API.api("/api/skills/workshop?tab=" + encodeURIComponent(skillsUI.tab) +
-        "&query=" + encodeURIComponent(skillsUI.query));
-      const entries = r.entries || [];
-      const cats = r.categories || [];
-      const tabs = [["installed", "已安装"], ["discover", "发现"], ["updates", "可更新"]];
-      el.innerHTML = '<div class="card"><div class="news-head"><h3>Skills 车间</h3>' +
-        '<div class="news-tools">' +
-        '<input id="skillSearch" class="news-search" placeholder="搜索 skill" value="' + esc(skillsUI.query) + '">' +
-        '<div class="news-filter">' + tabs.map(function (t) {
-          return '<button class="news-filter-btn' + (skillsUI.tab === t[0] ? " on" : "") +
-            '" data-skill-tab="' + t[0] + '">' + t[1] + "</button>";
-        }).join("") + "</div></div></div>" +
-        '<div class="desc">共 ' + entries.length + " 条" +
-        (cats.length ? " · " + cats.length + " 个分类" : "") + "</div>" +
-        entries.map(function (e) {
-          const badge = e.installed
-            ? '<span class="tag green">已安装</span>'
-            : (e.updateAvailable ? '<span class="tag blue">有更新</span>' : '<span class="tag gray">可安装</span>');
-          const f = e.factors || {};
-          const keys = Object.keys(f).slice(0, 2);
-          const extra = keys.map(function (k) { return k + " " + Math.round((f[k] || 0) * 100) + "%"; }).join(" · ");
-          return '<div class="row" data-skill-id="' + esc(e.entryId) + '"><div class="lbl">' + esc(e.name) + " " + badge +
-            "<small>" + esc(e.category || "") + (extra ? " · " + esc(extra) : "") + "</small></div>" +
-            '<div class="ctl"><span class="desc">' + esc(e.source || "") + "</span></div></div>";
-        }).join("") + "</div>";
-      $$("#skillsContent .row[data-skill-id]").forEach(function (rowEl) {
-        rowEl.style.cursor = "pointer";
-        rowEl.addEventListener("click", function () {
-          const e = entries.find(function (x) { return x.entryId === rowEl.dataset.skillId; });
-          if (!e) return;
-          openModal("<h3>" + esc(e.name) + "</h3>" +
-            '<div class="desc">' + esc(e.category || "") + " · " + esc(e.source || "") + "</div>" +
-            '<div class="desc" style="margin:10px 0;white-space:pre-wrap">' +
-            esc((e.description || "").slice(0, 600)) + "</div>" +
-            '<div class="modal-actions">' +
-            (e.installed
-              ? '<button class="btn danger" data-skill-uninstall>卸载</button>'
-              : '<button class="btn primary" data-skill-install>安装</button>') +
-            '<button class="btn" data-close>关闭</button></div>');
-          const inst = $("#modalBox [data-skill-install]");
-          if (inst) inst.addEventListener("click", async function () {
-            inst.disabled = true;
-            try {
-              const started = await API.api("/api/skills/install", { method: "POST", body: { id: e.entryId } });
-              if (started && started.busy) { toast("已有安装任务在进行", "err"); inst.disabled = false; return; }
-              const t0 = Date.now();
-              const timer = setInterval(async function () {
-                try {
-                  const st = await API.api("/api/skills/job");
-                  if (!st.running) {
-                    clearInterval(timer);
-                    toast(st.ok ? ("已安装：" + e.name) : (st.message || "安装失败"), st.ok ? "ok" : "err");
-                    closeModal();
-                    renderSkillsWorkshop();
-                  } else if (Date.now() - t0 > 180000) {
-                    clearInterval(timer);
-                    toast("安装仍在后台进行，稍后刷新查看", "err");
-                    inst.disabled = false;
-                  }
-                } catch (pollErr) {
-                  clearInterval(timer);
-                  inst.disabled = false;
-                }
-              }, 1000);
-            } catch (err) { toast("安装失败：" + err.message, "err"); inst.disabled = false; }
-          });
-          const un = $("#modalBox [data-skill-uninstall]");
-          if (un) un.addEventListener("click", async function () {
-            un.disabled = true;
-            try {
-              await API.api("/api/skills/uninstall", { method: "POST", body: { id: e.entryId } });
-              toast("已卸载：" + e.name, "ok");
-              closeModal();
-              renderSkillsWorkshop();
-            } catch (err) { toast("卸载失败：" + err.message, "err"); un.disabled = false; }
-          });
-          $("#modalBox [data-close]").addEventListener("click", closeModal);
-        });
-      });
+  const skillsUI = { tab: "discover", mode: "grid", query: "", cache: {}, targets: [],
+    searchTimer: null, composing: false, renderSeq: 0, detailSeq: 0, detailCache: {}, check: null, installedIndex: null };
 
-      const inp = $("#skillSearch");
-      if (inp) inp.addEventListener("input", function () { skillsUI.query = inp.value; renderSkillsWorkshop(); });
-      $$("#skillsContent [data-skill-tab]").forEach(function (b) {
-        b.addEventListener("click", function () { skillsUI.tab = b.dataset.skillTab; renderSkillsWorkshop(); });
+  function skillSource(e) {
+    if (e.repo) return e.repo;
+    if (typeof e.source === "string") return e.source;
+    if (e.source && typeof e.source === "object") {
+      var v = e.source.repo || e.source.url || e.source.name || "";
+      return v || e.category || "";
+    }
+    return e.category || "";
+  }
+
+  function skillRepo(e) {
+    let repo = e.repo || (e.source && typeof e.source === "object" ? e.source.repo : "") || "";
+    repo = String(repo).replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/i, "").replace(/^\/+|\/+$/g, "");
+    return repo;
+  }
+
+  function skillBadge(e) {
+    const out = [];
+    if (e.updateAvailable) out.push('<span class="tag blue">有更新</span>');
+    if (e.installed && e.installed.length) {
+      out.push('<span class="tag green">已安装' +
+        (e.installed.length > 1 ? " ×" + e.installed.length : "") + '</span>');
+    }
+    if (e.skillsh && e.rank) out.push('<span class="tag gray">榜单 #' + esc(String(e.rank)) + '</span>');
+    if (!out.length) out.push('<span class="tag gray">可安装</span>');
+    return out.join("");
+  }
+
+  function skillFactors(e) {
+    const f = e.factors;
+    if (Array.isArray(f)) {
+      return f.slice(0, 2).map(function (x) {
+        if (!x || typeof x !== "object") return "";
+        const label = x.label || x.name || x.key || "";
+        const val = x.score != null ? x.score : (x.value != null ? x.value : 0);
+        return label + (label ? " " : "") + Math.round((Number(val) || 0) * 100);
+      }).filter(Boolean).join(" · ");
+    }
+    if (f && typeof f === "object") {
+      return Object.keys(f).slice(0, 2)
+        .map(function (k) { return k + " " + Math.round((f[k] || 0) * 100); }).join(" · ");
+    }
+    return "";
+  }
+
+  function skillCardHtml(e) {
+    const icon = (e.name || "?").slice(0, 2).toUpperCase();
+    return '<div class="skill-card skill-fade" role="button" tabindex="0" data-skill-id="' + esc(e.entryId) + '">' +
+      '<div class="sc-head"><div class="sc-ico">' + esc(icon) + '</div><div>' +
+      '<div class="sc-name">' + esc(e.name) + '</div>' +
+      '<div class="sc-src">' + esc(skillSource(e)) + '</div></div></div>' +
+      '<div class="sc-desc">' + esc((e.description || "").slice(0, 90)) + '</div>' +
+      '<div class="sc-foot">' + skillBadge(e) +
+      '<span class="sc-f">' + esc(skillFactors(e) || e.category || "") + '</span></div></div>';
+  }
+
+  function groupByCategory(entries) {
+    const groups = {}; const order = [];
+    entries.forEach(function (e) {
+      const c = e.category || "其他";
+      if (!groups[c]) { groups[c] = []; order.push(c); }
+      groups[c].push(e);
+    });
+    return { groups: groups, order: order };
+  }
+
+  function skillListView(entries) {
+    const g = groupByCategory(entries);
+    return '<div class="skill-list">' + g.order.map(function (cat) {
+      return '<div class="group-head">' + esc(cat) + '<span class="n">' + g.groups[cat].length + '</span></div>' +
+        g.groups[cat].map(function (e) {
+          return '<div class="skill-row skill-fade" role="button" tabindex="0" data-skill-id="' + esc(e.entryId) + '">' +
+            '<div><div class="n">' + esc(e.name) + '</div><div class="d">' + esc((e.description || skillSource(e) || "").slice(0, 64)) + '</div></div>' +
+            '<div class="r">' + skillBadge(e) + '<span class="sc-f">' + esc(skillFactors(e)) + '</span></div></div>';
+        }).join("");
+    }).join("") + "</div>";
+  }
+
+  function gridByCategory(entries) {
+    const g = groupByCategory(entries);
+    return '<div class="skill-grid-sections">' + g.order.map(function (cat) {
+      return '<div class="group-head">' + esc(cat) + '<span class="n">' + g.groups[cat].length + '</span></div>' +
+        '<div class="skill-grid">' + g.groups[cat].map(skillCardHtml).join("") + '</div>';
+    }).join("") + '</div>';
+  }
+
+  function magazineView(entries) {
+    if (!entries.length) {
+      return '<div class="card"><div class="desc">发现源暂无数据。</div></div>';
+    }
+    const scored = entries.slice().sort(function (a, b) {
+      const fa = a.factors || {}; const fb = b.factors || {};
+      const sa = Object.keys(fa).reduce(function (x, k) { return x + (fa[k] || 0); }, 0);
+      const sb = Object.keys(fb).reduce(function (x, k) { return x + (fb[k] || 0); }, 0);
+      return sb - sa;
+    });
+    const hero = scored[0];
+    const rest = scored.slice(1, 4);
+    const g = groupByCategory(entries);
+    return '<div class="skill-hero"><div class="hero-main">' +
+      '<div class="k">趋势精选 · ' + esc(hero.category || "Skill") + '</div>' +
+      '<h3>' + esc(hero.name) + '</h3>' +
+      '<p>' + esc((hero.description || "").slice(0, 160)) + '</p>' +
+      '<div style="margin-top:10px"><button class="btn sm primary" data-skill-open="' + esc(hero.entryId) + '">' +
+      (hero.skillsh ? "看内容 / 一键安装" : "查看 / 安装") + '</button></div>' +
+      '</div><div class="hero-side">' + rest.map(function (e) {
+        return '<div class="hero-mini" role="button" tabindex="0" data-skill-open="' + esc(e.entryId) + '">' +
+          '<div class="sc-ico">' + esc((e.name || "?").slice(0, 2).toUpperCase()) + '</div>' +
+          '<div><div class="n">' + esc(e.name) + '</div><div class="s">' + esc(skillSource(e)) + '</div></div></div>';
+      }).join("") + "</div></div>" +
+      g.order.map(function (cat) {
+        return '<div class="mag-sect">' + esc(cat) + " · " + g.groups[cat].length + '</div>' +
+          g.groups[cat].map(function (e) {
+            return '<div class="mag-row" role="button" tabindex="0" data-skill-open="' + esc(e.entryId) + '">' +
+              '<span class="mag-rank">#' + esc(String(e.rank || "")) + '</span>' +
+              '<div><div class="n">' + esc(e.name) + '</div>' +
+              '<div class="d">' + esc((e.description || "").slice(0, 78)) + '</div></div>' +
+              '<div class="r">' + skillBadge(e) + '</div></div>';
+          }).join("");
+      }).join("");
+  }
+
+  function scopeView(allEntries, entries) {
+    const targets = skillsUI.targets || [];
+    if (!targets.length) {
+      return '<div class="card"><div class="desc">没有可用的安装位置。</div></div>';
+    }
+    return '<div class="scope-wrap">' + targets.map(function (t) {
+      const rowsAll = allEntries.filter(function (e) {
+        return (e.installed || []).some(function (i) { return i.agent === t.id; });
       });
+      const rows = entries.filter(function (e) {
+        return (e.installed || []).some(function (i) { return i.agent === t.id; });
+      });
+      const on = rowsAll.filter(function (e) {
+        return (e.installed || []).some(function (i) { return i.agent === t.id && i.enabled; });
+      }).length;
+      const manualN = rows.filter(function (e) {
+        return (e.installed || []).some(function (i) { return i.agent === t.id && !i.managed; });
+      }).length;
+      return '<div class="scope-card">' +
+        '<div class="scope-head"><div class="scope-title"><div class="scope-name">' + esc(t.label) +
+        ' <span class="scope-root">' + esc(t.root) + '</span></div>' +
+        '<div class="scope-stat">' + rowsAll.length + ' 个 Skill · 启用 ' + on + ' · 停用 ' + (rowsAll.length - on) +
+        (manualN ? ' · 手动 ' + manualN : '') +
+        (skillsUI.query.trim() ? ' · 匹配 ' + rows.length : '') + '</div></div>' +
+        '<div class="scope-actions">' +
+        (manualN ? '<button class="view-btn primary" data-adopt-all="' + esc(t.id) + '">全部接管</button>' : '') +
+        '<button class="view-btn" data-bulk="on" data-target="' + esc(t.id) + '">全部启用</button>' +
+        '<button class="view-btn" data-bulk="off" data-target="' + esc(t.id) + '">全部停用</button>' +
+        '<button class="view-btn" data-open-target="' + esc(t.id) + '">复制目录</button></div></div>' +
+        (rows.length ? rows.map(function (e) {
+          const inst = (e.installed || []).find(function (i) { return i.agent === t.id; }) || {};
+          const managed = !!inst.managed;
+          return '<div class="scope-row' + (inst.enabled ? "" : " off") + '">' +
+            '<label class="scope-switch' + (managed ? "" : " locked") + '" title="' + (managed ? (inst.enabled ? "停用" : "启用") : "手动安装，AgentFloat 不接管") + '">' +
+            '<input type="checkbox" data-toggle="' + esc(e.entryId) + '" data-target="' + esc(t.id) + '"' +
+            (inst.enabled ? " checked" : "") + (managed ? "" : " disabled") + '><span></span></label>' +
+            '<div class="scope-skill"><div class="n">' + esc(e.name) + '</div>' +
+            '<div class="d">' + esc(e.category || "") + ' · ' + esc(inst.path || "") + '</div></div>' +
+            (managed
+              ? '<button class="view-btn danger" data-remove="' + esc(e.entryId) + '" data-target="' + esc(t.id) + '">移除</button>'
+              : '<button class="view-btn" data-adopt="' + esc(e.entryId) + '" data-target="' + esc(t.id) + '">接管</button>') + '</div>';
+        }).join("") : '<div class="scope-empty">' +
+          (rowsAll.length ? '没有匹配「' + esc(skillsUI.query) + '」的 Skill' : '这个 Agent 还没有安装 Skill') +
+          '</div>') +
+        '</div>';
+    }).join("") + "</div>";
+  }
+
+  function matrixView(allEntries, entries) {
+    const targets = skillsUI.targets || [];
+    const rows = entries.filter(function (e) { return (e.installed || []).length; });
+    if (!rows.length) {
+      return emptyState(allEntries.length ? "没有匹配的 Skill" : "还没有安装 Skill",
+        allEntries.length ? "换个关键词，或清除搜索。" : "去「发现」页挑一个。", "clear");
+    }
+    return '<div class="matrix-wrap"><table class="skill-matrix"><thead><tr>' +
+      '<th class="mx-name">Skill</th>' +
+      targets.map(function (t) { return '<th title="' + esc(t.root) + '">' + esc(t.label) + '</th>'; }).join("") +
+      '</tr></thead><tbody>' + rows.map(function (e) {
+        return '<tr><td class="mx-name"><div class="n">' + esc(e.name) + '</div>' +
+          '<div class="d">' + esc(e.category || "") + '</div></td>' +
+          targets.map(function (t) {
+            const inst = (e.installed || []).find(function (i) { return i.agent === t.id; });
+            if (!inst) {
+              return '<td class="mx-cell"><button class="mx-dot none" data-mx="' + esc(e.entryId) +
+                '" data-target="' + esc(t.id) + '" title="未安装到 ' + esc(t.label) + '">＋</button></td>';
+            }
+            const cls = inst.managed ? (inst.enabled ? "on" : "off") : "manual";
+            const text = inst.managed ? (inst.enabled ? "●" : "○") : "🔒";
+            const tip = inst.managed ? (inst.enabled ? "已启用，点击停用" : "已停用，点击启用") : "手动安装，点击查看";
+            return '<td class="mx-cell"><button class="mx-dot ' + cls + '" data-mx="' + esc(e.entryId) +
+              '" data-target="' + esc(t.id) + '" title="' + esc(t.label + " · " + tip) + '">' + text + '</button></td>';
+          }).join("") + '</tr>';
+      }).join("") + '</tbody></table></div>';
+  }
+
+  function emptyState(title, desc, action) {
+    let btn = "";
+    if (action === "clear") btn = '<button class="btn sm" id="skillClear">清除搜索</button>';
+    else if (action === "discover") btn = '<button class="btn sm primary" data-go-discover>去发现页</button>';
+    return '<div class="card skill-empty"><div class="empty-title">' + esc(title) + '</div>' +
+      '<div class="desc">' + esc(desc) + '</div>' +
+      (btn ? '<div class="err-actions">' + btn + '</div>' : '') + '</div>';
+  }
+
+  function updatesView(all) {
+    const candidates = all.filter(function (e) {
+      const src = e.source || {};
+      return src.repo && /^[0-9a-f]{40}$/i.test(String(src.commit || ""));
+    });
+    if (!candidates.length) {
+      return '<div class="card"><h3>暂无可更新</h3><div class="desc">本机 ' + all.length +
+        ' 个 Skill 都是本地/手动来源，没有可比对的上游 commit。从「发现」安装的 Skill 目前按快照记录，也不参与更新。</div>' +
+        '<div class="err-actions"><button class="btn sm" data-go-discover>去发现页安装可更新的 Skill</button></div></div>';
+    }
+    const res = skillsUI.check;
+    if (!res) {
+      return '<div class="card"><h3>检查更新</h3><div class="desc">将检查 ' + candidates.length +
+        ' 个带固定 commit 的受管 Skill（git ls-remote，不消耗 GitHub API 配额）。</div>' +
+        '<div class="err-actions"><button class="btn sm primary" id="skillCheck">开始检查</button></div></div>';
+    }
+    const updates = res.updates || [];
+    if (!updates.length) {
+      return '<div class="card"><h3>已是最新</h3><div class="desc">检查了 ' + (res.checked || 0) +
+        ' 个来源，均未发现新提交（' + esc(res.checkedAt || "") + '）。</div></div>';
+    }
+    return '<div class="card"><h3>' + updates.length + ' 个有更新</h3><div class="desc">检查于 ' +
+      esc(res.checkedAt || "") + '</div><div class="err-actions">' +
+      '<button class="btn sm primary" id="skillUpdateAll">全部更新</button></div></div>' +
+      '<div class="skill-list">' + updates.map(function (u) {
+        return '<div class="skill-row"><div><div class="n">' + esc(u.name) + '</div>' +
+          '<div class="d">当前 ' + esc(String(u.current || "").slice(0, 8)) +
+          ' → 最新 ' + esc(String(u.latest || "").slice(0, 8)) + '</div></div>' +
+          '<div class="r"><span class="tag blue">有更新</span>' +
+          '<button class="view-btn" data-diff="' + esc(u.entryId) + '">看差异</button>' +
+          '<button class="btn sm primary" data-update-skill="' + esc(u.entryId) + '">更新</button></div></div>';
+      }).join("") + '</div>';
+  }
+
+  async function runSkillCheck() {
+    const btn = $("#skillCheck");
+    if (btn) { btn.disabled = true; btn.textContent = "检查中…"; }
+    try {
+      const res = await API.api("/api/skills/check", { method: "POST", body: {} });
+      if (res && res.ok === false) throw new Error(res.error || "检查失败");
+      skillsUI.check = res;
+      renderSkillsWorkshop(false, { preserveScroll: true });
     } catch (err) {
-      el.innerHTML = '<div class="card error"><h3>加载失败</h3><div class="desc">' + esc(err.message || "未知错误") + "</div></div>";
+      if (btn) { btn.disabled = false; btn.textContent = "开始检查"; }
+      toast("检查更新失败：" + err.message, "err");
     }
   }
 
+  async function ensureInstalledIndex() {
+    if (skillsUI.installedIndex) return skillsUI.installedIndex;
+    const idx = {};
+    try {
+      const r = await API.api("/api/skills/workshop?tab=installed");
+      if (r && r.targets) skillsUI.targets = r.targets;
+      (r.entries || []).forEach(function (e) {
+        const repo = skillRepo(e);
+        if (!repo) return;
+        const name = String(e.name || "").toLowerCase();
+        idx[(repo + "/" + name).toLowerCase()] = true;
+        idx[(repo + "/" + String(e.slug || e.name || "")).toLowerCase()] = true;
+      });
+    } catch (err) { /* 忽略，发现页仍可用 */ }
+    skillsUI.installedIndex = idx;
+    return idx;
+  }
+
+  async function fetchSkillsTab(tab) {
+    if (skillsUI.cache[tab]) return skillsUI.cache[tab];
+    let r;
+    if (tab === "backups") {
+      const b = await API.api("/api/skills/backups");
+      r = { entries: [], backups: b.backups || [], root: b.root || "", counts: {} };
+      skillsUI.cache[tab] = r;
+      return r;
+    }
+    if (tab === "discover") {
+      const d = await API.api("/api/skills/discover?view=trending");
+      const idx = await ensureInstalledIndex();
+      r = {
+        entries: (d.entries || []).map(function (x) {
+          return {
+            entryId: "skillssh:" + x.id,
+            name: x.name,
+            slug: x.slug,
+            repo: x.source || "",
+            source: (x.installsText ? x.installsText + " 次安装 · " : "") + (x.source || ""),
+            category: x.category || "其他",
+            description: "skills.sh 榜单 · " + (x.installsText || "") + " 次安装 · " + (x.source || ""),
+            skillsh: true,
+            rank: x.rank,
+            installs: x.installsText || "",
+            pageUrl: x.url,
+            installCommand: x.installCommand,
+            installed: idx[((x.source || "") + "/" + (x.name || "")).toLowerCase()] ||
+              idx[((x.source || "") + "/" + (x.slug || "")).toLowerCase()]
+              ? [{ agent: "?", managed: false, enabled: true }] : [],
+            factors: {}
+          };
+        })
+      };
+    } else {
+      const apiTab = tab === "updates" ? "installed" : tab;
+      r = await API.api("/api/skills/workshop?tab=" + encodeURIComponent(apiTab));
+    }
+    skillsUI.cache[tab] = r;
+    if (r && r.targets) skillsUI.targets = r.targets;
+    return r;
+  }
+
+  function filterSkills(entries) {
+    const q = (skillsUI.query || "").trim().toLowerCase();
+    if (!q) return entries;
+    return entries.filter(function (e) {
+      return ((e.name || "") + " " + (e.description || "") + " " + skillSource(e) + " " + (e.category || ""))
+        .toLowerCase().indexOf(q) >= 0;
+    });
+  }
+
+  function pollSkillJob(done) {
+    const t0 = Date.now();
+    const timer = setInterval(async function () {
+      try {
+        const st = await API.api("/api/skills/job");
+        if (!st.running) {
+          clearInterval(timer);
+          done(st);
+        } else if (Date.now() - t0 > 180000) {
+          clearInterval(timer);
+          done({ ok: false, message: "安装仍在后台进行，稍后刷新查看" });
+        }
+      } catch (err) {
+        clearInterval(timer);
+        done({ ok: false, message: err.message || "任务状态获取失败" });
+      }
+    }, 1000);
+  }
+
+  function refreshSkills() {
+    skillsUI.cache = {};
+    skillsUI.installedIndex = null;
+    renderSkillsWorkshop(true);
+  }
+
+  async function ensureTargets() {
+    if (skillsUI.targets && skillsUI.targets.length) return;
+    try {
+      const r = await API.api("/api/skills/workshop?tab=installed");
+      skillsUI.targets = r.targets || [];
+    } catch (err) { skillsUI.targets = []; }
+  }
+
+  async function renderSkillsWorkshop(force, opts) {
+    opts = opts || {};
+    const el = $("#skillsContent");
+    if (!el) return;
+    const seq = ++skillsUI.renderSeq;
+    const tab = skillsUI.tab;
+    const active = document.activeElement;
+    const hadFocus = !!(active && active.id === "skillSearch");
+    const caret = hadFocus ? active.selectionStart : null;
+    const prevScroll = el.scrollTop;
+    if (force === true) skillsUI.cache = {};
+    if (!skillsUI.cache[tab]) {
+      el.innerHTML = '<div class="card"><div class="desc">加载中…</div></div>';
+    }
+    let data;
+    try { data = await fetchSkillsTab(tab); }
+    catch (err) {
+      if (seq !== skillsUI.renderSeq) return;
+      el.innerHTML = '<div class="card error"><h3>加载失败</h3><div class="desc">' +
+        esc(err.message || "未知错误") + '</div>' +
+        '<div class="err-actions"><button class="btn sm primary" id="skillRetry">重试</button></div></div>';
+      const b = $("#skillRetry");
+      if (b) b.addEventListener("click", function () { renderSkillsWorkshop(true); });
+      return;
+    }
+    if (seq !== skillsUI.renderSeq || tab !== skillsUI.tab) return;
+
+    const all = data.entries || [];
+    const entries = filterSkills(all);
+    const counts = data.counts || {};
+    const q = (skillsUI.query || "").trim();
+    const installedN = counts.installed != null ? counts.installed
+      : all.filter(function (e) { return e.installed && e.installed.length; }).length;
+    const updateN = counts.updates != null ? counts.updates
+      : all.filter(function (e) { return e.updateAvailable; }).length;
+    const discN = tab === "discover" ? all.length
+      : (counts.discover != null ? counts.discover
+        : all.filter(function (e) { return !e.installed || !e.installed.length; }).length);
+
+    let body;
+    if (tab === "discover") {
+      body = entries.length ? magazineView(entries)
+        : emptyState(q ? "没有匹配「" + q + "」的 Skill" : "发现源暂无数据",
+          q ? "换个关键词，或清除搜索。" : "稍后点刷新重试。", q ? "clear" : "");
+    } else if (tab === "updates") {
+      body = updatesView(all);
+    } else if (tab === "backups") {
+      body = backupsView(data);
+    } else if (!entries.length) {
+      body = emptyState(q ? "没有匹配「" + q + "」的 Skill" : "还没有安装 Skill",
+        q ? "换个关键词，或清除搜索。" : "去「发现」页挑一个。", q ? "clear" : "discover");
+    } else if (skillsUI.mode === "scope") {
+      body = scopeView(all, entries);
+    } else if (skillsUI.mode === "matrix") {
+      body = matrixView(all, entries);
+    } else if (skillsUI.mode === "list") {
+      body = skillListView(entries);
+    } else {
+      body = gridByCategory(entries);
+    }
+
+    el.innerHTML =
+      '<div class="skill-head"><div><div class="desc">' +
+      (tab === "discover"
+        ? "发现 " + discN + " 个条目 · 来源 skills.sh · 24 小时趋势"
+        : tab === "updates"
+          ? "可更新 " + updateN + " · 检查需手动触发"
+          : tab === "backups"
+            ? "备份 " + ((data.backups || []).length) + " 份 · 恢复前会自动备份当前版本"
+            : "已装 " + installedN + " · 可更新 " + updateN) +
+      '</div></div>' +
+      '<div class="skill-tools">' +
+      '<input id="skillSearch" class="news-search" placeholder="搜索 skill" value="' + esc(skillsUI.query) + '">' +
+      '<div class="news-filter">' +
+      '<button class="news-filter-btn' + (tab === "installed" ? " on" : "") + '" data-skill-tab="installed">已安装</button>' +
+      '<button class="news-filter-btn' + (tab === "updates" ? " on" : "") + '" data-skill-tab="updates">可更新' + (updateN ? " " + updateN : "") + '</button>' +
+      '<button class="news-filter-btn' + (tab === "discover" ? " on" : "") + '" data-skill-tab="discover">发现</button>' +
+      '<button class="news-filter-btn' + (tab === "backups" ? " on" : "") + '" data-skill-tab="backups">备份</button>' +
+      '</div></div></div>' +
+      '<div class="skill-toolbar">' +
+      (tab === "installed"
+        ? '<button class="view-btn' + (skillsUI.mode === "grid" ? " on" : "") + '" data-skill-mode="grid">网格</button>' +
+          '<button class="view-btn' + (skillsUI.mode === "list" ? " on" : "") + '" data-skill-mode="list">列表</button>' +
+          '<button class="view-btn' + (skillsUI.mode === "scope" ? " on" : "") + '" data-skill-mode="scope">作用域</button>' +
+          '<button class="view-btn' + (skillsUI.mode === "matrix" ? " on" : "") + '" data-skill-mode="matrix">矩阵</button>'
+        : "") +
+      '<span class="spacer"></span>' +
+      (tab === "installed"
+        ? '<button class="view-btn" id="skillExport">导出锁文件</button>' +
+          '<button class="view-btn" id="skillImport">导入锁文件</button>'
+        : "") +
+      '<button class="view-btn" id="skillRefresh">' + (tab === "discover" ? "刷新榜单" : "刷新") + '</button></div>' +
+      '<div class="skill-body' + (opts.animate === false ? "" : " skill-fade") + '">' + body + '</div>';
+
+    // 焦点 / 滚动恢复（避免每次输入丢焦点、跳回顶部）
+    if (hadFocus) {
+      const next = $("#skillSearch");
+      if (next) {
+        try {
+          next.focus();
+          if (caret != null) next.setSelectionRange(caret, caret);
+        } catch (e) { /* ignore */ }
+      }
+    }
+    if (opts.resetScroll) el.scrollTop = 0;
+    else el.scrollTop = prevScroll;
+
+    // ── 事件 ─────────────────────────────────────
+    const inp = $("#skillSearch");
+    if (inp) {
+      inp.addEventListener("compositionstart", function () { skillsUI.composing = true; });
+      inp.addEventListener("compositionend", function () {
+        skillsUI.composing = false;
+        skillsUI.query = inp.value;
+        scheduleSearch();
+      });
+      inp.addEventListener("input", function () {
+        skillsUI.query = inp.value;
+        if (skillsUI.composing) return;
+        scheduleSearch();
+      });
+    }
+    function scheduleSearch() {
+      clearTimeout(skillsUI.searchTimer);
+      skillsUI.searchTimer = setTimeout(function () {
+        renderSkillsWorkshop(false, { preserveScroll: true, animate: false });
+      }, 140);
+    }
+    $$("#skillsContent [data-skill-tab]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        if (b.dataset.skillTab === skillsUI.tab) return;
+        skillsUI.tab = b.dataset.skillTab;
+        renderSkillsWorkshop(false, { resetScroll: true });
+      });
+    });
+    $$("#skillsContent [data-skill-mode]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        if (b.dataset.skillMode === skillsUI.mode) return;
+        skillsUI.mode = b.dataset.skillMode;
+        renderSkillsWorkshop(false, { resetScroll: true });
+      });
+    });
+    const rf = $("#skillRefresh");
+    if (rf) rf.addEventListener("click", function () {
+      if (tab === "discover") { skillsUI.cache.discover = null; }
+      refreshSkills();
+    });
+    function diffHtml(text) {
+      return String(text || "").split("\n").map(function (line) {
+        const cls = line.startsWith("+") ? "diff-add" : (line.startsWith("-") ? "diff-del" : "");
+        return '<span class="' + cls + '">' + esc(line) + "</span>";
+      }).join("\n");
+    }
+    async function openDiff(entryId) {
+      openModal('<h3>更新差异</h3><div class="desc">正在读取 SKILL.md / README…</div>' +
+        '<div class="modal-actions"><button class="btn" data-close>关闭</button></div>');
+      $("#modalBox [data-close]").addEventListener("click", closeModal);
+      try {
+        const d = await API.api("/api/skills/diff?id=" + encodeURIComponent(entryId));
+        if (!d || d.ok === false) throw new Error((d && d.error) || "读取失败");
+        const body = (d.files || []).map(function (f) {
+          return '<div class="detail-k">' + esc(f.path) + '</div><pre class="diff-pre">' +
+            diffHtml(f.diff) + "</pre>";
+        }).join("") || '<div class="desc">' + esc(d.note || "没有文本差异（仅 commit 变化）") + "</div>";
+        openModal("<h3>更新差异 · " + esc(d.name) + "</h3>" +
+          '<div class="desc">' + esc(d.current.slice(0, 8)) + " → " + esc(d.latest.slice(0, 8)) + "</div>" +
+          body + '<div class="modal-actions"><button class="btn" data-close>关闭</button></div>');
+      } catch (err) {
+        openModal("<h3>更新差异</h3><div class=\"card error\"><div class=\"desc\">" +
+          esc(err.message) + "</div></div><div class=\"modal-actions\"><button class=\"btn\" data-close>关闭</button></div>");
+      }
+      $("#modalBox [data-close]").addEventListener("click", closeModal);
+    }
+    function waitJob() {
+      return new Promise(function (resolve) { pollSkillJob(resolve); });
+    }
+    async function updateAll() {
+      const updates = (skillsUI.check && skillsUI.check.updates) || [];
+      const btn = $("#skillUpdateAll");
+      if (!updates.length) return;
+      if (!window.confirm("依次更新 " + updates.length + " 个 Skill？每个都会先备份当前版本。")) return;
+      if (btn) btn.disabled = true;
+      let ok = 0, fail = 0;
+      for (let i = 0; i < updates.length; i++) {
+        const u = updates[i];
+        if (btn) btn.textContent = "更新中 " + (i + 1) + "/" + updates.length;
+        try {
+          const started = await API.api("/api/skills/update", {
+            method: "POST", body: { id: u.entryId }
+          });
+          if (started && started.ok === false) throw new Error(started.error || "更新失败");
+          const st = await waitJob();
+          if (st.ok) ok++;
+          else { fail++; toast(u.name + "：" + (st.message || "更新失败"), "err"); }
+        } catch (err) { fail++; toast(u.name + "：" + err.message, "err"); }
+      }
+      toast("更新完成：成功 " + ok + "，失败 " + fail, fail ? "err" : "ok");
+      skillsUI.check = null;
+      refreshSkills();
+    }
+    function previewLock(text) {
+      let data;
+      try { data = JSON.parse(text); } catch (err) { toast("锁文件不是合法 JSON", "err"); return; }
+      const entries = Array.isArray(data.entries) ? data.entries : [];
+      if (!entries.length) { toast("锁文件没有 entries", "err"); return; }
+      const local = (skillsUI.cache.installed && skillsUI.cache.installed.entries) || [];
+      const rows = entries.map(function (lock) {
+        const hit = local.find(function (e) { return e.entryId === lock.entryId || e.name === lock.name; });
+        return { lock: lock, hit: hit };
+      });
+      const found = rows.filter(function (r) { return r.hit; }).length;
+      openModal("<h3>导入锁文件</h3>" +
+        '<div class="desc">共 ' + entries.length + " 条；本机已安装 " + found +
+        " 条。只应用已安装 Skill 的启用/停用作用域，缺失项不会自动安装。</div>" +
+        '<div class="lock-list">' + rows.map(function (r) {
+          return '<div class="lock-row"><div><div class="n">' + esc(r.lock.name || r.lock.entryId) + '</div>' +
+            '<div class="d">' + esc(r.lock.repo || "本地") + " · " +
+            (r.lock.targets || []).map(function (t) { return esc(t.id + (t.enabled ? " 开" : " 关")); }).join(" / ") +
+            "</div></div><span class=\"tag " + (r.hit ? "green" : "gray") + "\">" +
+            (r.hit ? "已安装" : "缺失") + "</span></div>";
+        }).join("") + "</div>" +
+        '<div class="modal-actions"><button class="btn primary" data-apply-lock>应用作用域</button>' +
+        '<button class="btn" data-close>取消</button></div>');
+      $("#modalBox [data-close]").addEventListener("click", closeModal);
+      $("#modalBox [data-apply-lock]").addEventListener("click", async function () {
+        this.disabled = true;
+        let changed = 0, skipped = 0;
+        try {
+          for (const r of rows) {
+            if (!r.hit) { skipped++; continue; }
+            for (const t of (r.lock.targets || [])) {
+              const inst = (r.hit.installed || []).find(function (i) { return i.agent === t.id; });
+              if (!inst || !inst.managed) { skipped++; continue; }
+              if (!!inst.enabled === !!t.enabled) continue;
+              const res = await API.api("/api/skills/toggle", {
+                method: "POST", body: { id: r.hit.entryId, target_id: t.id, enabled: !!t.enabled }
+              });
+              if (res && res.ok === false) throw new Error(res.error || "应用失败");
+              changed++;
+            }
+          }
+          toast("已应用 " + changed + " 项作用域" + (skipped ? "，跳过 " + skipped + " 项" : ""), "ok");
+          closeModal();
+          refreshSkills();
+        } catch (err) {
+          this.disabled = false;
+          toast("导入失败：" + err.message, "err");
+        }
+      });
+    }
+    const im = $("#skillImport");
+    if (im) im.addEventListener("click", function () {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".json,application/json";
+      input.addEventListener("change", function () {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function () { previewLock(String(reader.result || "")); };
+        reader.readAsText(file, "utf-8");
+      });
+      input.click();
+    });
+    $$("#skillsContent [data-diff]").forEach(function (btn) {
+      btn.addEventListener("click", function () { openDiff(btn.dataset.diff); });
+    });
+    const ua = $("#skillUpdateAll");
+    if (ua) ua.addEventListener("click", updateAll);
+    const ex = $("#skillExport");
+    if (ex) ex.addEventListener("click", function () { exportLockfile(all); });
+    $$("#skillsContent [data-restore]").forEach(function (btn) {
+      btn.addEventListener("click", async function () {
+        const agent = btn.dataset.target || "原位置";
+        if (!window.confirm("恢复这份备份到 " + agent + "？当前版本会先自动备份。")) return;
+        btn.disabled = true;
+        try {
+          const res = await API.api("/api/skills/restore", {
+            method: "POST",
+            body: { backup: btn.dataset.restore, target_id: btn.dataset.target || "" }
+          });
+          if (res && res.ok === false) throw new Error(res.error || "恢复失败");
+          toast("已恢复备份", "ok");
+          refreshSkills();
+        } catch (err) {
+          btn.disabled = false;
+          toast("恢复失败：" + err.message, "err");
+        }
+      });
+    });
+    $$("#skillsContent [data-copy-backup]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(btn.dataset.copyBackup).then(function () {
+            toast("已复制备份路径", "ok");
+          }, function () { toast(btn.dataset.copyBackup, "ok"); });
+        } else { toast(btn.dataset.copyBackup, "ok"); }
+      });
+    });
+    const ck = $("#skillCheck");
+    if (ck) ck.addEventListener("click", runSkillCheck);
+    const clr = $("#skillClear");
+    if (clr) clr.addEventListener("click", function () {
+      skillsUI.query = "";
+      renderSkillsWorkshop(false, { resetScroll: true });
+    });
+    const gd = $("[data-go-discover]");
+    if (gd) gd.addEventListener("click", function () {
+      skillsUI.tab = "discover";
+      renderSkillsWorkshop(false, { resetScroll: true });
+    });
+
+    function openFor(entry) {
+      if (!entry) return;
+      if (entry.skillsh) openDiscoverDetail(entry); else openSkillDetail(entry);
+    }
+    function bindOpen(node, entry) {
+      if (!node || !entry) return;
+      node.addEventListener("click", function () { openFor(entry); });
+      node.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          openFor(entry);
+        }
+      });
+    }
+    $$("#skillsContent [data-skill-id]").forEach(function (node) {
+      bindOpen(node, all.find(function (x) { return x.entryId === node.dataset.skillId; }));
+    });
+    $$("#skillsContent [data-skill-open]").forEach(function (node) {
+      bindOpen(node, all.find(function (x) { return x.entryId === node.dataset.skillOpen; }));
+    });
+
+    $$("#skillsContent [data-toggle]").forEach(function (cb) {
+      cb.addEventListener("change", async function () {
+        cb.disabled = true;
+        try {
+          const res = await API.api("/api/skills/toggle", {
+            method: "POST",
+            body: { id: cb.dataset.toggle, target_id: cb.dataset.target, enabled: cb.checked }
+          });
+          if (res && res.ok === false) throw new Error(res.error || "操作失败");
+          toast(cb.checked ? "已启用" : "已停用", "ok");
+          refreshSkills();
+        } catch (err) {
+          cb.checked = !cb.checked;
+          cb.disabled = false;
+          toast("操作失败：" + err.message, "err");
+        }
+      });
+    });
+
+    // 批量：只作用于当前过滤后可见的 Skill
+    $$("#skillsContent [data-bulk]").forEach(function (btn) {
+      btn.addEventListener("click", async function () {
+        const target = btn.dataset.target;
+        const enable = btn.dataset.bulk === "on";
+        const jobsList = [];
+        entries.forEach(function (e) {
+          const inst = (e.installed || []).find(function (i) { return i.agent === target; });
+          if (inst && inst.managed && inst.enabled !== enable) jobsList.push({ id: e.entryId, enabled: enable });
+        });
+        if (!jobsList.length) { toast("没有可调节的受管 Skill", "ok"); return; }
+        if (!window.confirm((enable ? "启用" : "停用") + "当前可见的 " + jobsList.length + " 个 Skill？")) return;
+        btn.disabled = true;
+        try {
+          for (const item of jobsList) {
+            const res = await API.api("/api/skills/toggle", {
+              method: "POST",
+              body: { id: item.id, target_id: target, enabled: item.enabled }
+            });
+            if (res && res.ok === false) throw new Error(res.error || "操作失败");
+          }
+          toast((enable ? "已启用 " : "已停用 ") + jobsList.length + " 个", "ok");
+          refreshSkills();
+        } catch (err) {
+          btn.disabled = false;
+          toast("批量操作失败：" + err.message, "err");
+        }
+      });
+    });
+
+    $$("#skillsContent [data-remove]").forEach(function (btn) {
+      btn.addEventListener("click", async function (ev) {
+        ev.stopPropagation();
+        const e = all.find(function (x) { return x.entryId === btn.dataset.remove; });
+        if (!e) return;
+        if (!window.confirm("从该 Agent 移除「" + e.name + "」？会先备份，可在 versions/backups 找回。")) return;
+        btn.disabled = true;
+        try {
+          const res = await API.api("/api/skills/uninstall", {
+            method: "POST", body: { id: e.entryId, target_id: btn.dataset.target }
+          });
+          if (res && res.ok === false) throw new Error(res.error || "移除失败");
+          toast("已移除：" + e.name, "ok");
+          refreshSkills();
+        } catch (err) {
+          btn.disabled = false;
+          toast("移除失败：" + err.message, "err");
+        }
+      });
+    });
+
+    $$("#skillsContent [data-adopt-all]").forEach(function (btn) {
+      btn.addEventListener("click", async function () {
+        const target = btn.dataset.adoptAll;
+        const pending = entries.filter(function (e) {
+          return (e.installed || []).some(function (i) { return i.agent === target && !i.managed; });
+        });
+        if (!pending.length) return;
+        if (!window.confirm("接管当前可见的 " + pending.length + " 个手动 Skill？只写入标记，不改动原文件。")) return;
+        btn.disabled = true;
+        try {
+          for (const e of pending) {
+            const res = await API.api("/api/skills/adopt", {
+              method: "POST", body: { id: e.entryId, target_id: target }
+            });
+            if (res && res.ok === false) throw new Error(res.error || "接管失败");
+          }
+          toast("已接管 " + pending.length + " 个 Skill", "ok");
+          refreshSkills();
+        } catch (err) {
+          btn.disabled = false;
+          toast("接管失败：" + err.message, "err");
+        }
+      });
+    });
+
+    $$("#skillsContent [data-adopt]").forEach(function (btn) {
+      btn.addEventListener("click", async function (ev) {
+        ev.stopPropagation();
+        const row = all.find(function (x) { return x.entryId === btn.dataset.adopt; });
+        const nm = row ? row.name : "该 Skill";
+        if (!window.confirm("接管「" + nm + "」？接管后由 AgentFloat 管理启用/停用/卸载；只写入标记，不改动原文件。")) return;
+        btn.disabled = true;
+        try {
+          const r = await API.api("/api/skills/adopt", {
+            method: "POST", body: { id: btn.dataset.adopt, target_id: btn.dataset.target }
+          });
+          if (r && r.ok === false) throw new Error(r.error || "接管失败");
+          toast("已接管：" + nm, "ok");
+          refreshSkills();
+        } catch (err) {
+          btn.disabled = false;
+          toast("接管失败：" + err.message, "err");
+        }
+      });
+    });
+
+    // 矩阵单元格：受管 → 启停；手动/未装 → 打开详情
+    $$("#skillsContent [data-mx]").forEach(function (btn) {
+      btn.addEventListener("click", async function (ev) {
+        ev.stopPropagation();
+        const e = all.find(function (x) { return x.entryId === btn.dataset.mx; });
+        if (!e) return;
+        const target = (skillsUI.targets || []).find(function (x) { return x.id === btn.dataset.target; });
+        const inst = (e.installed || []).find(function (i) { return i.agent === btn.dataset.target; });
+        if (!inst || !inst.managed) { openSkillDetail(e); return; }
+        btn.disabled = true;
+        try {
+          const res = await API.api("/api/skills/toggle", {
+            method: "POST",
+            body: { id: e.entryId, target_id: btn.dataset.target, enabled: !inst.enabled }
+          });
+          if (res && res.ok === false) throw new Error(res.error || "操作失败");
+          toast((target ? target.label : btn.dataset.target) + " · " + (inst.enabled ? "已停用" : "已启用"), "ok");
+          refreshSkills();
+        } catch (err) {
+          btn.disabled = false;
+          toast("操作失败：" + err.message, "err");
+        }
+      });
+    });
+
+    $$("#skillsContent [data-update-skill]").forEach(function (btn) {
+      btn.addEventListener("click", async function () {
+        btn.disabled = true;
+        try {
+          const started = await API.api("/api/skills/update", {
+            method: "POST", body: { id: btn.dataset.updateSkill }
+          });
+          if (started && (started.busy || started.ok === false)) {
+            toast(started.busy ? "已有安装任务在进行" : (started.error || "更新失败"), "err");
+            btn.disabled = false; return;
+          }
+          toast("正在更新…", "ok");
+          pollSkillJob(function (st) {
+            toast(st.ok ? "更新完成" : (st.message || "更新失败"), st.ok ? "ok" : "err");
+            skillsUI.check = null;
+            refreshSkills();
+          });
+        } catch (err) { toast("更新失败：" + err.message, "err"); btn.disabled = false; }
+      });
+    });
+    $$("#skillsContent [data-open-target]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        const t = (skillsUI.targets || []).find(function (x) { return x.id === btn.dataset.openTarget; });
+        if (!t) return;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(t.root).then(function () {
+            toast("已复制安装目录：" + t.root, "ok");
+          }, function () { toast(t.root, "ok"); });
+        } else {
+          toast(t.root, "ok");
+        }
+      });
+    });
+  }
+
+  function formatSize(n) {
+    const v = Number(n) || 0;
+    if (v >= 1024 * 1024) return (v / 1024 / 1024).toFixed(1) + " MB";
+    if (v >= 1024) return Math.round(v / 1024) + " KB";
+    return v + " B";
+  }
+
+  function backupsView(data) {
+    const rows = data.backups || [];
+    if (!rows.length) {
+      return emptyState("还没有备份", "更新或覆盖安装时会自动备份；恢复前也会再备份当前版本。", "");
+    }
+    let lastDate = "";
+    return '<div class="backup-list">' + rows.map(function (b) {
+      const date = String(b.createdAt || "").slice(0, 10);
+      const head = date !== lastDate ? '<div class="group-head">' + esc(date) + '</div>' : "";
+      lastDate = date;
+      return head + '<div class="backup-row">' +
+        '<div class="bk-main"><div class="n">' + esc(b.name) + '</div>' +
+        '<div class="d">' + esc(b.createdAt || "") + " · " + esc(b.agent || "未知 Agent") +
+        " · " + esc(formatSize(b.size)) + " · " + esc(String(b.files || 0)) + " 个文件" +
+        (b.version ? " · v" + esc(b.version) : "") + '</div></div>' +
+        '<div class="bk-actions"><button class="view-btn" data-copy-backup="' + esc(b.path) + '">复制路径</button>' +
+        '<button class="btn sm primary" data-restore="' + esc(b.id) + '" data-target="' + esc(b.agent || "") + '">恢复</button></div></div>';
+    }).join("") + '</div>' +
+      '<div class="desc" style="margin-top:10px">备份目录：' + esc(data.root || "") + '</div>';
+  }
+
+  async function openBundle(e, target) {
+    const installed = e.installed || [];
+    if (!installed.length) { toast("没有安装副本", "err"); return; }
+    const targetId = target || installed[0].agent || "";
+    const d = await API.api("/api/skills/bundle?id=" + encodeURIComponent(e.entryId) +
+      "&target=" + encodeURIComponent(targetId));
+    if (!d || d.ok === false) { toast("读取失败：" + ((d && d.error) || "未知错误"), "err"); return; }
+    const readme = d.readme || "";
+    const skillMd = d.skillMd || "";
+    const license = d.license || "未提供";
+    const licenseText = d.licenseText || "";
+    const files = d.files || [];
+    openModal("<h3>" + esc(e.name) + " · 内容</h3>" +
+      '<div class="desc">' + esc((d.target && d.target.path) || "") + '</div>' +
+      (installed.length > 1 ? '<div class="bundle-target"><label>安装位置：<select id="bundleTarget">' +
+        installed.map(function (i) {
+          return '<option value="' + esc(i.agent) + '"' + (i.agent === targetId ? " selected" : "") + '>' +
+            esc(i.agentLabel || i.agent) + '</option>';
+        }).join("") + '</select></label></div>' : "") +
+      '<div class="bundle-tabs">' +
+      '<button class="view-btn on" data-btab="readme">README</button>' +
+      (skillMd ? '<button class="view-btn" data-btab="skill">SKILL.md</button>' : "") +
+      '<button class="view-btn" data-btab="files">文件 ' + files.length + '</button>' +
+      '<button class="view-btn" data-btab="license">许可证</button></div>' +
+      '<div class="bundle-body">' +
+      '<pre class="bundle-pre" data-bbody="readme">' + esc(readme.slice(0, 20000) || "（无 README）") + '</pre>' +
+      (skillMd ? '<pre class="bundle-pre hidden" data-bbody="skill">' + esc(skillMd.slice(0, 20000)) + '</pre>' : "") +
+      '<div class="hidden" data-bbody="files">' + (files.length ? '<div class="file-list">' + files.map(function (f) {
+        return '<div class="file-row"><span>' + esc(f.path) + '</span><em>' + esc(formatSize(f.size)) + '</em></div>';
+      }).join("") + '</div>' : '<div class="desc">没有文件。</div>') + '</div>' +
+      '<div class="hidden" data-bbody="license"><div class="chips"><span class="chip">' + esc(license) + '</span></div>' +
+      (licenseText ? '<pre class="bundle-pre">' + esc(licenseText.slice(0, 6000)) + '</pre>' : "") + '</div>' +
+      '</div>' +
+      '<div class="modal-actions"><button class="btn" data-share>分享</button>' +
+      '<button class="btn" data-close>关闭</button></div>');
+    $$("#modalBox [data-btab]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        $$("#modalBox [data-btab]").forEach(function (x) { x.classList.toggle("on", x === b); });
+        $$("#modalBox [data-bbody]").forEach(function (x) {
+          x.classList.toggle("hidden", x.dataset.bbody !== b.dataset.btab);
+        });
+      });
+    });
+    const sel = $("#bundleTarget");
+    if (sel) sel.addEventListener("change", function () { closeModal(); openBundle(e, sel.value); });
+    const bd = $("#modalBox [data-bundle]");
+    if (bd) bd.addEventListener("click", function () {
+      const first = (e.installed || [])[0];
+      openBundle(e, first ? first.agent : "");
+    });
+    const sh = $("#modalBox [data-share]");
+    if (sh) sh.addEventListener("click", function () { openShare(e); });
+    $("#modalBox [data-close]").addEventListener("click", closeModal);
+  }
+
+  function exportLockfile(all) {
+    const entries = all.filter(function (e) { return (e.installed || []).length; }).map(function (e) {
+      return {
+        entryId: e.entryId,
+        name: e.name,
+        repo: skillRepo(e),
+        commit: (e.source && e.source.commit) || "",
+        targets: (e.installed || []).map(function (i) {
+          return { id: i.agent, enabled: !!i.enabled, managed: !!i.managed };
+        })
+      };
+    });
+    const data = { schemaVersion: 1, generatedAt: new Date().toISOString(), entries: entries };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    a.href = URL.createObjectURL(blob);
+    a.download = "agentfloat-skills-" + stamp + ".json";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+    toast("已导出 " + entries.length + " 个 Skill 的锁文件", "ok");
+  }
+
+  function scopeChecklist(e) {
+    return '<div class="target-list">' + (skillsUI.targets || []).map(function (t) {
+      const inst = (e.installed || []).find(function (i) { return i.agent === t.id; });
+      const locked = inst && !inst.managed;
+      return '<label class="target-check' + (inst ? " on" : "") + '">' +
+        '<input type="checkbox" data-scope-add="' + esc(t.id) + '"' + (inst ? " checked" : "") +
+        (locked ? " disabled" : "") + '>' +
+        '<span class="tc-name">' + esc(t.label) + '</span>' +
+        '<em>' + esc(inst ? (locked ? "手动安装" : (inst.enabled ? "已启用" : "已停用")) : (t.exists ? "未安装" : "目录不存在")) + '</em></label>';
+    }).join("") + '</div>';
+  }
+
+  function buildShareText(e) {
+    const repo = skillRepo(e);
+    const install = repo ? "npx skills add https://github.com/" + repo : "（本机私有 Skill，无公开来源）";
+    const desc = e.description || "—";
+    const purpose = desc.length > 140 ? desc.slice(0, 140) + "…" : desc;
+    const usage = e.triggerDoc || e.trigger || desc;
+    const scope = (e.installed || []).map(function (i) { return i.agentLabel || i.agent; }).join("、") || "未安装";
+    return [
+      "# " + e.name,
+      "",
+      "**用途**：" + purpose,
+      "",
+      "**用法**：" + usage,
+      "",
+      "**安装位置**：" + scope,
+      "",
+      "**获取方式**：" + install,
+      "",
+      "—— 由 AgentFloat Skills 车间分享"
+    ].join("\n");
+  }
+
+  function openShare(e) {
+    const text = buildShareText(e);
+    openModal("<h3>分享 · " + esc(e.name) + "</h3>" +
+      '<div class="desc">复制下面的 Markdown，或下载为 .md 文件。</div>' +
+      '<textarea id="shareText" class="share-text" readonly>' + esc(text) + "</textarea>" +
+      '<div class="modal-actions">' +
+      '<button class="btn primary" data-share-copy>复制</button>' +
+      '<button class="btn" data-share-download>下载 .md</button>' +
+      '<button class="btn" data-close>关闭</button></div>');
+    $("#modalBox [data-share-copy]").addEventListener("click", function () {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { toast("已复制分享内容", "ok"); },
+          function () { toast("复制失败，请手动选择", "err"); });
+      } else {
+        toast("请手动选择文本复制", "err");
+      }
+    });
+    $("#modalBox [data-share-download]").addEventListener("click", function () {
+      const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = (e.name || "skill") + ".md";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+    });
+    $("#modalBox [data-close]").addEventListener("click", closeModal);
+  }
+
+  function openSkillDetail(e) {
+    const installedN = (e.installed || []).length;
+    openModal("<h3>" + esc(e.name) + "</h3>" +
+      '<div class="desc">' + esc(e.category || "") + " · " + esc(skillSource(e)) +
+      " · 已安装 " + installedN + " 个位置</div>" +
+      '<div class="desc" style="margin:10px 0;white-space:pre-wrap">' +
+      esc((e.description || "").slice(0, 600)) + "</div>" +
+      '<div class="detail-k">安装位置（勾选即安装 / 取消即移除）</div>' +
+      scopeChecklist(e) +
+      '<div class="modal-actions">' +
+      '<button class="btn" data-bundle>查看 README / 文件</button>' +
+      '<button class="btn" data-share>分享</button>' +
+      (installedN ? '<button class="btn danger" data-skill-uninstall>全部卸载</button>' : "") +
+      '<button class="btn" data-close>关闭</button></div>');
+    $$("#modalBox [data-scope-add]").forEach(function (cb) {
+      cb.addEventListener("change", async function () {
+        const target = cb.dataset.scopeAdd;
+        cb.disabled = true;
+        try {
+          if (cb.checked) {
+            const started = await API.api("/api/skills/install", {
+              method: "POST", body: { id: e.entryId, targets: [target] }
+            });
+            if (started && (started.busy || started.ok === false)) {
+          toast(started.busy ? "已有安装任务在进行" : (started.error || "安装失败"), "err");
+          cb.checked = false; cb.disabled = false; return;
+        }
+            closeModal();
+            toast("正在安装到 " + target + "…", "ok");
+            pollSkillJob(function (st) {
+              toast(st.ok ? "已安装：" + e.name : (st.message || "安装失败"), st.ok ? "ok" : "err");
+              refreshSkills();
+            });
+          } else {
+            if (!window.confirm("从 " + target + " 移除「" + e.name + "」？会先备份。")) {
+              cb.checked = true; cb.disabled = false; return;
+            }
+            await API.api("/api/skills/uninstall", {
+              method: "POST", body: { id: e.entryId, target_id: target }
+            });
+            toast("已从 " + target + " 移除", "ok");
+            closeModal();
+            refreshSkills();
+          }
+        } catch (err) {
+          cb.checked = !cb.checked;
+          cb.disabled = false;
+          toast("操作失败：" + err.message, "err");
+        }
+      });
+    });
+    const bd = $("#modalBox [data-bundle]");
+    if (bd) bd.addEventListener("click", function () {
+      const first = (e.installed || [])[0];
+      openBundle(e, first ? first.agent : "");
+    });
+    const sh = $("#modalBox [data-share]");
+    if (sh) sh.addEventListener("click", function () { openShare(e); });
+    const un = $("#modalBox [data-skill-uninstall]");
+    if (un) un.addEventListener("click", async function () {
+      if (!window.confirm("卸载「" + e.name + "」的全部安装位置？会先备份。")) return;
+      un.disabled = true;
+      try {
+        const res = await API.api("/api/skills/uninstall", { method: "POST", body: { id: e.entryId } });
+        if (res && res.ok === false) throw new Error(res.error || "卸载失败");
+        toast("已卸载：" + e.name, "ok");
+        closeModal();
+        refreshSkills();
+      } catch (err) { toast("卸载失败：" + err.message, "err"); un.disabled = false; }
+    });
+    $("#modalBox [data-close]").addEventListener("click", closeModal);
+  }
+
+  async function openDiscoverDetail(e) {
+    const key = (e.repo || "") + "/" + (e.slug || "");
+    const seq = ++skillsUI.detailSeq;
+    openModal("<h3>" + esc(e.name) + "</h3><div class=\"desc\">正在读取内容与优势…</div>" +
+      '<div class="modal-actions"><button class="btn" data-close>关闭</button></div>');
+    $("#modalBox [data-close]").addEventListener("click", closeModal);
+    await ensureTargets();
+    if (seq !== skillsUI.detailSeq) return;
+    let d = skillsUI.detailCache[key];
+    if (!d) {
+      try {
+        d = await API.api("/api/skills/discover/detail?source=" + encodeURIComponent(e.repo) +
+          "&slug=" + encodeURIComponent(e.slug));
+        skillsUI.detailCache[key] = d;
+      } catch (err) { d = { ok: false }; }
+    }
+    if (seq !== skillsUI.detailSeq) return;
+    if ($("#modalMask").classList.contains("hidden")) return;
+    const bullets = (d.summary || []).map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("");
+    const auditChips = (d.audits || []).map(function (a) {
+      return '<span class="chip ' + (a.status === "Pass" ? "ok" : "warn") + '">' + esc(a.name + " " + a.status) + "</span>";
+    }).join("");
+    const adv = [
+      e.installs ? '<span class="chip">安装 ' + esc(e.installs) + ' 次</span>' : "",
+      d.stars ? '<span class="chip">GitHub ★ ' + esc(d.stars) + '</span>' : "",
+      '<span class="chip">' + esc(e.category || "其他") + '</span>',
+      auditChips
+    ].join("");
+    const md = d.skillMd ? '<details class="md-preview"><summary>查看 SKILL.md 摘要</summary><pre>' +
+      esc(d.skillMd.slice(0, 2400)) + "</pre></details>" : "";
+    openModal("<h3>" + esc(e.name) + "</h3>" +
+      '<div class="desc">#' + esc(String(e.rank || "-")) + " · " + esc(e.repo) + " · " + esc(e.installs || "") + " 次安装</div>" +
+      '<div class="detail-k">它做什么</div>' +
+      (bullets ? "<ul class=\"detail-list\">" + bullets + "</ul>" : '<div class="desc">skills.sh 未提供摘要。</div>') +
+      '<div class="detail-k">优势</div><div class="chips">' + adv +
+      ((e.installed && e.installed.length) ? '<span class="chip ok">本机已安装</span>' : "") + "</div>" +
+      '<div class="detail-k">安装位置</div>' +
+      '<div class="target-list">' + (skillsUI.targets || []).map(function (t) {
+        return '<label class="target-check"><input type="checkbox" data-install-target="' + esc(t.id) + '"' +
+          (t.id === "agents" && t.exists && !(e.installed && e.installed.length) ? " checked" : "") + '><span class="tc-name">' + esc(t.label) + '</span>' +
+          '<em>' + esc(t.exists ? "目录可用" : "目录不存在") + '</em></label>';
+      }).join("") + "</div>" +
+      '<div class="modal-actions">' +
+      '<button class="btn primary" data-install-now>一键安装</button>' +
+      '<button class="btn" data-copy-cmd>复制命令</button>' +
+      '<button class="btn" data-open-page>打开 skills.sh</button>' +
+      '<button class="btn" data-close>关闭</button></div>' +
+      '<div class="detail-k">装前检查</div>' +
+      '<div class="preflight">' +
+      '<div><span>来源</span><b>' + esc(e.repo) + '</b></div>' +
+      '<div><span>版本</span><b class="warn">快照 · 仓库 HEAD（未固定 commit）</b></div>' +
+      '<div><span>许可</span><b>未提供，需到仓库确认</b></div>' +
+      '<div><span>退路</span><b>覆盖前备份；卸载移入回收站</b></div>' +
+      '<div><span>目标</span><b>安装到勾选的 Agent，可随时停用</b></div>' +
+      '</div>' +
+      md);
+    const btn = $("#modalBox [data-install-now]");
+    if (btn) btn.addEventListener("click", async function () {
+      const targets = $$("#modalBox [data-install-target]:checked").map(function (x) { return x.dataset.installTarget; });
+      if (!targets.length) { toast("请至少选择一个安装位置", "err"); return; }
+      btn.disabled = true;
+      try {
+        const started = await API.api("/api/skills/discover/install", {
+          method: "POST",
+          body: { source: e.repo, slug: e.slug, name: e.name, targets: targets }
+        });
+        if (started && (started.busy || started.ok === false)) {
+          toast(started.busy ? "已有安装任务在进行" : (started.error || "安装失败"), "err");
+          btn.disabled = false; return;
+        }
+        closeModal();
+        toast("正在准备安装（下载仓库）…", "ok");
+        pollSkillJob(function (st) {
+          toast(st.ok ? "已安装：" + e.name : (st.message || "安装失败"), st.ok ? "ok" : "err");
+          refreshSkills();
+        });
+      } catch (err) { toast("安装失败：" + err.message, "err"); btn.disabled = false; }
+    });
+    const cp = $("#modalBox [data-copy-cmd]");
+    if (cp) cp.addEventListener("click", function () {
+      const cmd = d.installCommand || e.installCommand || "";
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(cmd).then(function () { toast("已复制：" + cmd, "ok"); },
+          function () { toast("复制失败，请手动选择", "err"); });
+      } else { toast(cmd, "ok"); }
+    });
+    const op = $("#modalBox [data-open-page]");
+    if (op) op.addEventListener("click", function () { window.open(e.pageUrl, "_blank"); });
+    $("#modalBox [data-close]").addEventListener("click", closeModal);
+  }
+
   // ── 页面导航 ────────────────────────────────────
-  function goPage(p) {
+  // LLM 页的写操作走 /api/llm/*，不会回写本地 cfg；进入设置 / API 用量 / AI 接入前
+  // 重新拉一次，避免把旧快照整份 PUT 回去覆盖供应商与 Key。有未保存修改时不覆盖。
+  async function refreshConfig() {
+    if (!cfg) return;
+    if (JSON.stringify(cfg) !== baseStr) return;   // 保留用户未保存的修改
+    try {
+      const resp = await API.api("/api/config");
+      if (resp && resp.config) {
+        cfg = resp.config;
+        baseStr = JSON.stringify(cfg);
+        applyTheme();
+        refreshDirty();
+      }
+    } catch (e) { /* 拉取失败沿用现有 cfg，保存仍由服务端按 changed_keys 合并 */ }
+  }
+
+  async function goPage(p) {
     page = p;
     if (p !== "install") leaveInstallPage();
     $$("#nav .nav-item").forEach((a) => {
@@ -233,15 +1366,24 @@ import {
     if (a.dataset.page === p) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   });
-    ["guide", "settings", "install", "api", "news", "skills"].forEach((id) => $("#page-" + id).classList.toggle("hidden", id !== p));
-    $("#pageTitle").textContent = { guide: "使用指南", settings: "设置", install: "Agent 安装", api: "API 用量", news: "AI 快报", skills: "Skills 车间" }[p];
+    ["guide", "settings", "install", "api", "llm", "news", "skills"].forEach((id) => $("#page-" + id).classList.toggle("hidden", id !== p));
+    $("#pageTitle").textContent = { guide: "使用指南", settings: "设置", install: "Agent 安装", api: "API 用量", llm: "AI 接入", news: "AI 快报", skills: "Skills 车间" }[p];
+    const saveBtn = $("#btnSave");
+    if (saveBtn) saveBtn.style.display = p === "settings" ? "" : "none";
+    const dirtyHint = $("#dirtyHint");
+    if (dirtyHint && p !== "settings") dirtyHint.classList.remove("show");
+    try { history.replaceState(null, "", "#/" + p); } catch (e) { /* ignore */ }
+    if (p === "settings" || p === "api" || p === "llm") {
+      await refreshConfig();
+      if (page !== p) return;   // 等待期间用户已切到别的页
+    }
     if (p === "guide") renderGuide();
     else if (p === "settings") renderSettings();
     else if (p === "install") renderInstallPage();
     else if (p === "api") loadApiPage();
+    else if (p === "llm") renderLlmPage();
     else if (p === "news") loadNewsPage();
     else renderSkillsWorkshop();
-    try { history.replaceState(null, "", "#/" + p); } catch (e) { /* ignore */ }
   }
   function goSub(s) {
     sub = s;
@@ -292,7 +1434,7 @@ import {
     const primary = agents.find((a) => a.primary) || agents[0] || {};
 
     // v3.9.0：新用户提示卡（未看过引导时显示；点「我已熟悉」写入 onboarding_done）
-    let _guideBanner = "";
+    _guideBanner = "";
     if (!cfg.onboarding_done) {
       _guideBanner = '<div class="card guide-hero"><h3>新用户？先看这里</h3>' +
         '<div class="desc">花 3 分钟看完「使用指南」：浮球操作、Agent 启动、密钥保险箱、余额监控与自动更新一次讲清。</div>' +
@@ -328,6 +1470,8 @@ import {
         row("退出时清理 Agent 进程", "退出 AgentFloat 时结束主 Agent 进程", switchCtl("cleanup_on_quit", cfg.cleanup_on_quit)) +
         row("开机自启", "登录 Windows 后自动运行", switchCtl("auto_start", cfg.auto_start)) +
         row("启动时检查更新", "", switchCtl("check_updates", cfg.check_updates)) +
+        row("进度贴边条", "关闭后不显示任何进度浮窗（保存并重启浮窗生效）",
+          switchCtl("progress.enabled", (cfg.progress || {}).enabled !== false)) +
         row("Agent 进程面板", "悬停浮球显示在线 Agent 进程与操作（中断 / 继续任务）",
           switchCtl("process_panel.enabled", (cfg.process_panel || {}).enabled !== false)) +
         row("面板悬停延迟 (ms)", "", numCtl("process_panel.hover_delay_ms",
@@ -486,8 +1630,65 @@ import {
         row("AI 调用方式", "", textCtl("skills.ai_tool", sk.ai_tool || "codex exec", 200)) +
         row("描述截断长度", "", numCtl("skills.max_description_len", sk.max_description_len || 160, { min: 40, max: 400 })) +
         row("新 skill 自动翻译", "检测到新装 skill 自动触发本地 AI 补译", switchCtl("skills.auto_translate_new_skills", sk.auto_translate_new_skills)) +
-        '<div class="row"><div class="lbl">本地 AI 自检服务</div><div class="ctl"><button class="btn" onclick="App.runAiServices()">立即运行（API 配置 / Skills 翻译）</button></div></div>');
+        '<div class="row"><div class="lbl">本地 AI 自检服务</div><div class="ctl"><button class="btn" onclick="App.runAiServices()">立即运行（API 配置 / Skills 翻译）</button></div></div>' +
+        '<div id="integrationCard"><div class="desc">加载 MCP 与内置 Skills…</div></div>');
     bindAll(el);
+    loadIntegrationCard();
+  }
+
+  async function loadIntegrationCard() {
+    const el = $("#integrationCard");
+    if (!el) return;
+    try {
+      const d = await API.api("/api/integrations");
+      const skills = (d.skills || []).map(function (s) {
+        return '<div class="mini-row"><span class="grow">' + esc(s.name) + '</span>' +
+          '<span class="tag ' + (s.installed ? "green" : "gray") + '">' +
+          (s.installed ? "已安装" : "未安装") + '</span></div>';
+      }).join("") || '<div class="desc">没有随包携带的 Skill。</div>';
+      el.innerHTML = card("MCP 与内置 Skills",
+        "随安装包提供进度协议的 MCP 服务和内置 Skill；装好后 Agent 可以直接汇报进度。",
+        row("MCP 服务", d.mcp && d.mcp.exists ? "已随包安装" : "未找到（开发模式或构建未包含）",
+          '<code>' + esc((d.mcp && d.mcp.path) || "af-mcp.exe") + '</code>') +
+        '<div class="mini-row"><span class="grow"><b>内置 Skills</b></span></div>' + skills +
+        row("安装位置", "", '<code>' + esc(d.skillsRoot || "") + '</code>') +
+        '<div class="row"><div class="lbl">一键安装 / 更新</div><div class="ctl">' +
+        '<button class="btn primary" id="btnInstallBundled">安装到通用 Agents</button>' +
+        '<button class="btn" id="btnAutoMcp">自动接入 MCP</button></div></div>' +
+        '<details class="md-preview"><summary>MCP 配置示例</summary><pre>' +
+        esc('{"mcpServers":{"agentfloat":{"command":"' + ((d.mcp && d.mcp.path) || "af-mcp.exe") + '"}}}') +
+        '</pre></details>');
+      const btn = $("#btnInstallBundled");
+      if (btn) btn.addEventListener("click", async function () {
+        btn.disabled = true;
+        try {
+          const r = await API.api("/api/integrations/install", { method: "POST", body: { target: "agents" } });
+          if (r && r.ok === false) throw new Error(r.error || "安装失败");
+          toast("已安装 " + ((r.installed || []).length) + " 个 Skill", "ok");
+          loadIntegrationCard();
+        } catch (err) {
+          toast("安装失败：" + err.message, "err");
+          btn.disabled = false;
+        }
+      });
+      const auto = $("#btnAutoMcp");
+      if (auto) auto.addEventListener("click", async function () {
+        if (!window.confirm("自动写入本机已安装客户端的 MCP 配置？会先备份原文件。")) return;
+        auto.disabled = true;
+        try {
+          const r = await API.api("/api/integrations/auto", { method: "POST", body: { target: "agents" } });
+          if (r && r.ok === false) throw new Error(r.error || "接入失败");
+          const added = (r.results || []).filter(function (x) { return x.status === "added"; }).length;
+          toast("已接入 " + added + " 个客户端（其余未检测到或已存在）", "ok");
+          loadIntegrationCard();
+        } catch (err) {
+          toast("自动接入失败：" + err.message, "err");
+          auto.disabled = false;
+        }
+      });
+    } catch (err) {
+      el.innerHTML = card("MCP 与内置 Skills", "读取失败：" + esc(err.message || "未知错误"), "");
+    }
   }
 
   // ── 喝水助手 ──
@@ -1320,6 +2521,9 @@ import {
       try {
         const r = await API.api("/api/news/export", { method: "POST", body: { date: st.date || null } });
         toast(r.ok ? ("已导出：" + r.path) : ("导出失败：" + (r.error || "")), r.ok ? "ok" : "err");
+        if (r.ok && r.path) {
+          API.api("/api/reveal", { method: "POST", body: { path: r.path } }).catch(function () {});
+        }
       } catch (e) { toast("导出失败：" + e.message, "err"); }
     });
     const btnDensity = $("#btnDensity");
@@ -1669,16 +2873,36 @@ import {
 
   // ── 模态框 / SSE / 启动 ─────────────────────────
   // v3.15.1：统一加载骨架 / 错误卡片（v3.16.4 起实现移到 util.js，供安装页共用）
+  let modalLastFocus = null;
   function openModal(html) {
+    modalLastFocus = document.activeElement;
     $("#modalBox").innerHTML = html;
+    $("#modalBox").setAttribute("tabindex", "-1");
     $("#modalMask").classList.remove("hidden");
-    // v3.16.0：打开即聚焦首个可输入控件（键盘可用）
-    const first = $("#modalBox input, #modalBox select, #modalBox textarea, #modalBox button");
+    const first = $("#modalBox input, #modalBox select, #modalBox textarea, #modalBox button, #modalBox [data-close]");
     if (first) { try { first.focus(); } catch (e) {} }
+    else { try { $("#modalBox").focus(); } catch (e) {} }
   }
   function closeModal() {
     $("#modalMask").classList.add("hidden");
+    skillsUI.detailSeq = (skillsUI.detailSeq || 0) + 1; // 取消在途详情请求
+    const last = modalLastFocus;
+    modalLastFocus = null;
+    if (last && document.contains(last)) { try { last.focus(); } catch (e) {} }
   }
+  // 焦点陷阱：Tab 不跑到背景页面
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key !== "Tab") return;
+    if ($("#modalMask").classList.contains("hidden")) return;
+    const nodes = $$("#modalBox a[href], #modalBox button, #modalBox input, #modalBox select, " +
+      "#modalBox textarea, #modalBox [tabindex]:not([tabindex='-1'])")
+      .filter(function (n) { return !n.disabled && n.offsetParent !== null; });
+    if (!nodes.length) return;
+    const first = nodes[0];
+    const last = nodes[nodes.length - 1];
+    if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
+    else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+  });
   // v3.15.1：统一确认弹层（替代原生 confirm；危险操作可指定 danger/okText）
   function confirmDialog(opts) {
     const o = opts || {};
@@ -1802,7 +3026,7 @@ import {
     applyTheme();
     refreshDirty();
     const h = (location.hash || "").replace(/^#\/?/, "");
-    if (["api", "news", "settings", "install"].indexOf(h) >= 0) goPage(h);
+    if (["api", "news", "settings", "install", "skills", "guide", "llm"].indexOf(h) >= 0) goPage(h);
     else goPage("settings");
   }
 

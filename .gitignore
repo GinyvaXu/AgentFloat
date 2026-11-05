@@ -66,9 +66,11 @@ UI设计审查报告*
 # ── 临时脚本 & 本地文档 ──
 _gen_report.py
 浮窗炫酷助手_技术方案报告.docx
-# 本地个人配置（含用户私有设置，绝不上传）
+# 本地个人配置（含用户私有设置 / API Key，绝不上传）
 config.json
+config.json*
 launcher_config.json
+launcher_config.json*
 skill_state.json
 skills_translations_ai.json
 
@@ -82,3 +84,16 @@ installer/*.exe
 .playwright-mcp/
 guide-*.png
 
+# 本机运行产物 / 工作区状态（含个人路径，不入库）
+debug_logs/
+skills_workshop/
+.workbuddy/
+
+
+# 调试截图 / 临时产物（本地保留，不入库）
+docs/*.png
+dev/**/evidence/*.png
+dev/**/evidence/*.txt
+-
+
+# 4.0 构建输入确认（保留源码，排除缓存）

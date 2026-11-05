@@ -414,8 +414,10 @@ class FloatingWidget(QWidget):
         if self._auto_worker is not None and self._auto_worker.isRunning():
             return
         agent = get_primary_agent(self._agents)
-        if not agent:
-            _log().debug("自动翻译：未配置主 Agent，跳过")
+        from agentfloat.services import llm as llm_service
+        llm_ready = llm_service.has_active_provider(self.config)
+        if not agent and not llm_ready:
+            _log().debug("自动翻译：未配置主 Agent 且无 AI 接入供应商，跳过")
             return
         roots = cfg.get("roots") or default_skill_roots()
         try:
@@ -427,7 +429,7 @@ class FloatingWidget(QWidget):
             _log().info("自动翻译：未检测到需要翻译的新 skill")
             return
         _log().info("自动翻译：检测到 %d 个新 skill，调用 %s 补译",
-                    len(new_skills), agent.get("name"))
+                    len(new_skills), (agent or {}).get("name") or "AI 接入供应商")
         worker = AutoTranslateWorker(self.config, agent, new_skills, parent=self)
         track(worker, "AutoTranslateWorker")
         worker.done.connect(self._on_auto_translate_done)
@@ -1872,13 +1874,16 @@ class FloatingWidget(QWidget):
                 QMessageBox.warning(None, "AI 快报", "未启用任何数据源，请在「设置 → AI 快报」中勾选。")
             return
         agent = None
+        llm_ready = False
         if cfg.get("use_ai", True):
+            from agentfloat.services import llm as llm_service
+            llm_ready = llm_service.has_active_provider(self.config)
             agent = get_primary_agent(self._agents)
-            if not agent:
+            if not agent and not llm_ready:
                 if not auto:
                     QMessageBox.warning(None, "AI 快报",
-                                        "未配置主 Agent，无法生成 AI 摘要。\n"
-                                        "可在设置中关闭「使用本地 AI 生成摘要」改用标题列表。")
+                                        "未配置主 Agent，也没有可用的「AI 接入」供应商，无法生成 AI 摘要。\n"
+                                        "可在「AI 接入」页添加供应商，或在设置中关闭「使用本地 AI 生成摘要」改用标题列表。")
                 return
         self._news_generating = True
         _bridge = getattr(self, "_web_bridge", None)
@@ -1888,7 +1893,7 @@ class FloatingWidget(QWidget):
             _bridge.publish("news_started", {})
         if self._news_panel is not None and self._news_panel.isVisible():
             self._news_panel.set_generating(True)
-        worker = NewsWorker(cfg, self._agents, parent=self)
+        worker = NewsWorker(cfg, self._agents, llm_cfg=self.config.get("llm"), parent=self)
         track(worker, "NewsWorker")
         worker.done.connect(self._on_news_done)
         worker.failed.connect(self._on_news_failed)
@@ -2382,11 +2387,7 @@ class FloatingWidget(QWidget):
 
 
     def _build_context_menu(self, menu_css=None):
-        """构建浮球右键菜单（v3.9.2 抽出 / v3.10.0 修正重复构建；menu_css 可省略）
-
-        v3.14.0：样式改取 ui/menu_style.menu_qss（与托盘菜单单源）；并修掉原先
-        连续 `QMenu(self)` 建两次导致第一个泄漏的问题。
-        """
+        """右键菜单：按「启动 / 工具 / 设置」分组，减少平铺条目。"""
         if not menu_css:
             from agentfloat.ui.menu_style import menu_qss
             menu_css = menu_qss(self.theme)
@@ -2395,48 +2396,57 @@ class FloatingWidget(QWidget):
 
         primary = get_primary_agent(self._agents)
         pname = primary.get("name", "主 Agent") if primary else "主 Agent"
-        menu.addAction("启动 %s" % pname, self.launch_requested.emit)
+        menu.addAction("▶  启动 %s" % pname, self.launch_requested.emit)
         if len(self._agents) > 1:
-            sub = menu.addMenu("启动其他 Agent")
+            sub = menu.addMenu("切换 Agent")
             for a in self._agents:
                 if a.get("id") == (primary or {}).get("id"):
                     continue
                 sub.addAction(a.get("name"), lambda a=a: launch_agent(a, self.config))
-        menu.addAction("Skills 辅助窗", self._open_skills_panel)
 
-        # Web Agent 启动/终止（PATCH 3.1.0：浮球右键菜单入口）
+        menu.addSeparator()
+        tools = menu.addMenu("工具与面板")
+        tools.addAction("Skills 辅助窗", self._open_skills_panel)
+        tools.addAction("AI 快报", self._open_news_panel)
+        tools.addAction("喝水助手", self._open_water_panel)
+        tools.addAction("进度驾驶舱", lambda: self._open_progress_cockpit())
+        tools.addAction("下一条语录", lambda: self.show_quote_window(next_one=True))
+
         web_agents = webagent.list_web_agents(self._agents)
         if web_agents:
-            web_menu = menu.addMenu("Web Agent")
+            web_menu = tools.addMenu("Web Agent")
             for agent, spec in web_agents:
                 st = webagent.status(agent)
                 wname = agent.get("name") or agent.get("id")
                 if st.get("running"):
-                    web_menu.addAction("终止 %s（:%d）" % (wname, spec["port"]),
+                    web_menu.addAction("停止 %s（:%d）" % (wname, spec["port"]),
                                        lambda a=agent: self._toggle_web_agent(a))
                     web_menu.addAction("打开 %s 页面" % wname,
                                        lambda u=spec["url"]: _open_url(u))
                 else:
                     web_menu.addAction("启动 %s" % wname,
                                        lambda a=agent: self._toggle_web_agent(a))
-                web_menu.addSeparator()
 
         menu.addSeparator()
-        menu.addAction("设置…", self.settings_requested.emit)
-        menu.addAction("使用教程", lambda: self.start_onboarding(force=True))
-        menu.addAction("换一条语录", lambda: self.show_quote_window(next_one=True))
-        menu.addAction("复制 Web 控制台令牌", self._copy_web_token)
-        menu.addSeparator()
-
-        auto = menu.addAction("开机自启")
+        settings = menu.addMenu("设置与帮助")
+        settings.addAction("设置…", self.settings_requested.emit)
+        settings.addAction("使用教程", lambda: self.start_onboarding(force=True))
+        settings.addAction("复制 Web 控制台令牌", self._copy_web_token)
+        auto = settings.addAction("开机自启")
         auto.setCheckable(True)
         auto.setChecked(is_auto_start_enabled())
         auto.triggered.connect(lambda checked: toggle_auto_start(checked))
 
         menu.addSeparator()
         menu.addAction("退出", self.quit_requested.emit)
-
         return menu
+
+    def _open_progress_cockpit(self):
+        try:
+            from agentfloat.ui.progress_cockpit import open_cockpit
+            open_cockpit(theme=self.theme)
+        except Exception as e:  # noqa: BLE001
+            _log().debug("打开进度驾驶舱失败: %s", e)
 
     def _copy_web_token(self):
         """复制本地 Web 控制台访问令牌（v3.8.0：浏览器手动打开控制台时粘贴）"""
@@ -2544,7 +2554,8 @@ class FloatingWidget(QWidget):
             elif name == "context":
                 self._popup_context_menu_demo()
             elif name == "snap":
-                self._snap_demo()
+                # 教程只讲原理，不真的把浮球吸到屏幕边缘（避免遮挡教程/触发隐藏）
+                _log().debug("[引导] 贴边步骤仅讲解，不执行吸附")
             elif name == "restore":
                 self._onboarding_demo_cleanup()
             _log().debug("[引导] 浮球演示状态: %s", name)
@@ -2583,21 +2594,43 @@ class FloatingWidget(QWidget):
             self._remove_edge_detector()
         except Exception:  # noqa: BLE001
             pass
-        # 缩放与悬停态还原
+        # 缩放与悬停态还原（先复位状态，再单独停计时器：
+        # _hold_timer 缺失时也不能把悬停态留在 true）
         try:
             self.is_hovered = False
+            self._hold_progress = 0.0
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self._hold_timer.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
             self._animate_scale(1.0, MotionTokens.SPEED)
+            self.update()
         except Exception:  # noqa: BLE001
             pass
 
     def _popup_context_menu_demo(self):
-        """非阻塞地弹出真实右键菜单（引导演示用；下一步/结束时关闭）"""
+        """非阻塞地弹出真实右键菜单（引导演示用；下一步/结束时关闭）
+
+        菜单放浮球左侧：气泡在右侧（GAP=26），右侧弹菜单会盖住讲解文字。
+        """
         menu = self._build_context_menu()
         menu.setAttribute(Qt.WA_DeleteOnClose, True)
         self._demo_menu = menu
-        off = int(self._ball_offset())
-        s = int(self.current_size)
-        menu.popup(self.mapToGlobal(QPoint(off + s + 8, off + s // 2)))
+        try:
+            from agentfloat.ui.onboarding import context_menu_pos
+            ball = self._ball_rect_global()
+            screen = QApplication.screenAt(ball.center()) or QApplication.primaryScreen()
+            area = screen.availableGeometry() if screen else QRect(0, 0, 1920, 1080)
+            hint = menu.sizeHint()
+            pos = context_menu_pos(ball, (hint.width(), hint.height()), area)
+        except Exception:  # noqa: BLE001
+            off = int(self._ball_offset())
+            s = int(self.current_size)
+            pos = self.mapToGlobal(QPoint(off + s + 8, off + s // 2))
+        menu.popup(pos)
 
     def _snap_demo(self):
         """演示拖拽贴边隐藏：吸附到最近边缘 → 滑出只留一点 → 稍后自动滑回"""
@@ -2642,6 +2675,20 @@ class FloatingWidget(QWidget):
             ball = self._ball_rect_global()
             screen = QApplication.screenAt(ball.center()) or QApplication.primaryScreen()
             geo = screen.availableGeometry() if screen else QRect(0, 0, 1920, 1080)
+            # 教程期间把浮球固定到屏幕中央，避免贴边吸附把气泡挤出屏幕
+            self._onboarding_origin_pos = self.pos()
+            try:
+                if getattr(self, "progress_radar", None) is not None:
+                    self.progress_radar.pause()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                center = geo.center()
+                self.move(center.x() - self.width() // 2 - 140, center.y() - self.height() // 2)
+                QApplication.processEvents()
+            except Exception:  # noqa: BLE001
+                pass
+            ball = self._ball_rect_global()
             overlay = OnboardingOverlay(ball, geo, theme=self.theme)
             overlay.finished.connect(self._on_onboarding_finished)
             overlay.step_changed.connect(self.onboarding_demo)
@@ -2659,6 +2706,21 @@ class FloatingWidget(QWidget):
             self._onboarding_demo_cleanup()      # 还原演示造成的状态
         except Exception:  # noqa: BLE001
             pass
+        try:
+            if getattr(self, "progress_radar", None) is not None:
+                # 关了「进度贴边条」就不该被引导结束重新拉起（测试版每次启动都播引导）
+                enabled = bool(((self.config or {}).get("progress") or {}).get("enabled", True))
+                if enabled:
+                    self.progress_radar.resume()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            origin = getattr(self, "_onboarding_origin_pos", None)
+            if origin is not None:
+                self.move(origin)
+                self._onboarding_origin_pos = None
+        except Exception:  # noqa: BLE001
+            pass
         cfg = dict(self.config or {})
         cfg["onboarding_done"] = True
         if completed:
@@ -2670,7 +2732,37 @@ class FloatingWidget(QWidget):
             _log().debug("保存引导状态失败: %s", e)
         if completed:
             self._show_launch_toast("引导完成 · 右键可重看")
+            try:
+                from PyQt5.QtCore import QTimer
+                QTimer.singleShot(400, self._offer_mcp_integration)
+            except Exception:  # noqa: BLE001
+                pass
         _log().info("新用户引导结束（completed=%s）", completed)
+
+    def _offer_mcp_integration(self):
+        """首次引导结束后，询问是否自动接入 MCP + 安装内置 Skills。"""
+        try:
+            from PyQt5.QtWidgets import QMessageBox
+            from agentfloat.services import integrations
+
+            st = integrations.status()
+            if not (st.get("mcp") or {}).get("exists"):
+                return
+            ans = QMessageBox.question(
+                self, "接入 AgentFloat 进度 MCP",
+                "是否自动把进度 MCP 接入本机已安装的 Claude / Codex / OpenCode / Cursor？\n"
+                "会先备份原配置文件，并安装内置 Skills。",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+            if ans != QMessageBox.Yes:
+                return
+            res = integrations.auto_connect("agents")
+            added = [r for r in res.get("results") or [] if r.get("status") == "added"]
+            QMessageBox.information(
+                self, "MCP 接入完成",
+                "已接入 %d 个客户端；其余未检测到或已存在。\n内置 Skills 已安装到通用 Agents。"
+                % len(added))
+        except Exception as exc:  # noqa: BLE001
+            _log().debug("MCP 自动接入失败: %s", exc)
 
     def maybe_start_onboarding(self):
         """首次运行自动播放引导（延迟到启动动画结束后由 app.py 调用）
@@ -2679,7 +2771,10 @@ class FloatingWidget(QWidget):
         """
         try:
             from agentfloat.core.version import is_beta
-            if not is_beta() and bool((self.config or {}).get("onboarding_done")):
+            import os
+            # 环境变量只是额外强制开关；测试版通道本身每次都重播（用户策略 2026-10-09）
+            replay = os.environ.get("AGENTFLOAT_REPLAY_ONBOARDING") == "1"
+            if not is_beta() and not replay and bool((self.config or {}).get("onboarding_done")):
                 return False
             return self.start_onboarding()
         except Exception as e:  # noqa: BLE001
@@ -2805,6 +2900,11 @@ class FloatingWidget(QWidget):
                     _log().info("API 监控配置已变更，重启监控")
                     self._restart_api_monitor()
 
+            # v3.28：AI 接入配置（供应商 / active）同步到主进程内存
+            new_llm_cfg = new_cfg.get("llm")
+            if new_llm_cfg is not None:
+                self.config["llm"] = copy.deepcopy(new_llm_cfg)
+
             # PATCH 3.6.1：进程面板配置（开关/悬停延迟/不透明度/大小）
             # 此前未合并 → 收尾 save_config 会把面板设置写回旧值（表现为「改了存不住」）
             new_panel_cfg = new_cfg.get("process_panel")
@@ -2821,6 +2921,23 @@ class FloatingWidget(QWidget):
             new_intro_cfg = new_cfg.get("intro")
             if new_intro_cfg is not None:
                 self.config["intro"] = new_intro_cfg
+
+            # 4.0：进度贴边条开关（不合并会被收尾 save_config 写回旧值 → 改了存不住）
+            new_progress_cfg = new_cfg.get("progress")
+            if new_progress_cfg is not None:
+                old_progress_cfg = self.config.get("progress")
+                self.config["progress"] = copy.deepcopy(new_progress_cfg)
+                radar = getattr(self, "progress_radar", None)
+                if radar is not None:
+                    try:
+                        if (new_progress_cfg or {}).get("enabled", True):
+                            if new_progress_cfg != old_progress_cfg:
+                                radar.reset_dismissed()
+                            radar.resume()
+                        else:
+                            radar.pause()
+                    except Exception:  # noqa: BLE001
+                        _log().debug("同步进度贴边条开关失败", exc_info=True)
 
             # PATCH 3.1.1：补齐此前被忽略的顶层键——它们不在上面任何分支里，
             # 收尾 save_config(self.config) 会把它们写回旧值（表现为「改了存不住」）

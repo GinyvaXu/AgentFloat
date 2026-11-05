@@ -56,6 +56,25 @@ def test_bubble_falls_back_to_vertical_then_clamped():
     assert rect3.bottom() <= tiny.bottom() - ob.MARGIN
 
 
+def test_context_menu_demo_does_not_cover_bubble():
+    """P1-7：第 5 步演示右键菜单必须放气泡外侧，不能压住讲解。"""
+    screen = QRect(0, 0, 1920, 1080)
+    ball = QRect(760, 500, 52, 52)       # 引导把球放在屏幕中偏左
+    menu_size = (180, 260)
+    pos = ob.context_menu_pos(ball, menu_size, screen)
+    menu = QRect(pos.x(), pos.y(), menu_size[0], menu_size[1])
+    bubble, side = ob.bubble_geometry(ball, screen)
+    assert side == "right"
+    assert not menu.intersects(bubble), (menu, bubble)
+    assert menu.right() < ball.left()
+
+    # 左侧放不下时仍夹在屏幕内（不至于跑出屏）
+    tight = QRect(0, 0, 500, 400)
+    pos2 = ob.context_menu_pos(QRect(4, 150, 52, 52), (180, 200), tight)
+    assert tight.left() <= pos2.x() and pos2.x() + 180 <= tight.right()
+    assert tight.top() <= pos2.y() and pos2.y() + 200 <= tight.bottom()
+
+
 def test_overlay_step_flow(qapp):
     """覆盖层：走完 6 步触发 finished(True)；跳过触发 finished(False)"""
     seen = []
