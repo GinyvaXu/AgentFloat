@@ -133,3 +133,10 @@
 - 全量：仅 2 个既有 floatball 失败；pyflakes 0
 - 已重建安装（AgentFloat.exe 21:06），测试任务全部 done 清理
 - 体验层待决策：①2 分钟门槛导致 40-60s 任务完全不显示 ②面板 10s 自动隐藏 ③陈旧任务计入数量 ④need_input 置顶会让正在看的行跳动 ⑤af-mcp 被杀/升级后本会话工具消失需重启 Desktop
+
+## 2026-11-05 21:47 LLM 页面冒烟 3 项修复
+- 深链：app.js 增加 hashchange 监听（#/llm 同文档跳转不再无效）；实测 #/settings→#/llm 正常
+- /api/llm/test 失败改回 200 + {ok:false,error}（原 400 会在控制台报红）；实测 status 200、errors 空
+- #dirtyHint 增加 aria-hidden 切换；实测 true→false→true
+- 源码实例验证后恢复配置、重建安装（AgentFloat.exe 21:46）
+- 未验证：窄屏视觉（窗口无法改尺寸）

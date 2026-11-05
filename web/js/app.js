@@ -79,7 +79,9 @@ import { renderLlmPage } from "./llm.js";
   function refreshDirty() {
     const dirty = cfg && JSON.stringify(cfg) !== baseStr;
     $("#btnSave").disabled = !dirty;
-    $("#dirtyHint").classList.toggle("show", !!dirty);
+    const hint = $("#dirtyHint");
+    hint.classList.toggle("show", !!dirty);
+    hint.setAttribute("aria-hidden", dirty ? "false" : "true");
     return !!dirty;
   }
   function diffKeys(a, b) {
@@ -1371,7 +1373,10 @@ import { renderLlmPage } from "./llm.js";
     const saveBtn = $("#btnSave");
     if (saveBtn) saveBtn.style.display = p === "settings" ? "" : "none";
     const dirtyHint = $("#dirtyHint");
-    if (dirtyHint && p !== "settings") dirtyHint.classList.remove("show");
+    if (dirtyHint && p !== "settings") {
+      dirtyHint.classList.remove("show");
+      dirtyHint.setAttribute("aria-hidden", "true");
+    }
     try { history.replaceState(null, "", "#/" + p); } catch (e) { /* ignore */ }
     if (p === "settings" || p === "api" || p === "llm") {
       await refreshConfig();
@@ -3025,9 +3030,15 @@ import { renderLlmPage } from "./llm.js";
       ? stateInfo.version_label : ("v" + version);
     applyTheme();
     refreshDirty();
+    const pageIds = ["api", "news", "settings", "install", "skills", "guide", "llm"];
     const h = (location.hash || "").replace(/^#\/?/, "");
-    if (["api", "news", "settings", "install", "skills", "guide", "llm"].indexOf(h) >= 0) goPage(h);
+    if (pageIds.indexOf(h) >= 0) goPage(h);
     else goPage("settings");
+    // 深链/前进后退：#/llm 这类同文档 hash 变化不会重新加载，必须自己接
+    window.addEventListener("hashchange", () => {
+      const target = (location.hash || "").replace(/^#\/?/, "");
+      if (pageIds.indexOf(target) >= 0 && target !== page) goPage(target);
+    });
   }
 
   window.App = {

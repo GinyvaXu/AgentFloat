@@ -468,7 +468,8 @@ def create_app(bridge, handlers):
                                        provider_id=str(body.get("id") or ""))
             return result
         except llm.LLMError as exc:
-            return _llm_error(exc)
+            # 测试失败是正常结果，不是传输错误：返回 200 + ok=false，避免控制台报红
+            return {"ok": False, "error": str(exc)}
         except Exception as exc:  # noqa: BLE001
             return _llm_error("测试失败：%s" % exc, 500)
 

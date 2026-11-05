@@ -1,13 +1,21 @@
 ﻿# 更新日志
 
-## [4.0.0] - 2026-11-02（4.0 交付 · 测试构建）
+## [4.0.0-alpha] - 2026-11-05（alpha 内测 · 不宣发）
 ### Added
 - D 线进度中枢：L0 贴边条 / L1 快面板 / L2 驾驶舱、CLI + MCP + progress-protocol、注意力路由
 - Skills 车间：skills.sh 榜单、装前检查、多目标安装、矩阵/作用域、备份恢复、分享/锁文件
 - AI 接入：供应商卡片、一键切换、金额/订阅余额、Token 今日/本月/分用途统计
 - 首次教程居中与弹性动效、右键菜单分组、服务绿点、启动动画淡出衔接
+### Fixed
+- 进度面板背景透明、点任务行后塌陷、展开时整窗跳到垂直居中（改为高度动画，顶边固定）
+- `step` 前进时上一步不收尾，导致同时多个 running、进度永远 0/N
+- 测试版每次启动重播引导会绕过「进度贴边条」开关
+- OpenCode Desktop 路径失效（`OpenCode.ink`）时无兜底；新增按文件名在 Programs 下查找
+- AI 接入深链 `#/llm` 同文档跳转无效（补 hashchange 监听）
+- `/api/llm/test` 失败返回 400 导致控制台报红（改 200 + ok:false）
+- 设置「有未保存的修改」对读屏常驻（补 aria-hidden 切换）
 ### Tests
-- 全量 pytest 592 收集 / 590 通过 / 2 个既有 floatball 失败；pyflakes 0；node --check 0
+- 全量 pytest 600 收集 / 598 通过 / 2 个既有 floatball 失败；pyflakes 0；node --check 0
 
 ## [3.24.0] - 2026-10-29（测试版 · 细节优化）
 ### Added
